@@ -15,10 +15,14 @@
     "directories": {
       "output": "release"
     },
+    "extraResources": [
+      "public/icon.png"
+    ],
     "asarUnpack": [
       "**/node_modules/@neteasecloudmusicapienhanced/**"
     ],
     "win": {
+      "icon": "build/icon.png",
       "target": [
         "nsis",
         "portable"

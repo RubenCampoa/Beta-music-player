@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, protocol, net, Tray, Menu, globalShortcut } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, protocol, net, Tray, Menu, globalShortcut, nativeImage } from 'electron';
 import path from 'path';
 import fs from 'fs';
 
@@ -19,9 +19,30 @@ protocol.registerSchemesAsPrivileged([
 
 function createTray() {
   if (tray) return;
-  const iconPath = path.join(__dirname, '../public/icon.png');
+
+  const possibleIconPaths = [
+    path.join(__dirname, '../public/icon.png'),
+    path.join(__dirname, '../dist/icon.png'),
+    path.join(process.resourcesPath, 'public/icon.png'),
+    path.join(process.resourcesPath, 'dist/icon.png'),
+    path.join(app.getAppPath(), 'public/icon.png'),
+    path.join(app.getAppPath(), 'dist/icon.png'),
+  ];
+
+  let trayIcon = nativeImage.createEmpty();
+  for (const p of possibleIconPaths) {
+    if (fs.existsSync(p)) {
+      trayIcon = nativeImage.createFromPath(p);
+      break;
+    }
+  }
+
+  if (!trayIcon.isEmpty()) {
+    trayIcon = trayIcon.resize({ width: 16, height: 16 });
+  }
+
   try {
-    tray = new Tray(iconPath);
+    tray = new Tray(trayIcon);
     tray.setToolTip('Beta Music Player');
     
     const contextMenu = Menu.buildFromTemplate([
@@ -56,9 +77,19 @@ function createTray() {
     ]);
 
     tray.setContextMenu(contextMenu);
+
+    tray.on('click', () => {
+      if (mainWindow?.isVisible()) {
+        mainWindow.focus();
+      } else {
+        mainWindow?.show();
+        mainWindow?.focus();
+      }
+    });
+
     tray.on('double-click', () => {
       if (mainWindow?.isVisible()) {
-        mainWindow.hide();
+        mainWindow.focus();
       } else {
         mainWindow?.show();
         mainWindow?.focus();
@@ -85,6 +116,21 @@ function registerGlobalMediaShortcuts() {
   }
 }
 
+function getAppIconPath() {
+  const possibleIconPaths = [
+    path.join(__dirname, '../public/icon.png'),
+    path.join(__dirname, '../dist/icon.png'),
+    path.join(process.resourcesPath, 'public/icon.png'),
+    path.join(process.resourcesPath, 'dist/icon.png'),
+    path.join(app.getAppPath(), 'public/icon.png'),
+    path.join(app.getAppPath(), 'dist/icon.png'),
+  ];
+  for (const p of possibleIconPaths) {
+    if (fs.existsSync(p)) return p;
+  }
+  return path.join(__dirname, '../public/icon.png');
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1240,
@@ -101,7 +147,7 @@ function createWindow() {
       contextIsolation: true,
       webSecurity: false,
     },
-    icon: path.join(__dirname, '../public/icon.png'),
+    icon: getAppIconPath(),
   });
 
   mainWindow.once('ready-to-show', () => {

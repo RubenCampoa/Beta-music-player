@@ -70,19 +70,19 @@ export const SettingsView: React.FC = () => {
         throw new Error('未获取到 Release 版本信息');
       }
       const data = await res.json();
-      const latestTag = data.tag_name || 'v1.0.0';
-      const currentVersion = 'v1.0.0';
+      const latestTag = data.tag_name || 'v1.0.1';
+      const currentVersion = 'v1.0.1';
 
-      if (latestTag !== currentVersion) {
+      if (latestTag !== currentVersion && latestTag !== '1.0.1') {
         setToastMessage(`发现新版本 ${latestTag}！正在为你打开 GitHub...`);
         if (data.html_url) {
           window.open(data.html_url, '_blank');
         }
       } else {
-        setToastMessage(`当前已是最新版本 (${currentVersion})`);
+        setToastMessage(`当前已是最新版本 (v1.0.1)`);
       }
     } catch {
-      setToastMessage('当前已是最新版本 (v1.0.0)');
+      setToastMessage('当前已是最新版本 (v1.0.1)');
     }
   };
 
@@ -96,7 +96,7 @@ export const SettingsView: React.FC = () => {
         </div>
         <div className="flex items-center space-x-3">
           <div className="px-3 py-1 bg-white/5 rounded-full border border-white/10 text-xs text-white/60 font-medium">
-            Beta Music Player v1.0.0
+            Beta Music Player v1.0.1
           </div>
           <button
             onClick={handleCheckUpdate}
