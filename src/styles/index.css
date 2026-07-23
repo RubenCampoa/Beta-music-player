@@ -1,0 +1,105 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --apple-red: #ff2d55;
+  --apple-pink: #fa233b;
+  --glass-bg: rgba(28, 28, 32, 0.72);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --sidebar-bg: rgba(20, 20, 24, 0.85);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Window Drag Regions for Frameless Electron Window */
+.drag-region {
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Glassmorphism Classes */
+.glass-panel {
+  background: var(--glass-bg);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid var(--glass-border);
+}
+
+.glass-sidebar {
+  background: var(--sidebar-bg);
+  backdrop-filter: blur(40px) saturate(200%);
+  -webkit-backdrop-filter: blur(40px) saturate(200%);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.glass-player {
+  background: rgba(26, 26, 30, 0.85);
+  backdrop-filter: blur(36px) saturate(190%);
+  -webkit-backdrop-filter: blur(36px) saturate(190%);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Apple Music Lyric Highlighting & DOF Blur */
+.lyric-line-active {
+  color: #ffffff;
+  font-weight: 700;
+  text-shadow: 0 0 20px rgba(255, 255, 255, 0.6), 0 0 40px rgba(255, 45, 85, 0.3);
+  transform: scale(1.05);
+  filter: blur(0px);
+  opacity: 1;
+}
+
+.lyric-line-inactive {
+  color: rgba(255, 255, 255, 0.45);
+  font-weight: 500;
+  filter: blur(0.8px);
+  opacity: 0.55;
+  transition: all 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.lyric-line-inactive:hover {
+  opacity: 0.85;
+  filter: blur(0px);
+}
+
+/* Smooth Canvas Background Overlay */
+.fluid-canvas-overlay {
+  background: radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0.25) 0%, rgba(0, 0, 0, 0.75) 100%);
+}
+
+/* Card Hover Animations */
+.apple-card {
+  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.3s ease;
+}
+
+.apple-card:hover {
+  transform: translateY(-4px) scale(1.015);
+  box-shadow: 0 16px 32px -8px rgba(0, 0, 0, 0.5);
+}
+
+/* Apple Music Lyric Vertical Gradient Fade Mask */
+.mask-v-fade {
+  mask-image: linear-gradient(to bottom, transparent 0%, black 12%, black 88%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 12%, black 88%, transparent 100%);
+}
