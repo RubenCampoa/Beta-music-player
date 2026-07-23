@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <b>基于 React 18 + Electron + TypeScript 构建的高颜值、全景沉浸式 Windows 桌面音乐播放器</b>
+  <b>基于 React 18 + Electron + TypeScript 构建的高颜值、全景沉浸式 Windows 桌面音乐播放器（由高中生和AI辅助开发）</b>
 </p>
 
 <p align="center">
