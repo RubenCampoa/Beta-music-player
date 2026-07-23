@@ -12,7 +12,7 @@ import {
   Shuffle,
   Volume2,
   VolumeX,
-  MoreHorizontal,
+  Heart,
   Sparkles,
   X,
 } from 'lucide-react';
@@ -40,6 +40,8 @@ export const AppleLyricView: React.FC = () => {
     setVolume,
     toggleMute,
     setToastMessage,
+    toggleFavorite,
+    isFavorite,
     enableLyricAnimation,
     enableLyricGlow,
     enableLyricBlur,
@@ -86,6 +88,17 @@ export const AppleLyricView: React.FC = () => {
     }
   }, [activeIndex, lyrics.length]);
 
+  // ESC Key listener to exit full lyrics mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFullLyricsMode) {
+        setFullLyricsMode(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isFullLyricsMode, setFullLyricsMode]);
+
   if (!isFullLyricsMode) return null;
 
   const handleLyricClick = (time: number) => {
@@ -124,19 +137,23 @@ export const AppleLyricView: React.FC = () => {
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.98 }}
       transition={{ duration: 0.35, ease: [0.25, 1, 0.5, 1] }}
-      className="fixed inset-0 z-50 flex flex-col justify-between p-8 pt-6 pb-8 select-none bg-[#0a0c14]/96 backdrop-blur-3xl overflow-hidden transform-gpu"
+      className="fixed inset-0 z-50 flex flex-col justify-between p-8 pt-6 pb-8 select-none bg-[#0a0c14]/80 backdrop-blur-3xl overflow-hidden transform-gpu"
     >
       {/* Top Bar: Pull handle & Close button */}
       <div className="flex items-center justify-between w-full z-10 px-2">
         <button
           onClick={() => setFullLyricsMode(false)}
-          className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-all duration-300 backdrop-blur-md border border-white/10"
-          title="退出歌词全景模式"
+          className="w-11 h-11 rounded-full bg-white/10 hover:bg-white/25 text-white/80 hover:text-white flex items-center justify-center transition-all duration-200 backdrop-blur-md border border-white/15 hover:scale-105 active:scale-95 cursor-pointer shadow-md shrink-0"
+          title="退出歌词全景模式 (或按 ESC 键)"
         >
-          <ChevronDown className="w-5 h-5" />
+          <ChevronDown className="w-6 h-6" />
         </button>
 
-        <div className="w-12 h-1 bg-white/30 rounded-full mx-auto absolute left-1/2 -translate-x-1/2 top-4" />
+        <div
+          onClick={() => setFullLyricsMode(false)}
+          className="w-16 h-1.5 bg-white/30 hover:bg-white/60 rounded-full cursor-pointer absolute left-1/2 -translate-x-1/2 top-5 transition-all hover:scale-105"
+          title="点击退出歌词全景模式"
+        />
 
         <div className="flex items-center space-x-2 text-white/60 text-xs font-semibold bg-black/30 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-white/10 shadow-sm">
           <Disc className="w-3.5 h-3.5 animate-spin text-apple-red" />
@@ -183,10 +200,19 @@ export const AppleLyricView: React.FC = () => {
                 </p>
               </div>
               <button
-                onClick={() => setToastMessage(`已收藏歌曲：${currentSong.name}`)}
-                className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-all shrink-0 border border-white/10"
+                onClick={() => toggleFavorite(currentSong)}
+                className={`p-2.5 rounded-full backdrop-blur-md transition-all shrink-0 border border-white/15 hover:scale-105 active:scale-95 cursor-pointer shadow-md ${
+                  isFavorite(currentSong.id)
+                    ? 'bg-apple-red/20 text-apple-red border-apple-red/40'
+                    : 'bg-white/10 text-white/70 hover:text-white'
+                }`}
+                title={isFavorite(currentSong.id) ? '取消收藏歌曲' : '收藏歌曲'}
               >
-                <MoreHorizontal className="w-5 h-5" />
+                <Heart
+                  className={`w-5 h-5 transition-all ${
+                    isFavorite(currentSong.id) ? 'fill-current text-apple-red' : ''
+                  }`}
+                />
               </button>
             </div>
           )}

@@ -72,79 +72,90 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
     let time = 0;
 
     const handleResize = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+      // Downscale internal canvas resolution by 4x for 60FPS+ ultra-fast GPU rendering
+      canvas.width = Math.ceil(window.innerWidth / 4);
+      canvas.height = Math.ceil(window.innerHeight / 4);
     };
     handleResize();
     window.addEventListener('resize', handleResize);
 
+    let isPaused = false;
+
     const render = () => {
-      time += 0.006;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!isPaused) {
+        time += 0.006;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      const width = canvas.width;
-      const height = canvas.height;
-      const colors = colorsRef.current;
+        const width = canvas.width;
+        const height = canvas.height;
+        const colors = colorsRef.current;
 
-      // Draw dark underlying base
-      ctx.fillStyle = '#0f0f12';
-      ctx.fillRect(0, 0, width, height);
+        // Draw dark underlying base
+        ctx.fillStyle = '#0f0f12';
+        ctx.fillRect(0, 0, width, height);
 
-      // Blobs trajectories
-      const blobs = [
-        {
-          x: width * (0.3 + 0.2 * Math.sin(time * 0.8)),
-          y: height * (0.3 + 0.2 * Math.cos(time * 0.6)),
-          r: width * 0.5,
-          color: colors[0] || '#ff2d55',
-        },
-        {
-          x: width * (0.7 + 0.2 * Math.cos(time * 0.7)),
-          y: height * (0.4 + 0.25 * Math.sin(time * 0.9)),
-          r: width * 0.55,
-          color: colors[1] || '#5856d6',
-        },
-        {
-          x: width * (0.4 + 0.25 * Math.sin(time * 0.5 + 1)),
-          y: height * (0.7 + 0.2 * Math.cos(time * 0.8)),
-          r: width * 0.45,
-          color: colors[2] || '#af52de',
-        },
-        {
-          x: width * (0.8 + 0.15 * Math.cos(time * 1.1)),
-          y: height * (0.8 + 0.15 * Math.sin(time * 0.7)),
-          r: width * 0.4,
-          color: colors[3] || '#ff9500',
-        },
-      ];
+        // Blobs trajectories
+        const blobs = [
+          {
+            x: width * (0.3 + 0.2 * Math.sin(time * 0.8)),
+            y: height * (0.3 + 0.2 * Math.cos(time * 0.6)),
+            r: width * 0.5,
+            color: colors[0] || '#ff2d55',
+          },
+          {
+            x: width * (0.7 + 0.2 * Math.cos(time * 0.7)),
+            y: height * (0.4 + 0.25 * Math.sin(time * 0.9)),
+            r: width * 0.55,
+            color: colors[1] || '#5856d6',
+          },
+          {
+            x: width * (0.4 + 0.25 * Math.sin(time * 0.5 + 1)),
+            y: height * (0.7 + 0.2 * Math.cos(time * 0.8)),
+            r: width * 0.45,
+            color: colors[2] || '#af52de',
+          },
+          {
+            x: width * (0.8 + 0.15 * Math.cos(time * 1.1)),
+            y: height * (0.8 + 0.15 * Math.sin(time * 0.7)),
+            r: width * 0.4,
+            color: colors[3] || '#ff9500',
+          },
+        ];
 
-      blobs.forEach((blob) => {
-        const gradient = ctx.createRadialGradient(
-          blob.x,
-          blob.y,
-          0,
-          blob.x,
-          blob.y,
-          blob.r
-        );
-        gradient.addColorStop(0, blob.color);
-        gradient.addColorStop(1, 'transparent');
+        blobs.forEach((blob) => {
+          const gradient = ctx.createRadialGradient(
+            blob.x,
+            blob.y,
+            0,
+            blob.x,
+            blob.y,
+            blob.r
+          );
+          gradient.addColorStop(0, blob.color);
+          gradient.addColorStop(1, 'transparent');
 
-        ctx.fillStyle = gradient;
-        ctx.globalCompositeOperation = 'screen';
-        ctx.beginPath();
-        ctx.arc(blob.x, blob.y, blob.r, 0, Math.PI * 2);
-        ctx.fill();
-      });
+          ctx.fillStyle = gradient;
+          ctx.globalCompositeOperation = 'screen';
+          ctx.beginPath();
+          ctx.arc(blob.x, blob.y, blob.r, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
 
       animationFrameId = requestAnimationFrame(render);
     };
+
+    const handleVisibilityChange = () => {
+      isPaused = document.hidden;
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     render();
 
     return () => {
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', handleResize);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
 
@@ -154,13 +165,13 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
 
   return (
     <div
-      className={`fixed inset-0 pointer-events-none transition-all duration-700 z-0 ${
+      className={`fixed inset-0 pointer-events-none transition-all duration-700 z-0 transform-gpu ${
         isFullLyricsMode ? 'opacity-100 scale-100' : 'opacity-40 scale-105'
       }`}
     >
-      <canvas ref={canvasRef} className="w-full h-full filter blur-[70px] saturate-[180%]" />
-      {/* Ambient Noise / Overlay */}
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-[30px]" />
+      <canvas ref={canvasRef} className="w-full h-full filter blur-[50px] saturate-[180%] transform-gpu" />
+      {/* Ambient Dark Overlay */}
+      <div className="absolute inset-0 bg-black/40" />
     </div>
   );
 };

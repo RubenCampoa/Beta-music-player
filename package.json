@@ -1,25 +1,48 @@
 {
-  "name": "apple-music-desktop",
-  "version": "1.0.0",
+  "name": "beta-music-player",
+  "version": "1.0.1",
   "private": true,
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "concurrently \"npm run start-api\" \"vite\"",
-    "build": "tsc && vite build && electron-builder",
+    "build": "tsc && vite build && electron-builder --win",
     "preview": "vite preview",
     "start-api": "node server.js"
   },
+  "build": {
+    "appId": "com.beta.musicplayer",
+    "productName": "Beta Music Player",
+    "directories": {
+      "output": "release"
+    },
+    "asarUnpack": [
+      "**/node_modules/@neteasecloudmusicapienhanced/**"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "verifyUpdateCodeSignature": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
   "dependencies": {
     "@neteasecloudmusicapienhanced/api": "latest",
+    "@types/jsmediatags": "^3.9.6",
     "concurrently": "^8.2.2",
+    "cors": "^2.8.5",
     "dexie": "^4.0.8",
+    "express": "^4.19.2",
     "framer-motion": "^11.3.24",
+    "jsmediatags": "^3.9.7",
     "lucide-react": "^0.428.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "zustand": "^4.5.4",
-    "express": "^4.19.2",
-    "cors": "^2.8.5"
+    "zustand": "^4.5.4"
   },
   "devDependencies": {
     "@types/node": "^22.2.0",

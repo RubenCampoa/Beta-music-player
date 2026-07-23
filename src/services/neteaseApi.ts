@@ -1,10 +1,15 @@
 import { Song, Playlist, UserProfile, LyricLine } from '../types/music';
 
-// NetEase API Base URL (Local Node Server deployed from api-enhanced)
-const API_BASE = 'http://127.0.0.1:3000';
+// High Availability API Mirror List (Local Primary + High-Speed HTTPS Fallback Mirrors)
+const API_BASE_ENDPOINTS = [
+  'http://127.0.0.1:3000',
+  'https://netease-cloud-music-api-beta-five.vercel.app',
+  'https://music-api.he-tag.top',
+];
 
 class NeteaseApiService {
   private cookie: string = localStorage.getItem('netease_cookie') || '';
+  private activeBaseIndex: number = 0;
 
   public setCookie(cookie: string) {
     this.cookie = cookie;
@@ -20,45 +25,58 @@ class NeteaseApiService {
     localStorage.removeItem('netease_cookie');
   }
 
-  // Use standard GET request and pass cookie as a query parameter
-  // which is fully natively supported by NeteaseCloudMusicApiEnhanced
+  // Resilient fetchApi with automatic failover mirror switching
   private async fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const hasQuery = endpoint.includes('?');
-    let url = `${API_BASE}${endpoint}${hasQuery ? '&' : '?'}timestamp=${Date.now()}`;
-    
-    // Explicitly pass cookie to bypass any browser CORS strictness
-    if (this.cookie) {
-      url += `&cookie=${encodeURIComponent(this.cookie)}`;
+
+    for (let i = 0; i < API_BASE_ENDPOINTS.length; i++) {
+      const idx = (this.activeBaseIndex + i) % API_BASE_ENDPOINTS.length;
+      const baseUrl = API_BASE_ENDPOINTS[idx];
+      let url = `${baseUrl}${endpoint}${hasQuery ? '&' : '?'}timestamp=${Date.now()}`;
+
+      if (this.cookie) {
+        url += `&cookie=${encodeURIComponent(this.cookie)}`;
+      }
+
+      try {
+        const response = await fetch(url, {
+          ...options,
+          headers: {
+            'Content-Type': 'application/json',
+            ...(options.headers || {}),
+          },
+        });
+
+        if (response.ok) {
+          this.activeBaseIndex = idx; // Lock on working API endpoint
+          return await response.json();
+        }
+      } catch (error) {
+        console.warn(`NetEase API endpoint attempt failed [${baseUrl}${endpoint}], trying next mirror...`);
+      }
     }
 
-    try {
-      const response = await fetch(url, {
-        ...options,
-        headers: {
-          'Content-Type': 'application/json',
-          ...(options.headers || {}),
-        },
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      return await response.json();
-    } catch (error) {
-      console.warn(`NetEase API Request Failed [${endpoint}]`, error);
-      throw error;
-    }
+    throw new Error(`All NetEase API endpoints failed for [${endpoint}]`);
   }
 
   // --- QR Code Login Flow (Natively via api-enhanced) ---
   public async getQrKey(): Promise<string> {
-    const res = await this.fetchApi<{ data: { unikey: string } }>('/login/qr/key');
-    return res.data.unikey;
+    try {
+      const res = await this.fetchApi<any>('/login/qr/key');
+      return res.data?.unikey || res.unikey || res.data?.key || res.key || '';
+    } catch {
+      return '';
+    }
   }
 
   public async getQrImage(key: string): Promise<string> {
-    const res = await this.fetchApi<{ data: { qrimg: string } }>(`/login/qr/create?key=${key}&qrimg=true`);
-    return res.data.qrimg;
+    if (!key) return '';
+    try {
+      const res = await this.fetchApi<any>(`/login/qr/create?key=${encodeURIComponent(key)}&qrimg=true`);
+      return res.data?.qrimg || res.qrimg || res.data?.qrurl || '';
+    } catch {
+      return '';
+    }
   }
 
   public async checkQrStatus(key: string): Promise<{ code: number; message: string; cookie?: string }> {
@@ -112,6 +130,25 @@ class NeteaseApiService {
     }
   }
 
+  // --- NetEase Liked Songs List (IDs) & Bi-directional Like Action ---
+  public async getLikelist(uid: number): Promise<number[]> {
+    try {
+      const res = await this.fetchApi<{ ids?: number[] }>(`/likelist?uid=${uid}`);
+      return res.ids || [];
+    } catch {
+      return [];
+    }
+  }
+
+  public async likeSong(songId: number, like: boolean = true): Promise<boolean> {
+    try {
+      const res = await this.fetchApi<{ code?: number }>(`/like?id=${songId}&like=${like}`);
+      return res.code === 200;
+    } catch {
+      return false;
+    }
+  }
+
   // --- Playlist Songs ---
   public async getPlaylistSongs(playlistId: string | number): Promise<Song[]> {
     try {
@@ -128,8 +165,38 @@ class NeteaseApiService {
   // --- Search Songs ---
   public async searchSongs(keywords: string): Promise<Song[]> {
     try {
-      const res = await this.fetchApi<{ result: { songs: any[] } }>(`/search?keywords=${encodeURIComponent(keywords)}`);
-      return (res.result?.songs || []).map((track) => this.formatTrackToSong(track));
+      // First try /cloudsearch which natively includes track.al.picUrl for all search results
+      const res = await this.fetchApi<{ result?: { songs?: any[] }; code?: number }>(
+        `/cloudsearch?keywords=${encodeURIComponent(keywords)}`
+      );
+      const songs = res.result?.songs;
+      if (songs && songs.length > 0) {
+        return songs.map((track) => this.formatTrackToSong(track));
+      }
+    } catch (e) {
+      console.warn('Cloudsearch failed, trying /search fallback:', e);
+    }
+
+    try {
+      // Fallback to /search if /cloudsearch is unavailable
+      const res = await this.fetchApi<{ result?: { songs?: any[] } }>(
+        `/search?keywords=${encodeURIComponent(keywords)}`
+      );
+      const songs = res.result?.songs || [];
+      if (songs.length === 0) return [];
+
+      // If search results lack picUrl, fetch full track details via /song/detail
+      if (!songs[0].al?.picUrl && !songs[0].album?.picUrl) {
+        const ids = songs.map((s: any) => s.id).slice(0, 30).join(',');
+        try {
+          const detailRes = await this.fetchApi<{ songs?: any[] }>(`/song/detail?ids=${ids}`);
+          if (detailRes.songs && detailRes.songs.length > 0) {
+            return detailRes.songs.map((track) => this.formatTrackToSong(track));
+          }
+        } catch {}
+      }
+
+      return songs.map((track) => this.formatTrackToSong(track));
     } catch {
       return [];
     }
@@ -197,9 +264,26 @@ class NeteaseApiService {
   }
 
   private formatTrackToSong(track: any): Song {
-    const artistName = track.ar ? track.ar.map((a: any) => a.name).join(' / ') : track.artists ? track.artists.map((a: any) => a.name).join(' / ') : '未知歌手';
-    const coverUrl = track.al?.picUrl || track.album?.picUrl || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=400&h=400&fit=crop';
-    const isVip = track.fee === 1 || track.fee === 4 || track.fee === 8 || (track.fee && track.fee > 0);
+    const artistName = track.ar
+      ? track.ar.map((a: any) => a.name).join(' / ')
+      : track.artists
+      ? track.artists.map((a: any) => a.name).join(' / ')
+      : '未知歌手';
+
+    let rawCoverUrl =
+      track.al?.picUrl ||
+      track.album?.picUrl ||
+      track.al?.pic_str ||
+      (track.album?.picId ? `https://p1.music.126.net/${track.album.picId}.jpg` : undefined);
+
+    if (!rawCoverUrl) {
+      rawCoverUrl = 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=400&h=400&fit=crop';
+    } else {
+      rawCoverUrl = rawCoverUrl.replace(/^http:/, 'https:');
+    }
+
+    const isVip =
+      track.fee === 1 || track.fee === 4 || track.fee === 8 || (track.fee && track.fee > 0);
 
     return {
       id: `netease-${track.id}`,
@@ -207,7 +291,7 @@ class NeteaseApiService {
       artist: artistName,
       album: track.al?.name || track.album?.name || '未知专辑',
       duration: Math.floor((track.dt || track.duration || 200000) / 1000),
-      coverUrl: coverUrl.replace(/^http:/, 'https:'),
+      coverUrl: rawCoverUrl,
       audioUrl: `https://music.163.com/song/media/outer/url?id=${track.id}.mp3`,
       source: 'netease',
       neteaseId: track.id,

@@ -1,5 +1,5 @@
 import React from 'react';
-import { PlayCircle, Compass, HardDrive, ListMusic, Heart, Settings } from 'lucide-react';
+import { PlayCircle, Compass, HardDrive, ListMusic, Heart, Settings, Info, AlertTriangle, History } from 'lucide-react';
 import { usePlayerStore } from '../../store/playerStore';
 
 export const Sidebar: React.FC = () => {
@@ -90,7 +90,7 @@ export const Sidebar: React.FC = () => {
           </div>
         </div>
 
-        {/* Settings */}
+        {/* Settings, Notice, Changelog & About */}
         <div className="space-y-1 pt-2 border-t border-white/10">
           <button
             onClick={() => setActiveTab('settings')}
@@ -103,14 +103,48 @@ export const Sidebar: React.FC = () => {
             <Settings className="w-4 h-4" />
             <span>设置</span>
           </button>
+          <button
+            onClick={() => setActiveTab('notice')}
+            className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
+              activeTab === 'notice'
+                ? 'bg-apple-red text-white shadow-lg shadow-apple-red/20'
+                : 'text-white/70 hover:bg-white/5 hover:text-white'
+            }`}
+          >
+            <AlertTriangle className="w-4 h-4" />
+            <span>注意事项</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('changelog')}
+            className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
+              activeTab === 'changelog'
+                ? 'bg-apple-red text-white shadow-lg shadow-apple-red/20'
+                : 'text-white/70 hover:bg-white/5 hover:text-white'
+            }`}
+          >
+            <History className="w-4 h-4" />
+            <span>更新日志</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('about')}
+            className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
+              activeTab === 'about'
+                ? 'bg-apple-red text-white shadow-lg shadow-apple-red/20'
+                : 'text-white/70 hover:bg-white/5 hover:text-white'
+            }`}
+          >
+            <Info className="w-4 h-4" />
+            <span>关于</span>
+          </button>
         </div>
       </div>
 
       {/* Footer Info */}
       <div className="px-3 py-2 border-t border-white/10 text-[11px] text-white/40 flex items-center justify-between">
         <span>Beta music player</span>
-        <span className="bg-white/10 text-white/60 px-1.5 py-0.5 rounded text-[9px]">v1.0</span>
+        <span className="bg-white/10 text-white/60 px-1.5 py-0.5 rounded text-[9px]">v1.0.1</span>
       </div>
     </aside>
   );
 };
+

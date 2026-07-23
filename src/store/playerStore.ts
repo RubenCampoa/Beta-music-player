@@ -15,12 +15,28 @@ interface PlayerState {
   repeatMode: 'off' | 'one' | 'all';
   isShuffle: boolean;
 
+  // Queue Drawer State
+  isQueueOpen: boolean;
+
+  // Search State
+  searchQuery: string;
+  searchResults: Song[];
+  searchHistory: string[];
+  isSearching: boolean;
+
   // Lyrics & UI State
   isFullLyricsMode: boolean;
   lyrics: LyricLine[];
-  activeTab: 'listen-now' | 'browse' | 'local' | 'playlist' | 'settings';
+  activeTab: 'listen-now' | 'browse' | 'local' | 'playlist' | 'search' | 'changelog' | 'settings' | 'notice' | 'about';
   selectedPlaylist: Playlist | null;
   toastMessage: string | null;
+
+  // Favorite Songs State
+  favoriteSongs: Song[];
+  neteaseLikeIds: number[];
+  setNeteaseLikeIds: (ids: number[]) => void;
+  toggleFavorite: (song: Song) => void;
+  isFavorite: (songId: string | number) => boolean;
 
   // Settings & Motion Controls State
   isFluidBgEnabled: boolean;
@@ -47,10 +63,21 @@ interface PlayerState {
   nextSong: () => void;
   prevSong: () => void;
   setQueue: (queue: Song[]) => void;
+  removeFromQueue: (songId: string) => void;
+  clearQueue: () => void;
+  toggleQueueDrawer: () => void;
+  setQueueOpen: (open: boolean) => void;
+
+  // Search Actions
+  setSearchQuery: (query: string) => void;
+  performSearch: (query: string) => Promise<void>;
+  removeSearchHistoryItem: (query: string) => void;
+  clearSearchHistory: () => void;
+
   toggleRepeat: () => void;
   toggleShuffle: () => void;
   setFullLyricsMode: (open: boolean) => void;
-  setActiveTab: (tab: 'listen-now' | 'browse' | 'local' | 'playlist' | 'settings') => void;
+  setActiveTab: (tab: 'listen-now' | 'browse' | 'local' | 'playlist' | 'search' | 'changelog' | 'settings' | 'notice' | 'about') => void;
   setSelectedPlaylist: (playlist: Playlist | null) => void;
   setUser: (user: UserProfile | null) => void;
   setPlaylists: (playlists: Playlist[]) => void;
@@ -78,10 +105,32 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   repeatMode: 'off',
   isShuffle: false,
 
+  isQueueOpen: false,
+
+  searchQuery: '',
+  searchResults: [],
+  searchHistory: (() => {
+    try {
+      return JSON.parse(localStorage.getItem('search_history') || '[]');
+    } catch {
+      return [];
+    }
+  })(),
+  isSearching: false,
+
   isFullLyricsMode: false,
   lyrics: [],
   activeTab: 'listen-now',
   selectedPlaylist: null,
+  favoriteSongs: (() => {
+    try {
+      return JSON.parse(localStorage.getItem('favorite_songs') || '[]');
+    } catch {
+      return [];
+    }
+  })(),
+  neteaseLikeIds: [],
+  setNeteaseLikeIds: (neteaseLikeIds) => set({ neteaseLikeIds }),
   toastMessage: null,
 
   // Default motion toggles
@@ -178,6 +227,59 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   setQueue: (queue) => set({ queue }),
+  removeFromQueue: (songId) =>
+    set((state) => {
+      const newQueue = state.queue.filter((s) => s.id !== songId);
+      const newIndex = state.currentSong
+        ? newQueue.findIndex((s) => s.id === state.currentSong?.id)
+        : 0;
+      return { queue: newQueue, queueIndex: Math.max(0, newIndex) };
+    }),
+  clearQueue: () => set({ queue: [], queueIndex: 0 }),
+  toggleQueueDrawer: () => set((state) => ({ isQueueOpen: !state.isQueueOpen })),
+  setQueueOpen: (isQueueOpen) => set({ isQueueOpen }),
+
+  setSearchQuery: (searchQuery) => set({ searchQuery }),
+  performSearch: async (query) => {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+
+    // Update history deduplicated max 10
+    const currentHistory = get().searchHistory;
+    const filtered = currentHistory.filter((item) => item !== trimmed);
+    const updatedHistory = [trimmed, ...filtered].slice(0, 10);
+    try {
+      localStorage.setItem('search_history', JSON.stringify(updatedHistory));
+    } catch {}
+
+    set({
+      searchHistory: updatedHistory,
+      isSearching: true,
+      searchQuery: trimmed,
+      activeTab: 'search',
+    });
+    try {
+      const results = await neteaseApi.searchSongs(trimmed);
+      set({ searchResults: results, isSearching: false });
+    } catch {
+      set({ searchResults: [], isSearching: false });
+    }
+  },
+
+  removeSearchHistoryItem: (item) => {
+    const updatedHistory = get().searchHistory.filter((h) => h !== item);
+    try {
+      localStorage.setItem('search_history', JSON.stringify(updatedHistory));
+    } catch {}
+    set({ searchHistory: updatedHistory });
+  },
+
+  clearSearchHistory: () => {
+    try {
+      localStorage.removeItem('search_history');
+    } catch {}
+    set({ searchHistory: [] });
+  },
 
   toggleRepeat: () =>
     set((state) => ({
@@ -216,4 +318,53 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   setEnableLyricBlur: (enableLyricBlur) => set({ enableLyricBlur }),
   setEnableArtworkAnimation: (enableArtworkAnimation) => set({ enableArtworkAnimation }),
   setLyricFontSize: (lyricFontSize) => set({ lyricFontSize }),
+
+  toggleFavorite: async (song) => {
+    const isFav = get().isFavorite(song.id);
+    const favorites = get().favoriteSongs;
+    let updatedFavorites: Song[];
+    let msg: string;
+
+    const strId = String(song.id);
+    const numericId = song.neteaseId || Number(strId.replace(/^netease-/, ''));
+
+    if (isFav) {
+      updatedFavorites = favorites.filter((s) => s.id !== song.id && (numericId === 0 || s.neteaseId !== numericId));
+      msg = `已取消收藏歌曲：${song.name}`;
+      if (numericId > 0) {
+        set((state) => ({
+          neteaseLikeIds: state.neteaseLikeIds.filter((id) => id !== numericId),
+        }));
+        neteaseApi.likeSong(numericId, false).catch(() => {});
+      }
+    } else {
+      updatedFavorites = [song, ...favorites.filter((s) => s.id !== song.id)];
+      msg = `已成功收藏歌曲：${song.name}`;
+      if (numericId > 0) {
+        set((state) => ({
+          neteaseLikeIds: [numericId, ...state.neteaseLikeIds.filter((id) => id !== numericId)],
+        }));
+        neteaseApi.likeSong(numericId, true).catch(() => {});
+      }
+    }
+
+    try {
+      localStorage.setItem('favorite_songs', JSON.stringify(updatedFavorites));
+    } catch {}
+
+    set({ favoriteSongs: updatedFavorites });
+    get().setToastMessage(msg);
+  },
+
+  isFavorite: (songId) => {
+    if (!songId) return false;
+    const strId = String(songId);
+    const numericId = Number(strId.replace(/^netease-/, ''));
+    const inLocal = get().favoriteSongs.some(
+      (s) => s.id === strId || (numericId > 0 && s.neteaseId === numericId)
+    );
+    const inNetease = numericId > 0 && get().neteaseLikeIds.includes(numericId);
+    return inLocal || inNetease;
+  },
 }));
+

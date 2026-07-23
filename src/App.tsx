@@ -2,22 +2,40 @@ import React, { useEffect } from 'react';
 import { TitleBar } from './components/TitleBar/TitleBar';
 import { Sidebar } from './components/Sidebar/Sidebar';
 import { PlayerBar } from './components/Player/PlayerBar';
+import { QueueDrawer } from './components/Player/QueueDrawer';
 import { AudioController } from './components/Player/AudioController';
 import { FluidBackground } from './components/Background/FluidBackground';
 import { AppleLyricView } from './components/Lyrics/AppleLyricView';
 import { LoginModal } from './components/Login/LoginModal';
 
 import { ListenNowView } from './views/ListenNowView';
+import { BrowseView } from './views/BrowseView';
 import { LocalMusicView } from './views/LocalMusicView';
 import { PlaylistView } from './views/PlaylistView';
+import { SearchView } from './views/SearchView';
+import { ChangelogView } from './views/ChangelogView';
 import { SettingsView } from './views/SettingsView';
+import { AboutView } from './views/AboutView';
+import { NoticeView } from './views/NoticeView';
 
 import { usePlayerStore } from './store/playerStore';
 import { neteaseApi } from './services/neteaseApi';
-import { AlertCircle, Crown } from 'lucide-react';
+import { AlertCircle, Crown, Heart, CheckCircle2 } from 'lucide-react';
 
 export const App: React.FC = () => {
-  const { currentSong, isFullLyricsMode, activeTab, setUser, setPlaylists, toastMessage, setToastMessage, togglePlayPause } = usePlayerStore();
+  const {
+    currentSong,
+    isFullLyricsMode,
+    activeTab,
+    setUser,
+    setPlaylists,
+    setNeteaseLikeIds,
+    toastMessage,
+    setToastMessage,
+    togglePlayPause,
+    nextSong,
+    prevSong,
+  } = usePlayerStore();
 
   // Restore NetEase user session on startup if cookie exists
   useEffect(() => {
@@ -27,10 +45,25 @@ export const App: React.FC = () => {
         setUser(account);
         const userPlaylists = await neteaseApi.getUserPlaylists(account.userId);
         setPlaylists(userPlaylists);
+
+        const likeIds = await neteaseApi.getLikelist(account.userId);
+        setNeteaseLikeIds(likeIds);
       }
     };
     initSession();
   }, []);
+
+  // Listen to Global Electron Media Controls (Hardware Media Keys & Tray Menu)
+  useEffect(() => {
+    if (window.electronAPI?.onMediaControl) {
+      const cleanup = window.electronAPI.onMediaControl((action) => {
+        if (action === 'toggle-play') togglePlayPause();
+        else if (action === 'next-song') nextSong();
+        else if (action === 'prev-song') prevSong();
+      });
+      return cleanup;
+    }
+  }, [togglePlayPause, nextSong, prevSong]);
 
   // Global Keyboard Shortcut: Spacebar for Play / Pause Toggle
   useEffect(() => {
@@ -67,23 +100,34 @@ export const App: React.FC = () => {
       {/* Title Bar (Frameless Drag Region) */}
       <TitleBar />
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex overflow-hidden relative z-10">
+      {/* Main Content Area (Hidden in Full Lyrics Mode to prevent background DOM text bleeding through) */}
+      <div
+        className={`flex-1 flex overflow-hidden relative z-10 transition-opacity duration-300 ${
+          isFullLyricsMode ? 'opacity-0 pointer-events-none invisible' : 'opacity-100'
+        }`}
+      >
         {/* Glassmorphic Sidebar */}
         <Sidebar />
 
         {/* Dynamic Views Container */}
         <main className="flex-1 h-[calc(100vh-3rem-5rem)] overflow-y-auto p-6 backdrop-blur-xs">
           {activeTab === 'listen-now' && <ListenNowView />}
-          {activeTab === 'browse' && <ListenNowView />}
+          {activeTab === 'browse' && <BrowseView />}
           {activeTab === 'local' && <LocalMusicView />}
           {activeTab === 'playlist' && <PlaylistView />}
+          {activeTab === 'search' && <SearchView />}
+          {activeTab === 'changelog' && <ChangelogView />}
           {activeTab === 'settings' && <SettingsView />}
+          {activeTab === 'notice' && <NoticeView />}
+          {activeTab === 'about' && <AboutView />}
         </main>
       </div>
 
       {/* Fullscreen Apple Music Lyric Mode */}
       <AppleLyricView />
+
+      {/* Play Queue Right Drawer */}
+      <QueueDrawer />
 
       {/* Bottom Floating Control Bar */}
       <PlayerBar />
@@ -91,14 +135,16 @@ export const App: React.FC = () => {
       {/* NetEase QR Code Login Modal */}
       <LoginModal />
 
-      {/* Global VIP / Alert Toast Notification */}
+      {/* Global Toast Notification */}
       {toastMessage && (
         <div className="fixed top-14 left-1/2 -translate-x-1/2 z-[100] animate-fadeIn">
-          <div className="px-6 py-3 rounded-2xl bg-black/90 backdrop-blur-2xl border border-amber-500/40 text-white shadow-[0_10px_35px_rgba(255,191,0,0.35)] flex items-center space-x-3 text-sm font-bold">
+          <div className="px-6 py-3 rounded-2xl bg-[#141622]/95 backdrop-blur-2xl border border-white/20 text-white shadow-2xl flex items-center space-x-3 text-sm font-bold">
             {toastMessage.includes('VIP') ? (
               <Crown className="w-5 h-5 text-amber-400 shrink-0 animate-bounce" />
+            ) : toastMessage.includes('收藏') ? (
+              <Heart className="w-5 h-5 text-apple-red fill-current shrink-0 animate-pulse" />
             ) : (
-              <AlertCircle className="w-5 h-5 text-apple-red shrink-0" />
+              <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
             )}
             <span className="tracking-wide">{toastMessage}</span>
             <button
@@ -113,3 +159,4 @@ export const App: React.FC = () => {
     </div>
   );
 };
+

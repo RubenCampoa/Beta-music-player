@@ -1,11 +1,23 @@
-import React, { useState } from 'react';
-import { Search, User, LogOut, Music2, Minimize2, Maximize2, X } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Search, User, LogOut, Music2, Minimize2, Maximize2, X, History, Clock, Trash2 } from 'lucide-react';
 import { usePlayerStore } from '../../store/playerStore';
 import { neteaseApi } from '../../services/neteaseApi';
 
 export const TitleBar: React.FC = () => {
-  const { user, setUser, setIsLoginModalOpen, setPlaylists } = usePlayerStore();
+  const {
+    user,
+    setUser,
+    setIsLoginModalOpen,
+    setPlaylists,
+    performSearch,
+    searchHistory,
+    removeSearchHistoryItem,
+    clearSearchHistory,
+  } = usePlayerStore();
+
   const [searchQuery, setSearchQuery] = useState('');
+  const [showHistory, setShowHistory] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   const handleMinimize = () => window.electronAPI?.minimize();
   const handleMaximize = () => window.electronAPI?.maximize();
@@ -16,6 +28,34 @@ export const TitleBar: React.FC = () => {
     setUser(null);
     setPlaylists([]);
   };
+
+  const triggerSearch = (query: string) => {
+    const trimmed = query.trim();
+    if (trimmed) {
+      setSearchQuery(trimmed);
+      performSearch(trimmed);
+      setShowHistory(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      triggerSearch(searchQuery);
+    } else if (e.key === 'Escape') {
+      setShowHistory(false);
+    }
+  };
+
+  // Click outside to hide history dropdown
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setShowHistory(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   return (
     <header className="h-12 w-full drag-region glass-panel flex items-center justify-between px-4 z-40 border-b border-white/10 select-none">
@@ -51,15 +91,66 @@ export const TitleBar: React.FC = () => {
           <span className="whitespace-nowrap">Beta Music Player</span>
         </div>
 
-        <div className="relative w-full">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-white/40" />
+        {/* Search Container & History Dropdown */}
+        <div ref={containerRef} className="relative w-full">
+          <Search
+            onClick={() => triggerSearch(searchQuery)}
+            className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white cursor-pointer transition-colors z-10"
+          />
           <input
             type="text"
-            placeholder="搜索歌曲、歌手或专辑..."
+            placeholder="搜索歌曲、歌手或专辑 (按回车搜索)..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            onFocus={() => setShowHistory(true)}
+            onKeyDown={handleKeyDown}
             className="w-full bg-white/5 border border-white/10 rounded-full py-1 pl-8 pr-4 text-xs text-white placeholder-white/40 focus:outline-none focus:border-apple-red/60 focus:bg-white/10 transition-all"
           />
+
+          {/* Search History Dropdown */}
+          {showHistory && searchHistory.length > 0 && (
+            <div className="absolute left-0 right-0 top-full mt-2 bg-[#141622]/95 backdrop-blur-2xl border border-white/15 rounded-2xl shadow-2xl overflow-hidden z-50 p-3 space-y-2 animate-fadeIn">
+              <div className="flex items-center justify-between px-1 text-xs text-white/50 font-semibold">
+                <div className="flex items-center space-x-1.5">
+                  <History className="w-3.5 h-3.5 text-apple-red" />
+                  <span>搜索历史</span>
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    clearSearchHistory();
+                  }}
+                  className="flex items-center space-x-1 hover:text-red-400 text-[11px] font-medium transition-colors"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  <span>清空</span>
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto pt-1">
+                {searchHistory.map((item, idx) => (
+                  <div
+                    key={`${item}-${idx}`}
+                    onClick={() => triggerSearch(item)}
+                    className="flex items-center space-x-1.5 px-3 py-1 bg-white/5 hover:bg-white/15 rounded-full text-xs text-white/80 hover:text-white cursor-pointer transition-all border border-white/5 group"
+                  >
+                    <Clock className="w-3 h-3 text-white/40 group-hover:text-apple-red shrink-0" />
+                    <span className="truncate max-w-[120px]">{item}</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeSearchHistoryItem(item);
+                      }}
+                      className="text-white/30 hover:text-red-400 p-0.5 rounded-full transition-colors ml-0.5"
+                      title="删除该条记录"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

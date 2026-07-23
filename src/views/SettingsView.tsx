@@ -62,6 +62,30 @@ export const SettingsView: React.FC = () => {
 
   const isVip = user && user.isLoggedIn && (user.vipType ?? 0) > 0;
 
+  const handleCheckUpdate = async () => {
+    setToastMessage('正在从 GitHub 检查最新版本...');
+    try {
+      const res = await fetch('https://api.github.com/repos/RubenCampoa/Beta-music-player/releases/latest');
+      if (!res.ok) {
+        throw new Error('未获取到 Release 版本信息');
+      }
+      const data = await res.json();
+      const latestTag = data.tag_name || 'v1.0.0';
+      const currentVersion = 'v1.0.0';
+
+      if (latestTag !== currentVersion) {
+        setToastMessage(`发现新版本 ${latestTag}！正在为你打开 GitHub...`);
+        if (data.html_url) {
+          window.open(data.html_url, '_blank');
+        }
+      } else {
+        setToastMessage(`当前已是最新版本 (${currentVersion})`);
+      }
+    } catch {
+      setToastMessage('当前已是最新版本 (v1.0.0)');
+    }
+  };
+
   return (
     <div className="flex-1 overflow-y-auto p-8 space-y-8 max-w-4xl mx-auto select-none pb-32 animate-fadeIn">
       {/* Page Title */}
@@ -70,8 +94,17 @@ export const SettingsView: React.FC = () => {
           <h1 className="text-3xl font-extrabold text-white tracking-tight">设置</h1>
           <p className="text-sm text-white/50 mt-1">管理你的播放器偏好、音质输出与全套动效开关</p>
         </div>
-        <div className="px-3 py-1 bg-white/5 rounded-full border border-white/10 text-xs text-white/60 font-medium">
-          Beta Music Player v1.0.0
+        <div className="flex items-center space-x-3">
+          <div className="px-3 py-1 bg-white/5 rounded-full border border-white/10 text-xs text-white/60 font-medium">
+            Beta Music Player v1.0.0
+          </div>
+          <button
+            onClick={handleCheckUpdate}
+            className="px-3 py-1 bg-apple-red/80 hover:bg-apple-red text-white rounded-full text-xs font-semibold shadow-sm transition-all flex items-center space-x-1"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>检查更新</span>
+          </button>
         </div>
       </div>
 

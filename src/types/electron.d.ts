@@ -5,6 +5,7 @@ export interface IElectronAPI {
   selectAudioFiles: () => Promise<string[]>;
   selectAudioFolder: () => Promise<string | null>;
   loginViaWindow: () => Promise<string | null>;
+  onMediaControl?: (callback: (action: string) => void) => () => void;
 }
 
 declare global {
@@ -12,3 +13,6 @@ declare global {
     electronAPI?: IElectronAPI;
   }
 }
+
+
+

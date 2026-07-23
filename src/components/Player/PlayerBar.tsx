@@ -11,6 +11,8 @@ import {
   VolumeX,
   Quote,
   Music,
+  ListMusic,
+  Heart,
 } from 'lucide-react';
 import { usePlayerStore } from '../../store/playerStore';
 
@@ -25,6 +27,7 @@ export const PlayerBar: React.FC = () => {
     repeatMode,
     isShuffle,
     isFullLyricsMode,
+    isQueueOpen,
     togglePlayPause,
     nextSong,
     prevSong,
@@ -33,6 +36,9 @@ export const PlayerBar: React.FC = () => {
     setVolume,
     toggleMute,
     setFullLyricsMode,
+    toggleQueueDrawer,
+    toggleFavorite,
+    isFavorite,
   } = usePlayerStore();
 
   const [isHoverProgress, setIsHoverProgress] = useState(false);
@@ -65,29 +71,44 @@ export const PlayerBar: React.FC = () => {
       {/* Current Playing Track Meta (Click to open full lyric mode) */}
       <div className="flex items-center space-x-3.5 w-1/4 min-w-[200px]">
         {currentSong ? (
-          <div
-            onClick={() => setFullLyricsMode(!isFullLyricsMode)}
-            className="flex items-center space-x-3.5 cursor-pointer group"
-            title="点击展开 Apple Music 歌词动效"
-          >
-            <div className="relative w-12 h-12 rounded-lg overflow-hidden border border-white/15 shadow-md shrink-0">
-              <img
-                src={currentSong.coverUrl}
-                alt={currentSong.name}
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-              />
-              <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                <Quote className="w-5 h-5 text-white" />
+          <div className="flex items-center space-x-3.5">
+            <div
+              onClick={() => setFullLyricsMode(!isFullLyricsMode)}
+              className="flex items-center space-x-3.5 cursor-pointer group truncate"
+              title="点击展开 Apple Music 歌词动效"
+            >
+              <div className="relative w-12 h-12 rounded-lg overflow-hidden border border-white/15 shadow-md shrink-0">
+                <img
+                  src={currentSong.coverUrl}
+                  alt={currentSong.name}
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                />
+                <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                  <Quote className="w-5 h-5 text-white" />
+                </div>
+              </div>
+              <div className="flex flex-col truncate">
+                <span className="text-sm font-semibold text-white/95 truncate group-hover:text-apple-red transition-colors">
+                  {currentSong.name}
+                </span>
+                <span className="text-xs text-white/60 truncate group-hover:text-white/80 transition-colors">
+                  {currentSong.artist}
+                </span>
               </div>
             </div>
-            <div className="flex flex-col truncate">
-              <span className="text-sm font-semibold text-white/95 truncate group-hover:text-apple-red transition-colors">
-                {currentSong.name}
-              </span>
-              <span className="text-xs text-white/60 truncate group-hover:text-white/80 transition-colors">
-                {currentSong.artist}
-              </span>
-            </div>
+            <button
+              onClick={() => toggleFavorite(currentSong)}
+              className="p-1.5 rounded-full hover:bg-white/10 transition-all shrink-0 cursor-pointer"
+              title={isFavorite(currentSong.id) ? '取消收藏' : '收藏歌曲'}
+            >
+              <Heart
+                className={`w-4 h-4 transition-all ${
+                  isFavorite(currentSong.id)
+                    ? 'fill-current text-apple-red'
+                    : 'text-white/40 hover:text-white'
+                }`}
+              />
+            </button>
           </div>
         ) : (
           <div className="flex items-center space-x-3 text-white/40 text-xs">
@@ -174,8 +195,21 @@ export const PlayerBar: React.FC = () => {
         </div>
       </div>
 
-      {/* Right Volume & Lyric Toggle */}
-      <div className="flex items-center justify-end space-x-4 w-1/4 min-w-[200px]">
+      {/* Right Volume, Queue Drawer & Lyric Toggle */}
+      <div className="flex items-center justify-end space-x-3 w-1/4 min-w-[200px]">
+        {/* Queue Drawer Button */}
+        <button
+          onClick={toggleQueueDrawer}
+          className={`p-2 rounded-lg transition-all ${
+            isQueueOpen
+              ? 'bg-apple-red text-white shadow-md shadow-apple-red/30 scale-105'
+              : 'text-white/60 hover:bg-white/10 hover:text-white'
+          }`}
+          title="播放队列"
+        >
+          <ListMusic className="w-4 h-4" />
+        </button>
+
         {/* Lyrics Button */}
         <button
           onClick={() => setFullLyricsMode(!isFullLyricsMode)}
