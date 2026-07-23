@@ -26,6 +26,9 @@ interface PlayerState {
 
   // Lyrics & UI State
   isFullLyricsMode: boolean;
+  isDesktopLyricOpen: boolean;
+  setIsDesktopLyricOpen: (isOpen: boolean) => void;
+  toggleDesktopLyric: () => void;
   lyrics: LyricLine[];
   activeTab: 'listen-now' | 'browse' | 'local' | 'playlist' | 'search' | 'changelog' | 'settings' | 'notice' | 'about';
   selectedPlaylist: Playlist | null;
@@ -119,6 +122,15 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   isSearching: false,
 
   isFullLyricsMode: false,
+  isDesktopLyricOpen: false,
+  setIsDesktopLyricOpen: (isDesktopLyricOpen) => set({ isDesktopLyricOpen }),
+  toggleDesktopLyric: () => {
+    if (window.electronAPI?.toggleDesktopLyric) {
+      window.electronAPI.toggleDesktopLyric();
+    } else {
+      set((state) => ({ isDesktopLyricOpen: !state.isDesktopLyricOpen }));
+    }
+  },
   lyrics: [],
   activeTab: 'listen-now',
   selectedPlaylist: null,

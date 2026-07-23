@@ -13,6 +13,7 @@ import {
   Music,
   ListMusic,
   Heart,
+  Tv,
 } from 'lucide-react';
 import { usePlayerStore } from '../../store/playerStore';
 
@@ -27,6 +28,7 @@ export const PlayerBar: React.FC = () => {
     repeatMode,
     isShuffle,
     isFullLyricsMode,
+    isDesktopLyricOpen,
     isQueueOpen,
     togglePlayPause,
     nextSong,
@@ -36,6 +38,7 @@ export const PlayerBar: React.FC = () => {
     setVolume,
     toggleMute,
     setFullLyricsMode,
+    toggleDesktopLyric,
     toggleQueueDrawer,
     toggleFavorite,
     isFavorite,
@@ -210,7 +213,20 @@ export const PlayerBar: React.FC = () => {
           <ListMusic className="w-4 h-4" />
         </button>
 
-        {/* Lyrics Button */}
+        {/* Desktop Lyrics Button */}
+        <button
+          onClick={toggleDesktopLyric}
+          className={`p-2 rounded-lg transition-all ${
+            isDesktopLyricOpen
+              ? 'bg-apple-red text-white shadow-md shadow-apple-red/30 scale-105'
+              : 'text-white/60 hover:bg-white/10 hover:text-white'
+          }`}
+          title="开启/关闭桌面歌词 (透明悬浮/穿透锁/1.5行缓升)"
+        >
+          <Tv className="w-4 h-4" />
+        </button>
+
+        {/* Full Lyrics Button */}
         <button
           onClick={() => setFullLyricsMode(!isFullLyricsMode)}
           className={`p-2 rounded-lg transition-all ${

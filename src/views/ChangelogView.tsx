@@ -37,6 +37,16 @@ export const ChangelogView: React.FC = () => {
           <div className="flex items-start space-x-3">
             <CheckCircle2 className="w-5 h-5 text-apple-red shrink-0 mt-0.5" />
             <div className="space-y-1">
+              <h4 className="text-sm font-bold text-white">透明无边框桌面歌词 (1.5 行缓升平滑过渡)</h4>
+              <p className="text-xs text-white/60 leading-relaxed">
+                新增 Electron 独立透明悬浮桌面歌词窗口，平时高亮显示单行大字号歌词，切句时呈 1.5 行平滑缓升滑落视效；支持鼠标穿透锁定、快捷播放控制及主题色切换。
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-start space-x-3">
+            <CheckCircle2 className="w-5 h-5 text-apple-red shrink-0 mt-0.5" />
+            <div className="space-y-1">
               <h4 className="text-sm font-bold text-white">本地音乐 ID3 标签与专辑封面自动解析</h4>
               <p className="text-xs text-white/60 leading-relaxed">
                 导入本地 MP3 / FLAC 音频文件时，自动识别并解析文件嵌入的真实歌曲名、歌手、专辑名及专辑封面图，告别“未知歌手”与占位封面。
