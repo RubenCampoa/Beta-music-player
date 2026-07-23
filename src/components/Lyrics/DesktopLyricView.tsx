@@ -57,32 +57,28 @@ export const DesktopLyricView: React.FC = () => {
   const currentLine = data.lyrics[data.currentLyricIndex];
   const nextLine = data.lyrics[data.currentLyricIndex + 1];
 
-  // Dynamic Theme Styling
+  // Dynamic Theme Styling with high-contrast text shadow for transparent desktop overlay
   const themeClasses = {
     cyan: {
-      text: 'text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-sky-200 to-teal-100 drop-shadow-[0_0_20px_rgba(6,182,212,0.6)]',
-      glow: 'shadow-[0_0_30px_rgba(6,182,212,0.35)]',
-      next: 'text-cyan-200/50',
+      text: 'text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-sky-200 to-teal-100 drop-shadow-[0_2px_12px_rgba(0,0,0,0.95)]',
+      glow: 'shadow-none',
+      next: 'text-cyan-200/60 drop-shadow-[0_1px_6px_rgba(0,0,0,0.9)]',
     },
     red: {
-      text: 'text-transparent bg-clip-text bg-gradient-to-r from-red-400 via-pink-300 to-rose-100 drop-shadow-[0_0_20px_rgba(255,45,85,0.7)]',
-      glow: 'shadow-[0_0_30px_rgba(255,45,85,0.4)]',
-      next: 'text-rose-200/50',
+      text: 'text-transparent bg-clip-text bg-gradient-to-r from-red-400 via-pink-300 to-rose-100 drop-shadow-[0_2px_12px_rgba(0,0,0,0.95)]',
+      glow: 'shadow-none',
+      next: 'text-rose-200/60 drop-shadow-[0_1px_6px_rgba(0,0,0,0.9)]',
     },
     white: {
-      text: 'text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.8)] font-extrabold',
-      glow: 'shadow-[0_0_30px_rgba(255,255,255,0.2)]',
-      next: 'text-white/50',
+      text: 'text-white drop-shadow-[0_2px_14px_rgba(0,0,0,0.95)] font-extrabold',
+      glow: 'shadow-none',
+      next: 'text-white/60 drop-shadow-[0_1px_6px_rgba(0,0,0,0.9)]',
     },
   }[colorTheme];
 
   return (
     <div
-      className={`relative w-full h-screen flex flex-col justify-center items-center px-6 select-none overflow-hidden group transition-all duration-300 ${
-        isLocked
-          ? 'bg-transparent border-none'
-          : 'glass-panel rounded-2xl border border-white/15 bg-black/40 backdrop-blur-xl shadow-2xl hover:bg-black/60'
-      }`}
+      className="relative w-full h-screen flex flex-col justify-center items-center px-4 select-none overflow-hidden group bg-transparent border-none shadow-none"
       style={
         {
           WebkitAppRegion: isLocked ? 'no-drag' : 'drag',
