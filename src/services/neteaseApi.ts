@@ -321,7 +321,7 @@ class NeteaseApiService {
     }
 
     const fee = track.fee ?? track.privilege?.fee;
-    const isVip = fee === 1 || fee === 8;
+    const isVip = fee === 1;
 
     return {
       id: `netease-${track.id}`,
