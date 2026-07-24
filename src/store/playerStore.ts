@@ -158,8 +158,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   setCurrentSong: (song) => set({ currentSong: song }),
 
   playSong: async (song, newQueue) => {
-    // Check VIP Access & Trigger Toast
-    const isVipSong = song.isVip || (song.fee !== undefined && song.fee > 0);
+    // Check VIP Streaming Access & Trigger Toast
+    const isVipSong = Boolean(song.isVip || song.fee === 1 || song.fee === 8);
     if (isVipSong) {
       const user = get().user;
       const isUserVip = user && user.isLoggedIn && (user.vipType ?? 0) > 0;

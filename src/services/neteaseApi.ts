@@ -320,9 +320,8 @@ class NeteaseApiService {
       rawCoverUrl = rawCoverUrl.replace(/^http:/, 'https:');
     }
 
-    const isVip = Boolean(
-      track.fee === 1 || track.fee === 4 || track.fee === 8 || (track.fee != null && track.fee > 0)
-    );
+    const fee = track.fee ?? track.privilege?.fee;
+    const isVip = fee === 1 || fee === 8;
 
     return {
       id: `netease-${track.id}`,
