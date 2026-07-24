@@ -1,6 +1,7 @@
 import React from 'react';
 import { Search, Play, Music, Sparkles } from 'lucide-react';
 import { usePlayerStore } from '../store/playerStore';
+import { neteaseApi } from '../services/neteaseApi';
 import { Song } from '../types/music';
 
 export const SearchView: React.FC = () => {
@@ -90,8 +91,8 @@ export const SearchView: React.FC = () => {
                         className="w-9 h-9 rounded-md object-cover border border-white/10"
                       />
                       <span className="truncate max-w-[220px] text-white font-medium flex items-center space-x-1.5">
-                        <span className="truncate">{song.name}</span>
-                        {song.isVip && (
+                        <span className="truncate">{neteaseApi.cleanTitle(song.name)}</span>
+                        {Boolean(song.isVip) && (
                           <span
                             title="VIP 曲目 (标准音质免费播放，极高/无损音质需会员)"
                             className="px-1.5 py-0.5 rounded text-[8px] bg-gradient-to-r from-amber-500 to-red-500 text-white font-black shrink-0 shadow-sm uppercase tracking-wider cursor-help"
@@ -102,10 +103,10 @@ export const SearchView: React.FC = () => {
                       </span>
                     </td>
                     <td className="py-3 px-4 text-white/70 truncate max-w-[150px]">
-                      {song.artist}
+                      {neteaseApi.cleanTitle(song.artist)}
                     </td>
                     <td className="py-3 px-4 text-white/50 truncate max-w-[150px]">
-                      {song.album}
+                      {neteaseApi.cleanTitle(song.album)}
                     </td>
                     <td className="py-3 px-4 text-right text-white/50 font-mono">
                       {formatDuration(song.duration)}

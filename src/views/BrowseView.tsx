@@ -198,13 +198,13 @@ export const BrowseView: React.FC = () => {
 
                 <div className="flex flex-col truncate">
                   <span className="text-xs font-bold text-white group-hover:text-apple-red transition-colors truncate">
-                    {song.name}
+                    {neteaseApi.cleanTitle(song.name)}
                   </span>
-                  <span className="text-[11px] text-white/60 truncate">{song.artist}</span>
+                  <span className="text-[11px] text-white/60 truncate">{neteaseApi.cleanTitle(song.artist)}</span>
                 </div>
               </div>
 
-              {song.isVip && (
+              {Boolean(song.isVip) && (
                 <span
                   title="VIP 曲目 (标准音质免费播放，极高/无损音质需会员)"
                   className="px-1.5 py-0.5 rounded text-[8px] bg-gradient-to-r from-amber-500 to-red-500 text-white font-black shrink-0 shadow-sm uppercase tracking-wider cursor-help"

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { usePlayerStore } from '../../store/playerStore';
+import { neteaseApi } from '../../services/neteaseApi';
 
 export const AppleLyricView: React.FC = () => {
   const {
@@ -193,10 +194,10 @@ export const AppleLyricView: React.FC = () => {
             <div className="w-full flex items-center justify-between pt-1">
               <div className="flex flex-col truncate pr-2">
                 <h2 className="text-2xl font-bold text-white tracking-tight truncate drop-shadow-md">
-                  {currentSong.name}
+                  {neteaseApi.cleanTitle(currentSong.name)}
                 </h2>
                 <p className="text-base text-white/70 font-medium truncate drop-shadow">
-                  {currentSong.artist}
+                  {neteaseApi.cleanTitle(currentSong.artist)}
                 </p>
               </div>
               <button
@@ -384,7 +385,7 @@ export const AppleLyricView: React.FC = () => {
                           : 'none',
                       }}
                     >
-                      {line.text}
+                      {neteaseApi.cleanTitle(line.text)}
                     </div>
 
                     {/* Translated Lyric Sub-line (if available) */}
@@ -394,7 +395,7 @@ export const AppleLyricView: React.FC = () => {
                           isActive ? 'text-white/80' : 'text-white/30'
                         } ${lyricFontSize === 'large' ? 'text-base md:text-lg' : 'text-xs md:text-sm'}`}
                       >
-                        {line.translation}
+                        {neteaseApi.cleanTitle(line.translation)}
                       </div>
                     )}
                   </motion.div>

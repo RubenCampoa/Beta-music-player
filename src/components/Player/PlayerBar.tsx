@@ -13,9 +13,9 @@ import {
   Music,
   ListMusic,
   Heart,
-  Tv,
 } from 'lucide-react';
 import { usePlayerStore } from '../../store/playerStore';
+import { neteaseApi } from '../../services/neteaseApi';
 
 export const PlayerBar: React.FC = () => {
   const {
@@ -28,7 +28,6 @@ export const PlayerBar: React.FC = () => {
     repeatMode,
     isShuffle,
     isFullLyricsMode,
-    isDesktopLyricOpen,
     isQueueOpen,
     togglePlayPause,
     nextSong,
@@ -38,7 +37,6 @@ export const PlayerBar: React.FC = () => {
     setVolume,
     toggleMute,
     setFullLyricsMode,
-    toggleDesktopLyric,
     toggleQueueDrawer,
     toggleFavorite,
     isFavorite,
@@ -92,10 +90,10 @@ export const PlayerBar: React.FC = () => {
               </div>
               <div className="flex flex-col truncate">
                 <span className="text-sm font-semibold text-white/95 truncate group-hover:text-apple-red transition-colors">
-                  {currentSong.name}
+                  {neteaseApi.cleanTitle(currentSong.name)}
                 </span>
                 <span className="text-xs text-white/60 truncate group-hover:text-white/80 transition-colors">
-                  {currentSong.artist}
+                  {neteaseApi.cleanTitle(currentSong.artist)}
                 </span>
               </div>
             </div>
@@ -213,20 +211,7 @@ export const PlayerBar: React.FC = () => {
           <ListMusic className="w-4 h-4" />
         </button>
 
-        {/* Desktop Lyrics Button */}
-        <button
-          onClick={toggleDesktopLyric}
-          className={`p-2 rounded-lg transition-all ${
-            isDesktopLyricOpen
-              ? 'bg-apple-red text-white shadow-md shadow-apple-red/30 scale-105'
-              : 'text-white/60 hover:bg-white/10 hover:text-white'
-          }`}
-          title="开启/关闭桌面歌词 (透明悬浮/穿透锁/1.5行缓升)"
-        >
-          <Tv className="w-4 h-4" />
-        </button>
-
-        {/* Full Lyrics Button */}
+        {/* Lyrics Button */}
         <button
           onClick={() => setFullLyricsMode(!isFullLyricsMode)}
           className={`p-2 rounded-lg transition-all ${

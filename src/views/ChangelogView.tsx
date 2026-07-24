@@ -17,33 +17,58 @@ export const ChangelogView: React.FC = () => {
         </div>
         <div className="px-3 py-1 bg-apple-red/20 rounded-full border border-apple-red/30 text-xs text-apple-red font-semibold flex items-center space-x-1.5">
           <Disc className="w-3.5 h-3.5 animate-spin" />
-          <span>当前版本 v1.0.1</span>
+          <span>当前版本 v1.0.3</span>
         </div>
       </div>
 
-      {/* Release v1.0.1 */}
+      {/* Release v1.0.3 */}
       <section className="glass-panel p-6 rounded-2xl space-y-5 border border-white/15 shadow-2xl relative overflow-hidden">
         <div className="flex items-center justify-between border-b border-white/10 pb-4">
           <div className="flex items-center space-x-3">
-            <span className="text-2xl font-extrabold text-white tracking-tight">v1.0.1</span>
+            <span className="text-2xl font-extrabold text-white tracking-tight">v1.0.3</span>
             <span className="px-2.5 py-0.5 rounded-full bg-apple-red text-white text-[10px] font-bold uppercase tracking-wider shadow-sm">
               最新版本
             </span>
           </div>
-          <span className="text-xs font-mono text-white/40">2026-07-23</span>
+          <span className="text-xs font-mono text-white/40">2026-07-24</span>
         </div>
 
         <div className="space-y-4">
           <div className="flex items-start space-x-3">
             <CheckCircle2 className="w-5 h-5 text-apple-red shrink-0 mt-0.5" />
             <div className="space-y-1">
-              <h4 className="text-sm font-bold text-white">透明无边框桌面歌词 (1.5 行缓升平滑过渡)</h4>
+              <h4 className="text-sm font-bold text-white">歌单歌曲无上限全量加载</h4>
               <p className="text-xs text-white/60 leading-relaxed">
-                新增 Electron 独立透明悬浮桌面歌词窗口，平时高亮显示单行大字号歌词，切句时呈 1.5 行平滑缓升滑落视效；支持鼠标穿透锁定、快捷播放控制及主题色切换。
+                突破原网易云歌单单页 50 首歌曲的载入限制，全新实现多页自动循环拉取机制，支持无上限全量载入并完整展示歌单中的所有曲目。
               </p>
             </div>
           </div>
 
+          <div className="flex items-start space-x-3">
+            <CheckCircle2 className="w-5 h-5 text-apple-red shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <h4 className="text-sm font-bold text-white">音频标题与元数据空字符（Null Byte）异常清洗</h4>
+              <p className="text-xs text-white/60 leading-relaxed">
+                全面修复部分歌曲名称、歌手或专辑名末尾异常多出数字“0”的问题，精准剔除音频标签及 API 数据中的 Null Character (`\0` / `\u0000`) 与转义异常字符。
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Release v1.0.1 */}
+      <section className="glass-panel p-6 rounded-2xl space-y-5 border border-white/10 opacity-80 hover:opacity-100 transition-opacity relative overflow-hidden">
+        <div className="flex items-center justify-between border-b border-white/10 pb-4">
+          <div className="flex items-center space-x-3">
+            <span className="text-xl font-bold text-white tracking-tight">v1.0.1</span>
+            <span className="px-2 py-0.5 rounded bg-white/10 text-white/70 text-[10px] font-semibold">
+              正式版
+            </span>
+          </div>
+          <span className="text-xs font-mono text-white/40">2026-07-23</span>
+        </div>
+
+        <div className="space-y-4">
           <div className="flex items-start space-x-3">
             <CheckCircle2 className="w-5 h-5 text-apple-red shrink-0 mt-0.5" />
             <div className="space-y-1">

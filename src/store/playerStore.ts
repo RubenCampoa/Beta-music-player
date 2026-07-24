@@ -26,9 +26,6 @@ interface PlayerState {
 
   // Lyrics & UI State
   isFullLyricsMode: boolean;
-  isDesktopLyricOpen: boolean;
-  setIsDesktopLyricOpen: (isOpen: boolean) => void;
-  toggleDesktopLyric: () => void;
   lyrics: LyricLine[];
   activeTab: 'listen-now' | 'browse' | 'local' | 'playlist' | 'search' | 'changelog' | 'settings' | 'notice' | 'about';
   selectedPlaylist: Playlist | null;
@@ -48,6 +45,7 @@ interface PlayerState {
   enableLyricBlur: boolean;
   enableArtworkAnimation: boolean;
   lyricFontSize: 'normal' | 'large';
+  autoCheckUpdate: boolean;
 
   // NetEase User & Playlists
   user: UserProfile | null;
@@ -94,6 +92,7 @@ interface PlayerState {
   setEnableLyricBlur: (enabled: boolean) => void;
   setEnableArtworkAnimation: (enabled: boolean) => void;
   setLyricFontSize: (size: 'normal' | 'large') => void;
+  setAutoCheckUpdate: (enabled: boolean) => void;
 }
 
 export const usePlayerStore = create<PlayerState>((set, get) => ({
@@ -122,15 +121,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   isSearching: false,
 
   isFullLyricsMode: false,
-  isDesktopLyricOpen: false,
-  setIsDesktopLyricOpen: (isDesktopLyricOpen) => set({ isDesktopLyricOpen }),
-  toggleDesktopLyric: () => {
-    if (window.electronAPI?.toggleDesktopLyric) {
-      window.electronAPI.toggleDesktopLyric();
-    } else {
-      set((state) => ({ isDesktopLyricOpen: !state.isDesktopLyricOpen }));
-    }
-  },
   lyrics: [],
   activeTab: 'listen-now',
   selectedPlaylist: null,
@@ -145,13 +135,21 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   setNeteaseLikeIds: (neteaseLikeIds) => set({ neteaseLikeIds }),
   toastMessage: null,
 
-  // Default motion toggles
+  // Default motion & app settings
   isFluidBgEnabled: true,
   enableLyricAnimation: true,
   enableLyricGlow: true,
   enableLyricBlur: true,
   enableArtworkAnimation: true,
   lyricFontSize: 'large',
+  autoCheckUpdate: (() => {
+    try {
+      const saved = localStorage.getItem('auto_check_update');
+      return saved !== null ? JSON.parse(saved) : true;
+    } catch {
+      return true;
+    }
+  })(),
 
   user: null,
   playlists: [],
@@ -330,6 +328,12 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   setEnableLyricBlur: (enableLyricBlur) => set({ enableLyricBlur }),
   setEnableArtworkAnimation: (enableArtworkAnimation) => set({ enableArtworkAnimation }),
   setLyricFontSize: (lyricFontSize) => set({ lyricFontSize }),
+  setAutoCheckUpdate: (autoCheckUpdate) => {
+    try {
+      localStorage.setItem('auto_check_update', JSON.stringify(autoCheckUpdate));
+    } catch {}
+    set({ autoCheckUpdate });
+  },
 
   toggleFavorite: async (song) => {
     const isFav = get().isFavorite(song.id);

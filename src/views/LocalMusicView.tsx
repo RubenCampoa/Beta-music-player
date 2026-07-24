@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { UploadCloud, Play, Trash2, FolderPlus, Music } from 'lucide-react';
 import { Song } from '../types/music';
 import { localMusicService } from '../services/localMusicService';
+import { neteaseApi } from '../services/neteaseApi';
 import { usePlayerStore } from '../store/playerStore';
 
 export const LocalMusicView: React.FC = () => {
@@ -165,14 +166,14 @@ export const LocalMusicView: React.FC = () => {
                         className="w-9 h-9 rounded-md object-cover border border-white/10"
                       />
                       <span className="truncate max-w-[200px] text-white font-medium">
-                        {song.name}
+                        {neteaseApi.cleanTitle(song.name)}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-white/70 truncate max-w-[150px]">
-                      {song.artist}
+                      {neteaseApi.cleanTitle(song.artist)}
                     </td>
                     <td className="py-3 px-4 text-white/50 truncate max-w-[150px]">
-                      {song.album}
+                      {neteaseApi.cleanTitle(song.album)}
                     </td>
                     <td className="py-3 px-4 text-right text-white/50 font-mono">
                       {formatDuration(song.duration)}

@@ -2,6 +2,7 @@ import React from 'react';
 import { X, Play, Trash2, Music, ListMusic } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePlayerStore } from '../../store/playerStore';
+import { neteaseApi } from '../../services/neteaseApi';
 
 export const QueueDrawer: React.FC = () => {
   const {
@@ -114,10 +115,10 @@ export const QueueDrawer: React.FC = () => {
                             isCurrent ? 'text-apple-red' : 'text-white group-hover:text-apple-red'
                           }`}
                         >
-                          {song.name}
+                          {neteaseApi.cleanTitle(song.name)}
                         </span>
                         <span className="text-[11px] text-white/50 truncate">
-                          {song.artist}
+                          {neteaseApi.cleanTitle(song.artist)}
                         </span>
                       </div>
                     </div>

@@ -118,8 +118,8 @@ export const PlaylistView: React.FC = () => {
                         className="w-9 h-9 rounded-md object-cover border border-white/10"
                       />
                       <span className="truncate max-w-[220px] text-white font-medium flex items-center space-x-1.5">
-                        <span className="truncate">{song.name}</span>
-                        {song.isVip && (
+                        <span className="truncate">{neteaseApi.cleanTitle(song.name)}</span>
+                        {Boolean(song.isVip) && (
                           <span className="px-1.5 py-0.5 rounded text-[9px] bg-gradient-to-r from-amber-500 to-red-500 text-white font-black shrink-0 shadow-sm uppercase tracking-wider">
                             VIP
                           </span>
@@ -127,10 +127,10 @@ export const PlaylistView: React.FC = () => {
                       </span>
                     </td>
                     <td className="py-3 px-4 text-white/70 truncate max-w-[150px]">
-                      {song.artist}
+                      {neteaseApi.cleanTitle(song.artist)}
                     </td>
                     <td className="py-3 px-4 text-white/50 truncate max-w-[150px]">
-                      {song.album}
+                      {neteaseApi.cleanTitle(song.album)}
                     </td>
                     <td className="py-3 px-4 text-right text-white/50 font-mono">
                       {formatDuration(song.duration)}

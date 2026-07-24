@@ -149,14 +149,38 @@ class NeteaseApiService {
     }
   }
 
-  // --- Playlist Songs ---
+  // --- Playlist Songs (Supports Unlimited Multi-Page Auto-Fetching) ---
   public async getPlaylistSongs(playlistId: string | number): Promise<Song[]> {
     try {
-      const res = await this.fetchApi<{ songs?: any[]; playlist?: { tracks: any[] } }>(
-        `/playlist/track/all?id=${playlistId}&limit=50`
-      );
-      const tracks = res.songs || res.playlist?.tracks || [];
-      return tracks.map((track) => this.formatTrackToSong(track));
+      let allTracks: any[] = [];
+      let offset = 0;
+      const pageSize = 1000;
+      let hasMore = true;
+
+      while (hasMore) {
+        const res = await this.fetchApi<{ songs?: any[]; playlist?: { tracks: any[] } }>(
+          `/playlist/track/all?id=${playlistId}&limit=${pageSize}&offset=${offset}`
+        );
+        const tracks = res.songs || res.playlist?.tracks || [];
+        if (!tracks || tracks.length === 0) {
+          hasMore = false;
+        } else {
+          allTracks = allTracks.concat(tracks);
+          if (tracks.length < pageSize) {
+            hasMore = false;
+          } else {
+            offset += pageSize;
+          }
+        }
+        // Safety threshold to avoid unexpected infinite memory loops
+        if (offset >= 10000) break;
+      }
+
+      if (allTracks.length === 0) {
+        return this.getFallbackSongs();
+      }
+
+      return allTracks.map((track) => this.formatTrackToSong(track));
     } catch {
       return this.getFallbackSongs();
     }
@@ -227,11 +251,15 @@ class NeteaseApiService {
           const matched = transLyrics.find((t) => Math.abs(t.time - line.time) < 1.2);
           return {
             ...line,
-            translation: matched?.text,
+            text: this.cleanTitle(line.text),
+            translation: matched?.text ? this.cleanTitle(matched.text) : undefined,
           };
         });
       }
-      return mainLyrics;
+      return mainLyrics.map((line) => ({
+        ...line,
+        text: this.cleanTitle(line.text),
+      }));
     } catch {
       // Ignore
     }
@@ -254,13 +282,23 @@ class NeteaseApiService {
         const seconds = parseInt(match[2], 10);
         const millis = parseInt(match[3], 10);
         const time = minutes * 60 + seconds + (millis > 99 ? millis / 1000 : millis / 100);
-        const text = line.replace(timeReg, '').trim();
+        const text = this.cleanTitle(line.replace(timeReg, ''));
         if (text) {
           lyrics.push({ time, text });
         }
       }
     }
     return lyrics.sort((a, b) => a.time - b.time);
+  }
+
+  public cleanTitle(str?: string): string {
+    if (!str) return '';
+    let cleaned = str
+      .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200D\uFEFF\u00A0\0]/g, '')
+      .trim();
+    cleaned = cleaned.replace(/[\u0000\0]+/g, '').trim();
+    cleaned = cleaned.replace(/([^\d\s])\s*[0０]$/g, '$1').trim();
+    return cleaned;
   }
 
   private formatTrackToSong(track: any): Song {
@@ -282,14 +320,15 @@ class NeteaseApiService {
       rawCoverUrl = rawCoverUrl.replace(/^http:/, 'https:');
     }
 
-    const isVip =
-      track.fee === 1 || track.fee === 4 || track.fee === 8 || (track.fee && track.fee > 0);
+    const isVip = Boolean(
+      track.fee === 1 || track.fee === 4 || track.fee === 8 || (track.fee != null && track.fee > 0)
+    );
 
     return {
       id: `netease-${track.id}`,
-      name: track.name,
-      artist: artistName,
-      album: track.al?.name || track.album?.name || '未知专辑',
+      name: this.cleanTitle(track.name),
+      artist: this.cleanTitle(artistName),
+      album: this.cleanTitle(track.al?.name || track.album?.name || '未知专辑'),
       duration: Math.floor((track.dt || track.duration || 200000) / 1000),
       coverUrl: rawCoverUrl,
       audioUrl: `https://music.163.com/song/media/outer/url?id=${track.id}.mp3`,

@@ -38,6 +38,8 @@ export const SettingsView: React.FC = () => {
     setEnableArtworkAnimation,
     lyricFontSize,
     setLyricFontSize,
+    autoCheckUpdate,
+    setAutoCheckUpdate,
   } = usePlayerStore();
 
   const [audioQuality, setAudioQuality] = useState<'standard' | 'high' | 'lossless'>('high');
@@ -70,19 +72,19 @@ export const SettingsView: React.FC = () => {
         throw new Error('未获取到 Release 版本信息');
       }
       const data = await res.json();
-      const latestTag = data.tag_name || 'v1.0.1';
-      const currentVersion = 'v1.0.1';
+      const latestTag = data.tag_name || 'v1.0.3';
+      const currentVersion = 'v1.0.3';
 
-      if (latestTag !== currentVersion && latestTag !== '1.0.1') {
+      if (latestTag !== currentVersion && latestTag !== '1.0.3') {
         setToastMessage(`发现新版本 ${latestTag}！正在为你打开 GitHub...`);
         if (data.html_url) {
           window.open(data.html_url, '_blank');
         }
       } else {
-        setToastMessage(`当前已是最新版本 (v1.0.1)`);
+        setToastMessage(`当前已是最新版本 (v1.0.3)`);
       }
     } catch {
-      setToastMessage('当前已是最新版本 (v1.0.1)');
+      setToastMessage('当前已是最新版本 (v1.0.3)');
     }
   };
 
@@ -96,7 +98,7 @@ export const SettingsView: React.FC = () => {
         </div>
         <div className="flex items-center space-x-3">
           <div className="px-3 py-1 bg-white/5 rounded-full border border-white/10 text-xs text-white/60 font-medium">
-            Beta Music Player v1.0.1
+            Beta Music Player v1.0.3
           </div>
           <button
             onClick={handleCheckUpdate}
@@ -279,6 +281,26 @@ export const SettingsView: React.FC = () => {
               onChange={(e) => {
                 setEnableArtworkAnimation(e.target.checked);
                 setToastMessage(e.target.checked ? '已开启封面悬浮动效' : '已关闭封面悬浮动效');
+              }}
+              className="w-5 h-5 accent-apple-red rounded cursor-pointer shrink-0"
+            />
+          </div>
+
+          {/* Option 6: Auto Check Update on Launch */}
+          <div className="flex items-center justify-between p-4 bg-white/5 rounded-xl border border-white/10">
+            <div className="flex items-start space-x-3">
+              <ShieldCheck className="w-5 h-5 text-emerald-400 mt-0.5 shrink-0" />
+              <div>
+                <div className="text-sm font-semibold text-white">启动时自动检查更新</div>
+                <div className="text-xs text-white/50 mt-0.5">每次打开软件时自动检测 GitHub Release 最新版本</div>
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={autoCheckUpdate}
+              onChange={(e) => {
+                setAutoCheckUpdate(e.target.checked);
+                setToastMessage(e.target.checked ? '已开启启动自动检查更新' : '已关闭启动自动检查更新');
               }}
               className="w-5 h-5 accent-apple-red rounded cursor-pointer shrink-0"
             />

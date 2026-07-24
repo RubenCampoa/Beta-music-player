@@ -29,6 +29,16 @@ export const db = new LocalMusicDatabase();
 import jsmediatags from 'jsmediatags/dist/jsmediatags.min.js';
 
 class LocalMusicService {
+  private cleanTitle(str?: string): string {
+    if (!str) return '';
+    let cleaned = str
+      .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200D\uFEFF\u00A0\0]/g, '')
+      .trim();
+    cleaned = cleaned.replace(/[\u0000\0]+/g, '').trim();
+    cleaned = cleaned.replace(/([^\d\s])\s*[0０]$/g, '$1').trim();
+    return cleaned;
+  }
+
   // Extract ID3 Tags (Title, Artist, Album, Cover Artwork) from Blob
   private async parseId3Metadata(blob: Blob): Promise<{ title?: string; artist?: string; album?: string; coverUrl?: string }> {
     return new Promise((resolve) => {
@@ -48,9 +58,9 @@ class LocalMusicService {
               coverUrl = `data:${format};base64,${btoa(base64String)}`;
             }
             resolve({
-              title: tags.title?.trim(),
-              artist: tags.artist?.trim(),
-              album: tags.album?.trim(),
+              title: this.cleanTitle(tags.title),
+              artist: this.cleanTitle(tags.artist),
+              album: this.cleanTitle(tags.album),
               coverUrl,
             });
           },
@@ -75,7 +85,7 @@ class LocalMusicService {
     if (file instanceof File) {
       blob = file;
       filePath = (file as any).path || file.name;
-      name = file.name.replace(/\.[^/.]+$/, '');
+      name = this.cleanTitle(file.name.replace(/\.[^/.]+$/, ''));
 
       // Native duration extraction
       duration = await new Promise<number>((resolve) => {
@@ -93,14 +103,14 @@ class LocalMusicService {
     } else {
       blob = new Blob([file.buffer]);
       filePath = file.path;
-      name = file.name.replace(/\.[^/.]+$/, '');
+      name = this.cleanTitle(file.name.replace(/\.[^/.]+$/, ''));
     }
 
     // Attempt ID3 Tag Extraction
     const id3Data = await this.parseId3Metadata(blob);
-    if (id3Data.title) name = id3Data.title;
-    if (id3Data.artist) artist = id3Data.artist;
-    if (id3Data.album) album = id3Data.album;
+    if (id3Data.title) name = this.cleanTitle(id3Data.title);
+    if (id3Data.artist) artist = this.cleanTitle(id3Data.artist);
+    if (id3Data.album) album = this.cleanTitle(id3Data.album);
     if (id3Data.coverUrl) coverUrl = id3Data.coverUrl;
 
     const songId = `local-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;

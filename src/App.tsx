@@ -22,28 +22,14 @@ import { usePlayerStore } from './store/playerStore';
 import { neteaseApi } from './services/neteaseApi';
 import { AlertCircle, Crown, Heart, CheckCircle2 } from 'lucide-react';
 
-import { DesktopLyricView } from './components/Lyrics/DesktopLyricView';
-
 export const App: React.FC = () => {
-  // Check if current Electron window is spawned for Desktop Lyrics
-  const isDesktopLyricWindow = typeof window !== 'undefined' && window.location.hash === '#desktop-lyric';
-
-  if (isDesktopLyricWindow) {
-    return <DesktopLyricView />;
-  }
-
   const {
     currentSong,
-    lyrics,
-    isPlaying,
-    currentTime,
-    duration,
     isFullLyricsMode,
     activeTab,
     setUser,
     setPlaylists,
     setNeteaseLikeIds,
-    setIsDesktopLyricOpen,
     toastMessage,
     setToastMessage,
     togglePlayPause,
@@ -51,34 +37,7 @@ export const App: React.FC = () => {
     prevSong,
   } = usePlayerStore();
 
-  // Compute current active lyric line index based on audio currentTime
-  const currentLyricIndex = lyrics.findIndex((line, index) => {
-    const nextLine = lyrics[index + 1];
-    return currentTime >= line.time && (!nextLine || currentTime < nextLine.time);
-  });
-
-  // Real-time broadcast playback & lyric state to Desktop Lyric window via IPC
-  useEffect(() => {
-    if (window.electronAPI?.sendDesktopLyricData) {
-      window.electronAPI.sendDesktopLyricData({
-        song: currentSong,
-        currentLyricIndex,
-        lyrics,
-        isPlaying,
-        progressPercent: duration > 0 ? (currentTime / duration) * 100 : 0,
-      });
-    }
-  }, [currentSong, currentLyricIndex, lyrics, isPlaying, currentTime, duration]);
-
-  // Listen to Desktop Lyric Window open/close state
-  useEffect(() => {
-    if (window.electronAPI?.onDesktopLyricState) {
-      const cleanup = window.electronAPI.onDesktopLyricState((isOpen) => {
-        setIsDesktopLyricOpen(isOpen);
-      });
-      return cleanup;
-    }
-  }, [setIsDesktopLyricOpen]);
+  const { autoCheckUpdate } = usePlayerStore();
 
   // Restore NetEase user session on startup if cookie exists
   useEffect(() => {
@@ -95,6 +54,29 @@ export const App: React.FC = () => {
     };
     initSession();
   }, []);
+
+  // Auto check for update from GitHub Releases on application startup
+  useEffect(() => {
+    const checkAutoUpdate = async () => {
+      if (!autoCheckUpdate) return;
+      try {
+        const res = await fetch('https://api.github.com/repos/RubenCampoa/Beta-music-player/releases/latest');
+        if (res.ok) {
+          const data = await res.json();
+          const latestTag = data.tag_name || 'v1.0.3';
+          const currentVersion = 'v1.0.3';
+          if (latestTag !== currentVersion && latestTag !== '1.0.3') {
+            setToastMessage(`发现新版本 ${latestTag}！可在设置中点击检查更新进行查看与升级`);
+          }
+        }
+      } catch {
+        // Silently ignore network error during startup check
+      }
+    };
+
+    const timer = setTimeout(checkAutoUpdate, 1800);
+    return () => clearTimeout(timer);
+  }, [autoCheckUpdate, setToastMessage]);
 
   // Listen to Global Electron Media Controls (Hardware Media Keys & Tray Menu)
   useEffect(() => {
