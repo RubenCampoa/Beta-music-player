@@ -13,9 +13,11 @@ import {
   Music,
   ListMusic,
   Heart,
+  Tv,
 } from 'lucide-react';
 import { usePlayerStore } from '../../store/playerStore';
-import { neteaseApi } from '../../services/neteaseApi';
+import { neteaseApi, getOptimizedCoverUrl } from '../../services/neteaseApi';
+import { formatTime, formatRemainingTime } from '../../utils/format';
 
 export const PlayerBar: React.FC = () => {
   const {
@@ -43,16 +45,19 @@ export const PlayerBar: React.FC = () => {
   } = usePlayerStore();
 
   const [isHoverProgress, setIsHoverProgress] = useState(false);
+  const [isDesktopLyricActive, setIsDesktopLyricActive] = useState(false);
+
+  React.useEffect(() => {
+    if (window.electronAPI?.onDesktopLyricStatusChange) {
+      const cleanup = window.electronAPI.onDesktopLyricStatusChange((active) => {
+        setIsDesktopLyricActive(active);
+      });
+      return cleanup;
+    }
+  }, []);
 
   // Hide bottom floating bar when in full lyrics mode to prevent duplicate controls
   if (isFullLyricsMode) return null;
-
-  const formatTime = (secs: number) => {
-    if (!secs || isNaN(secs)) return '0:00';
-    const m = Math.floor(secs / 60);
-    const s = Math.floor(secs % 60);
-    return `${m}:${s < 10 ? '0' : ''}${s}`;
-  };
 
   const handleProgressSeek = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!duration) return;
@@ -80,8 +85,10 @@ export const PlayerBar: React.FC = () => {
             >
               <div className="relative w-12 h-12 rounded-lg overflow-hidden border border-white/15 shadow-md shrink-0">
                 <img
-                  src={currentSong.coverUrl}
+                  src={getOptimizedCoverUrl(currentSong.coverUrl, 200)}
                   alt={currentSong.name}
+                  loading="lazy"
+                  decoding="async"
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                 />
                 <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
@@ -209,6 +216,19 @@ export const PlayerBar: React.FC = () => {
           title="播放队列"
         >
           <ListMusic className="w-4 h-4" />
+        </button>
+
+        {/* Desktop Lyric Button */}
+        <button
+          onClick={() => window.electronAPI?.toggleDesktopLyric?.()}
+          className={`p-2 rounded-lg transition-all ${
+            isDesktopLyricActive
+              ? 'bg-apple-red text-white shadow-md shadow-apple-red/30 scale-105'
+              : 'text-white/60 hover:bg-white/10 hover:text-white'
+          }`}
+          title="桌面歌词 (网易云同款桌面浮动窗口)"
+        >
+          <Tv className="w-4 h-4" />
         </button>
 
         {/* Lyrics Button */}

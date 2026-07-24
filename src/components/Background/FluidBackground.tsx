@@ -61,6 +61,8 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
     };
   }, [coverUrl]);
 
+  const isPlaying = usePlayerStore((state) => state.isPlaying);
+
   // Fluid Mesh Animation Loop
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -79,11 +81,12 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
     handleResize();
     window.addEventListener('resize', handleResize);
 
-    let isPaused = false;
+    let isTabHidden = document.hidden;
 
     const render = () => {
-      if (!isPaused) {
-        time += 0.006;
+      // Render frame only if tab is visible and music is playing or initial frame
+      if (!isTabHidden && (isPlaying || time === 0)) {
+        if (isPlaying) time += 0.006;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         const width = canvas.width;
@@ -146,7 +149,7 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
     };
 
     const handleVisibilityChange = () => {
-      isPaused = document.hidden;
+      isTabHidden = document.hidden;
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
@@ -157,7 +160,7 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
       window.removeEventListener('resize', handleResize);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, []);
+  }, [isPlaying]);
 
   if (!isFluidBgEnabled) {
     return <div className="fixed inset-0 pointer-events-none z-0 bg-[#0a0a0d]" />;

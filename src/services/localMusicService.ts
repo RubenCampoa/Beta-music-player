@@ -27,16 +27,11 @@ class LocalMusicDatabase extends Dexie {
 export const db = new LocalMusicDatabase();
 
 import jsmediatags from 'jsmediatags/dist/jsmediatags.min.js';
+import { cleanTitle } from '../utils/format';
 
 class LocalMusicService {
   private cleanTitle(str?: string): string {
-    if (!str) return '';
-    let cleaned = str
-      .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200D\uFEFF\u00A0\0]/g, '')
-      .trim();
-    cleaned = cleaned.replace(/[\u0000\0]+/g, '').trim();
-    cleaned = cleaned.replace(/([^\d\s])\s*[0０]$/g, '$1').trim();
-    return cleaned;
+    return cleanTitle(str);
   }
 
   // Extract ID3 Tags (Title, Artist, Album, Cover Artwork) from Blob

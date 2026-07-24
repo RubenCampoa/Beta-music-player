@@ -2,7 +2,7 @@ import React from 'react';
 import { X, Play, Trash2, Music, ListMusic } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePlayerStore } from '../../store/playerStore';
-import { neteaseApi } from '../../services/neteaseApi';
+import { neteaseApi, getOptimizedCoverUrl } from '../../services/neteaseApi';
 
 export const QueueDrawer: React.FC = () => {
   const {
@@ -94,8 +94,10 @@ export const QueueDrawer: React.FC = () => {
                     <div className="flex items-center space-x-3 truncate flex-1 pr-2">
                       <div className="relative w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-white/10">
                         <img
-                          src={song.coverUrl}
+                          src={getOptimizedCoverUrl(song.coverUrl, 100)}
                           alt={song.name}
+                          loading="lazy"
+                          decoding="async"
                           className="w-full h-full object-cover"
                         />
                         {isCurrent && (

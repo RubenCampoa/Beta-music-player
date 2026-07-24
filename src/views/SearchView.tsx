@@ -1,7 +1,7 @@
 import React from 'react';
 import { Search, Play, Music, Sparkles } from 'lucide-react';
 import { usePlayerStore } from '../store/playerStore';
-import { neteaseApi } from '../services/neteaseApi';
+import { neteaseApi, getOptimizedCoverUrl } from '../services/neteaseApi';
 import { Song } from '../types/music';
 
 export const SearchView: React.FC = () => {
@@ -86,8 +86,10 @@ export const SearchView: React.FC = () => {
                     </td>
                     <td className="py-3 px-4 flex items-center space-x-3">
                       <img
-                        src={song.coverUrl}
+                        src={getOptimizedCoverUrl(song.coverUrl, 100)}
                         alt={song.name}
+                        loading="lazy"
+                        decoding="async"
                         className="w-9 h-9 rounded-md object-cover border border-white/10"
                       />
                       <span className="truncate max-w-[220px] text-white font-medium flex items-center space-x-1.5">

@@ -1,4 +1,7 @@
 import { Song, Playlist, UserProfile, LyricLine } from '../types/music';
+import { cleanTitle, getOptimizedCoverUrl } from '../utils/format';
+
+export { cleanTitle, getOptimizedCoverUrl };
 
 // High Availability API Mirror List (Local Primary + High-Speed HTTPS Fallback Mirrors)
 const API_BASE_ENDPOINTS = [
@@ -292,13 +295,7 @@ class NeteaseApiService {
   }
 
   public cleanTitle(str?: string): string {
-    if (!str) return '';
-    let cleaned = str
-      .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200D\uFEFF\u00A0\0]/g, '')
-      .trim();
-    cleaned = cleaned.replace(/[\u0000\0]+/g, '').trim();
-    cleaned = cleaned.replace(/([^\d\s])\s*[0０]$/g, '$1').trim();
-    return cleaned;
+    return cleanTitle(str);
   }
 
   private formatTrackToSong(track: any): Song {

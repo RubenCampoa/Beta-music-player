@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Compass, Flame, Radio, Award, Disc, Play, Sparkles, Music2 } from 'lucide-react';
 import { Song, Playlist } from '../types/music';
 import { usePlayerStore } from '../store/playerStore';
-import { neteaseApi } from '../services/neteaseApi';
+import { neteaseApi, getOptimizedCoverUrl } from '../services/neteaseApi';
 
 export const BrowseView: React.FC = () => {
   const { playSong, setSelectedPlaylist, performSearch } = usePlayerStore();
@@ -144,7 +144,7 @@ export const BrowseView: React.FC = () => {
             >
               <div className="relative w-full aspect-square rounded-xl overflow-hidden border border-white/10 shadow-md">
                 <img
-                  src={pl.coverImgUrl}
+                  src={getOptimizedCoverUrl(pl.coverImgUrl, 300)}
                   alt={pl.name}
                   loading="lazy"
                   decoding="async"
@@ -187,8 +187,10 @@ export const BrowseView: React.FC = () => {
 
                 <div className="relative w-11 h-11 rounded-lg overflow-hidden shrink-0 border border-white/10">
                   <img
-                    src={song.coverUrl}
+                    src={getOptimizedCoverUrl(song.coverUrl, 120)}
                     alt={song.name}
+                    loading="lazy"
+                    decoding="async"
                     className="w-full h-full object-cover"
                   />
                   <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">

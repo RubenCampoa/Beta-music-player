@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Play, Music, ListMusic } from 'lucide-react';
 import { Song } from '../types/music';
 import { usePlayerStore } from '../store/playerStore';
-import { neteaseApi } from '../services/neteaseApi';
+import { neteaseApi, getOptimizedCoverUrl } from '../services/neteaseApi';
 
 export const PlaylistView: React.FC = () => {
   const { selectedPlaylist, playSong, currentSong, isPlaying } = usePlayerStore();
@@ -36,7 +36,7 @@ export const PlaylistView: React.FC = () => {
       <div className="flex items-end space-x-6 glass-panel rounded-2xl p-6 border border-white/10">
         <div className="relative w-40 h-40 rounded-xl overflow-hidden shadow-2xl border border-white/15 shrink-0">
           <img
-            src={selectedPlaylist.coverImgUrl}
+            src={getOptimizedCoverUrl(selectedPlaylist.coverImgUrl, 400)}
             alt={selectedPlaylist.name}
             className="w-full h-full object-cover"
           />
@@ -113,8 +113,10 @@ export const PlaylistView: React.FC = () => {
                     </td>
                     <td className="py-3 px-4 flex items-center space-x-3">
                       <img
-                        src={song.coverUrl}
+                        src={getOptimizedCoverUrl(song.coverUrl, 100)}
                         alt={song.name}
+                        loading="lazy"
+                        decoding="async"
                         className="w-9 h-9 rounded-md object-cover border border-white/10"
                       />
                       <span className="truncate max-w-[220px] text-white font-medium flex items-center space-x-1.5">

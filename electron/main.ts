@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, protocol, net, Tray, Menu, globalShortcut, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, protocol, net, Tray, Menu, globalShortcut, nativeImage, screen } from 'electron';
 import path from 'path';
 import fs from 'fs';
 
@@ -12,6 +12,8 @@ app.commandLine.appendSwitch('enable-gpu-rasterization');
 app.commandLine.appendSwitch('enable-zero-copy');
 app.commandLine.appendSwitch('disable-gpu-vsync');
 app.commandLine.appendSwitch('max-gum-fps', '120');
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512');
+app.commandLine.appendSwitch('enable-features', 'ParallelDownloading,CanvasOopRasterization');
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app-audio', privileges: { secure: true, standard: true, supportFetchAPI: true, stream: true } }
@@ -155,6 +157,14 @@ function createWindow() {
     mainWindow?.focus();
   });
 
+  mainWindow.on('enter-full-screen', () => {
+    mainWindow?.webContents.send('fullscreen-change', true);
+  });
+
+  mainWindow.on('leave-full-screen', () => {
+    mainWindow?.webContents.send('fullscreen-change', false);
+  });
+
   // Windows Close to Tray Behavior
   mainWindow.on('close', (event) => {
     if (!isQuitting) {
@@ -236,11 +246,168 @@ app.on('window-all-closed', () => {
   }
 });
 
+// Desktop Lyric Window Management & IPC Routing
+let desktopLyricWindow: BrowserWindow | null = null;
+let lastDesktopLyricData: any = null;
+let isDesktopLyricLocked = false;
+let hoverCheckInterval: NodeJS.Timeout | null = null;
+let lastHoverState = false;
+
+function startLyricHoverCheck() {
+  if (hoverCheckInterval) return;
+  hoverCheckInterval = setInterval(() => {
+    if (!desktopLyricWindow || desktopLyricWindow.isDestroyed()) {
+      if (hoverCheckInterval) clearInterval(hoverCheckInterval);
+      hoverCheckInterval = null;
+      lastHoverState = false;
+      return;
+    }
+
+    const mousePos = screen.getCursorScreenPoint();
+    const bounds = desktopLyricWindow.getBounds();
+
+    const isInside =
+      mousePos.x >= bounds.x &&
+      mousePos.x <= bounds.x + bounds.width &&
+      mousePos.y >= bounds.y &&
+      mousePos.y <= bounds.y + bounds.height;
+
+    if (isInside !== lastHoverState) {
+      lastHoverState = isInside;
+      desktopLyricWindow.webContents.send('desktop-lyric-hover', isInside);
+    }
+
+    if (isDesktopLyricLocked) {
+      // If cursor is near top bar region (top 45px), allow mouse clicks so Unlock button can be pressed!
+      const isTopBarRegion =
+        mousePos.x >= bounds.x &&
+        mousePos.x <= bounds.x + bounds.width &&
+        mousePos.y >= bounds.y &&
+        mousePos.y <= bounds.y + 45;
+
+      if (isTopBarRegion) {
+        desktopLyricWindow.setIgnoreMouseEvents(false);
+      } else {
+        desktopLyricWindow.setIgnoreMouseEvents(true, { forward: true });
+      }
+    }
+  }, 40);
+}
+
+function createDesktopLyricWindow() {
+  if (desktopLyricWindow && !desktopLyricWindow.isDestroyed()) {
+    if (desktopLyricWindow.isMinimized()) desktopLyricWindow.restore();
+    desktopLyricWindow.show();
+    return;
+  }
+
+  desktopLyricWindow = new BrowserWindow({
+    width: 820,
+    height: 160,
+    minWidth: 420,
+    minHeight: 120,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: true,
+    hasShadow: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      webSecurity: false,
+    },
+    icon: getAppIconPath(),
+  });
+
+  desktopLyricWindow.setAlwaysOnTop(true, 'screen-saver');
+
+  const devUrl = process.env.VITE_DEV_SERVER_URL;
+  const distIndexPath = path.join(__dirname, '../dist/index.html');
+
+  if (devUrl) {
+    desktopLyricWindow.loadURL(`${devUrl}#/desktop-lyric`);
+  } else if (fs.existsSync(distIndexPath)) {
+    desktopLyricWindow.loadFile(distIndexPath, { hash: '/desktop-lyric' });
+  }
+
+  desktopLyricWindow.once('ready-to-show', () => {
+    desktopLyricWindow?.show();
+    if (lastDesktopLyricData) {
+      desktopLyricWindow?.webContents.send('desktop-lyric-data', lastDesktopLyricData);
+    }
+  });
+
+  startLyricHoverCheck();
+
+  desktopLyricWindow.on('closed', () => {
+    desktopLyricWindow = null;
+    isDesktopLyricLocked = false;
+    mainWindow?.webContents.send('desktop-lyric-status-changed', false);
+  });
+}
+
+ipcMain.on('toggle-desktop-lyric', () => {
+  if (desktopLyricWindow && !desktopLyricWindow.isDestroyed()) {
+    desktopLyricWindow.close();
+  } else {
+    createDesktopLyricWindow();
+    mainWindow?.webContents.send('desktop-lyric-status-changed', true);
+  }
+});
+
+ipcMain.on('close-desktop-lyric', () => {
+  if (desktopLyricWindow && !desktopLyricWindow.isDestroyed()) {
+    desktopLyricWindow.close();
+  }
+});
+
+ipcMain.on('set-desktop-lyric-ignore-mouse', (_event, ignore) => {
+  isDesktopLyricLocked = ignore;
+  if (desktopLyricWindow && !desktopLyricWindow.isDestroyed()) {
+    if (ignore) {
+      desktopLyricWindow.setIgnoreMouseEvents(true, { forward: true });
+    } else {
+      desktopLyricWindow.setIgnoreMouseEvents(false);
+    }
+  }
+});
+
+ipcMain.on('sync-desktop-lyric-data', (_event, data) => {
+  lastDesktopLyricData = data;
+  if (desktopLyricWindow && !desktopLyricWindow.isDestroyed()) {
+    desktopLyricWindow.webContents.send('desktop-lyric-data', data);
+  }
+});
+
+ipcMain.on('desktop-lyric-action', (_event, action) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('media-control', action);
+  }
+});
+
+ipcMain.on('move-desktop-lyric-window', (_event, { deltaX, deltaY }) => {
+  if (desktopLyricWindow && !desktopLyricWindow.isDestroyed()) {
+    const [x, y] = desktopLyricWindow.getPosition();
+    desktopLyricWindow.setPosition(x + Math.round(deltaX), y + Math.round(deltaY));
+  }
+});
+
 // Basic Window Controls
 ipcMain.on('window-minimize', () => mainWindow?.minimize());
 ipcMain.on('window-maximize', () => {
   if (mainWindow?.isMaximized()) mainWindow.unmaximize();
   else mainWindow?.maximize();
+});
+ipcMain.on('window-fullscreen', () => {
+  if (mainWindow) {
+    const isFS = mainWindow.isFullScreen();
+    mainWindow.setFullScreen(!isFS);
+  }
+});
+ipcMain.handle('is-window-fullscreen', () => {
+  return mainWindow?.isFullScreen() ?? false;
 });
 ipcMain.on('window-close', () => {
   if (!isQuitting) {

@@ -17,17 +17,82 @@ export const ChangelogView: React.FC = () => {
         </div>
         <div className="px-3 py-1 bg-apple-red/20 rounded-full border border-apple-red/30 text-xs text-apple-red font-semibold flex items-center space-x-1.5">
           <Disc className="w-3.5 h-3.5 animate-spin" />
-          <span>当前版本 v1.0.3</span>
+          <span>当前版本 v1.0.4</span>
         </div>
       </div>
 
-      {/* Release v1.0.3 */}
+      {/* Release v1.0.4 */}
       <section className="glass-panel p-6 rounded-2xl space-y-5 border border-white/15 shadow-2xl relative overflow-hidden">
         <div className="flex items-center justify-between border-b border-white/10 pb-4">
           <div className="flex items-center space-x-3">
-            <span className="text-2xl font-extrabold text-white tracking-tight">v1.0.3</span>
+            <span className="text-2xl font-extrabold text-white tracking-tight">v1.0.4</span>
             <span className="px-2.5 py-0.5 rounded-full bg-apple-red text-white text-[10px] font-bold uppercase tracking-wider shadow-sm">
               最新版本
+            </span>
+          </div>
+          <span className="text-xs font-mono text-white/40">2026-07-24</span>
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-start space-x-3">
+            <CheckCircle2 className="w-5 h-5 text-apple-red shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <h4 className="text-sm font-bold text-white">网易云同款独立桌面歌词 (Desktop Lyrics)</h4>
+              <p className="text-xs text-white/60 leading-relaxed">
+                新增独立透明置顶桌面歌词窗口，支持随屏幕自由拖拽移动、快捷锁定 (鼠标穿透操作背景软件) 与一键解封播控。内置 6 组经典炫彩/霓虹渐变配色方案，支持通过调色板一键切换并自动持久化保存。采用纯正字体光晕与 SVG 投影渲染，彻底消除了文字描边与阴影暗块，支持由下至上连续平滑滚轴重绘与主次字号阶梯对比，最多展示两行歌词，零闪烁。
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-start space-x-3">
+            <CheckCircle2 className="w-5 h-5 text-apple-red shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <h4 className="text-sm font-bold text-white">全屏歌词软件窗口全屏覆盖 (Fullscreen Coverage)</h4>
+              <p className="text-xs text-white/60 leading-relaxed">
+                在全屏歌词模式顶部操控区新增【全屏覆盖 / 取消全屏覆盖】系统窗口掌控按钮，结合 Electron 主进程 enter/leave 原生事件监听，实现界面按钮与 OS 实际窗口状态的 100% 实时双向同步。
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-start space-x-3">
+            <CheckCircle2 className="w-5 h-5 text-apple-red shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <h4 className="text-sm font-bold text-white">音频播控声音平滑淡入淡出 (Audio Fade In & Fade Out)</h4>
+              <p className="text-xs text-white/60 leading-relaxed">
+                为播放、暂停及上下首切歌引入了发烧级余弦曲线音量平滑渐变算法（Ramp Volume Curve），切歌时旧歌声音柔和渐隐、新歌声音平滑渐现，播放/暂停开关无缝缓冲，彻底告别生硬爆音。
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-start space-x-3">
+            <CheckCircle2 className="w-5 h-5 text-apple-red shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <h4 className="text-sm font-bold text-white">VIP 歌曲检测逻辑与高清 CDN 图片缩放优化</h4>
+              <p className="text-xs text-white/60 leading-relaxed">
+                重构 VIP 判定算法，严格过滤 `fee === 8`（仅限 HQ 下载）的免费试听曲目，避免非 VIP 歌曲误标 VIP 标签；全面引入网易云图片 CDN 动态分辨率裁剪，图片传输体积骤降 90% 以上。
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-start space-x-3">
+            <CheckCircle2 className="w-5 h-5 text-apple-red shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <h4 className="text-sm font-bold text-white">启动自动更新检查与共享格式化模块重构</h4>
+              <p className="text-xs text-white/60 leading-relaxed">
+                新增启动自动检测新版本功能，引入 API 时间戳防浏览器 HTTP 缓存，解决重复检测误报；抽取 `src/utils/format.ts` 通用格式化工具模块，精简渲染闭包与冗余逻辑。
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Release v1.0.3 */}
+      <section className="glass-panel p-6 rounded-2xl space-y-5 border border-white/10 opacity-80 hover:opacity-100 transition-opacity relative overflow-hidden">
+        <div className="flex items-center justify-between border-b border-white/10 pb-4">
+          <div className="flex items-center space-x-3">
+            <span className="text-xl font-bold text-white tracking-tight">v1.0.3</span>
+            <span className="px-2 py-0.5 rounded bg-white/10 text-white/70 text-[10px] font-semibold">
+              正式版
             </span>
           </div>
           <span className="text-xs font-mono text-white/40">2026-07-24</span>

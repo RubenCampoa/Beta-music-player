@@ -15,10 +15,13 @@ import {
   Heart,
   Sparkles,
   X,
+  Minimize2,
+  Maximize,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { usePlayerStore } from '../../store/playerStore';
-import { neteaseApi } from '../../services/neteaseApi';
+import { neteaseApi, getOptimizedCoverUrl } from '../../services/neteaseApi';
+import { formatTime, formatRemainingTime } from '../../utils/format';
 
 export const AppleLyricView: React.FC = () => {
   const {
@@ -53,7 +56,24 @@ export const AppleLyricView: React.FC = () => {
   const [activeIndex, setActiveIndex] = useState<number>(-1);
   const [translateY, setTranslateY] = useState<number>(0);
   const [isHoverProgress, setIsHoverProgress] = useState(false);
+  const [isWindowFullScreen, setIsWindowFullScreen] = useState(false);
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  useEffect(() => {
+    if (!isFullLyricsMode) return;
+
+    if (window.electronAPI?.onFullScreenChange) {
+      window.electronAPI.isFullScreen?.().then((fs) => setIsWindowFullScreen(fs));
+      const cleanup = window.electronAPI.onFullScreenChange((fs) => {
+        setIsWindowFullScreen(fs);
+      });
+      return cleanup;
+    } else {
+      const handleFsChange = () => setIsWindowFullScreen(!!document.fullscreenElement);
+      document.addEventListener('fullscreenchange', handleFsChange);
+      return () => document.removeEventListener('fullscreenchange', handleFsChange);
+    }
+  }, [isFullLyricsMode]);
 
   // De-bounce React re-renders to only update activeIndex on line changes
   useEffect(() => {
@@ -115,22 +135,19 @@ export const AppleLyricView: React.FC = () => {
     window.dispatchEvent(new CustomEvent('audio-seek', { detail: seekTime }));
   };
 
-  const formatTime = (secs: number) => {
-    if (!secs || isNaN(secs)) return '0:00';
-    const m = Math.floor(secs / 60);
-    const s = Math.floor(secs % 60);
-    return `${m}:${s < 10 ? '0' : ''}${s}`;
-  };
-
-  const formatRemainingTime = (secs: number, total: number) => {
-    if (!total || isNaN(total)) return '-0:00';
-    const rem = Math.max(0, total - secs);
-    const m = Math.floor(rem / 60);
-    const s = Math.floor(rem % 60);
-    return `-${m}:${s < 10 ? '0' : ''}${s}`;
-  };
-
   const progressPercent = duration ? Math.min(100, (currentTime / duration) * 100) : 0;
+
+  const handleToggleWindowFullScreen = () => {
+    if (window.electronAPI?.toggleFullScreen) {
+      window.electronAPI.toggleFullScreen();
+    } else {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      } else {
+        document.exitFullscreen().catch(() => {});
+      }
+    }
+  };
 
   return (
     <motion.div
@@ -140,25 +157,56 @@ export const AppleLyricView: React.FC = () => {
       transition={{ duration: 0.35, ease: [0.25, 1, 0.5, 1] }}
       className="fixed inset-0 z-50 flex flex-col justify-between p-8 pt-6 pb-8 select-none bg-[#0a0c14]/80 backdrop-blur-3xl overflow-hidden transform-gpu"
     >
-      {/* Top Bar: Pull handle & Close button */}
-      <div className="flex items-center justify-between w-full z-10 px-2">
-        <button
-          onClick={() => setFullLyricsMode(false)}
-          className="w-11 h-11 rounded-full bg-white/10 hover:bg-white/25 text-white/80 hover:text-white flex items-center justify-center transition-all duration-200 backdrop-blur-md border border-white/15 hover:scale-105 active:scale-95 cursor-pointer shadow-md shrink-0"
-          title="退出歌词全景模式 (或按 ESC 键)"
-        >
-          <ChevronDown className="w-6 h-6" />
-        </button>
+      {/* Top Bar: Pull handle & Close buttons (z-50 isolate above lyrics) */}
+      <div className="relative z-50 flex items-center justify-between w-full px-2 no-drag pointer-events-auto">
+        <div className="flex items-center space-x-3 no-drag">
+          <button
+            onClick={() => setFullLyricsMode(false)}
+            className="w-11 h-11 rounded-full bg-white/10 hover:bg-white/25 text-white/80 hover:text-white flex items-center justify-center transition-all duration-200 backdrop-blur-md border border-white/15 hover:scale-105 active:scale-95 cursor-pointer shadow-md shrink-0 no-drag"
+            title="退出歌词全景模式 (或按 ESC 键)"
+          >
+            <ChevronDown className="w-6 h-6" />
+          </button>
+        </div>
 
         <div
           onClick={() => setFullLyricsMode(false)}
-          className="w-16 h-1.5 bg-white/30 hover:bg-white/60 rounded-full cursor-pointer absolute left-1/2 -translate-x-1/2 top-5 transition-all hover:scale-105"
-          title="点击退出歌词全景模式"
+          className="w-20 h-2 bg-white/30 hover:bg-white/60 rounded-full cursor-pointer absolute left-1/2 -translate-x-1/2 top-5 transition-all hover:scale-105 no-drag shadow-sm"
+          title="点击缩小歌词模式"
         />
 
-        <div className="flex items-center space-x-2 text-white/60 text-xs font-semibold bg-black/30 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-white/10 shadow-sm">
-          <Disc className="w-3.5 h-3.5 animate-spin text-apple-red" />
-          <span>Beta Music Player 全景歌词</span>
+        <div className="flex items-center space-x-3 no-drag relative z-[100]">
+          {/* Software Window Fullscreen Toggle Button */}
+          <button
+            onClick={handleToggleWindowFullScreen}
+            className={`flex items-center space-x-1.5 px-3.5 py-1.5 rounded-full border text-xs font-bold backdrop-blur-md transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-md no-drag relative z-[100] pointer-events-auto ${
+              isWindowFullScreen
+                ? 'bg-apple-red text-white border-apple-red shadow-apple-red/30'
+                : 'bg-white/10 hover:bg-white/25 text-white/90 border-white/15'
+            }`}
+            title={isWindowFullScreen ? '取消软件窗口全屏覆盖' : '将软件窗口设置为全屏覆盖模式'}
+          >
+            {isWindowFullScreen ? (
+              <>
+                <Minimize2 className="w-4 h-4" />
+                <span>取消全屏覆盖</span>
+              </>
+            ) : (
+              <>
+                <Maximize className="w-4 h-4 text-emerald-400" />
+                <span>全屏覆盖</span>
+              </>
+            )}
+          </button>
+
+          <button
+            onClick={() => setFullLyricsMode(false)}
+            className="flex items-center space-x-1.5 text-white/80 hover:text-white bg-black/30 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-white/10 shadow-sm transition-colors no-drag"
+            title="关闭全屏歌词界面"
+          >
+            <X className="w-4 h-4 text-white/60 hover:text-red-400 transition-colors" />
+            <span>关闭</span>
+          </button>
         </div>
       </div>
 
@@ -178,7 +226,7 @@ export const AppleLyricView: React.FC = () => {
           >
             {currentSong ? (
               <img
-                src={currentSong.coverUrl}
+                src={getOptimizedCoverUrl(currentSong.coverUrl, 600)}
                 alt={currentSong.name}
                 className="w-full h-full object-cover"
               />

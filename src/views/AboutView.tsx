@@ -16,7 +16,7 @@ export const AboutView: React.FC = () => {
         </div>
         <div className="px-3 py-1 bg-white/5 rounded-full border border-white/10 text-xs text-white/60 font-medium flex items-center space-x-1.5">
           <Disc className="w-3.5 h-3.5 text-apple-red animate-spin" />
-          <span>v1.0.3 正式版</span>
+          <span>v1.0.4 正式版</span>
         </div>
       </div>
 

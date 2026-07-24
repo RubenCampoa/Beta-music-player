@@ -6,6 +6,7 @@ import { QueueDrawer } from './components/Player/QueueDrawer';
 import { AudioController } from './components/Player/AudioController';
 import { FluidBackground } from './components/Background/FluidBackground';
 import { AppleLyricView } from './components/Lyrics/AppleLyricView';
+import { DesktopLyricView } from './components/Lyrics/DesktopLyricView';
 import { LoginModal } from './components/Login/LoginModal';
 
 import { ListenNowView } from './views/ListenNowView';
@@ -23,8 +24,13 @@ import { neteaseApi } from './services/neteaseApi';
 import { AlertCircle, Crown, Heart, CheckCircle2 } from 'lucide-react';
 
 export const App: React.FC = () => {
+  const isDesktopLyricWindow = window.location.hash.includes('desktop-lyric');
+
   const {
     currentSong,
+    currentTime,
+    lyrics,
+    isPlaying,
     isFullLyricsMode,
     activeTab,
     setUser,
@@ -38,6 +44,22 @@ export const App: React.FC = () => {
   } = usePlayerStore();
 
   const { autoCheckUpdate } = usePlayerStore();
+
+  // Continuously sync lyric data to Electron main process for Desktop Lyric Window
+  useEffect(() => {
+    if (window.electronAPI?.sendDesktopLyricData) {
+      window.electronAPI.sendDesktopLyricData({
+        currentSong,
+        lyrics,
+        currentTime,
+        isPlaying,
+      });
+    }
+  }, [currentSong, lyrics, currentTime, isPlaying]);
+
+  if (isDesktopLyricWindow) {
+    return <DesktopLyricView />;
+  }
 
   // Restore NetEase user session on startup if cookie exists
   useEffect(() => {
@@ -60,12 +82,18 @@ export const App: React.FC = () => {
     const checkAutoUpdate = async () => {
       if (!autoCheckUpdate) return;
       try {
-        const res = await fetch('https://api.github.com/repos/RubenCampoa/Beta-music-player/releases/latest');
+        const res = await fetch(`https://api.github.com/repos/RubenCampoa/Beta-music-player/releases/latest?t=${Date.now()}`, {
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+          },
+        });
         if (res.ok) {
           const data = await res.json();
-          const latestTag = data.tag_name || 'v1.0.3';
-          const currentVersion = 'v1.0.3';
-          if (latestTag !== currentVersion && latestTag !== '1.0.3') {
+          const latestTag = (data.tag_name || '').trim();
+          const currentVersion = 'v1.0.4';
+          const normalize = (v: string) => v.replace(/^v/i, '').trim();
+          if (latestTag && normalize(latestTag) !== normalize(currentVersion)) {
             setToastMessage(`发现新版本 ${latestTag}！可在设置中点击检查更新进行查看与升级`);
           }
         }
@@ -168,6 +196,8 @@ export const App: React.FC = () => {
               <Crown className="w-5 h-5 text-amber-400 shrink-0 animate-bounce" />
             ) : toastMessage.includes('收藏') ? (
               <Heart className="w-5 h-5 text-apple-red fill-current shrink-0 animate-pulse" />
+            ) : toastMessage.includes('频繁') || toastMessage.includes('失败') || toastMessage.includes('错误') || toastMessage.includes('限') ? (
+              <AlertCircle className="w-5 h-5 text-amber-400 shrink-0" />
             ) : (
               <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
             )}

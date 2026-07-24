@@ -15,6 +15,7 @@ import {
   Activity,
   Sun,
   Layers,
+  Settings,
 } from 'lucide-react';
 import { usePlayerStore } from '../store/playerStore';
 import { neteaseApi } from '../services/neteaseApi';
@@ -42,6 +43,8 @@ export const SettingsView: React.FC = () => {
     setAutoCheckUpdate,
   } = usePlayerStore();
 
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+
   const [audioQuality, setAudioQuality] = useState<'standard' | 'high' | 'lossless'>('high');
 
   const handleLogout = () => {
@@ -67,41 +70,88 @@ export const SettingsView: React.FC = () => {
   const handleCheckUpdate = async () => {
     setToastMessage('正在从 GitHub 检查最新版本...');
     try {
-      const res = await fetch('https://api.github.com/repos/RubenCampoa/Beta-music-player/releases/latest');
-      if (!res.ok) {
-        throw new Error('未获取到 Release 版本信息');
-      }
-      const data = await res.json();
-      const latestTag = data.tag_name || 'v1.0.3';
-      const currentVersion = 'v1.0.3';
+      // Append cache buster timestamp to prevent browser 304/stale cache
+      const res = await fetch(
+        `https://api.github.com/repos/RubenCampoa/Beta-music-player/releases/latest?t=${Date.now()}`,
+        {
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+          },
+        }
+      );
 
-      if (latestTag !== currentVersion && latestTag !== '1.0.3') {
-        setToastMessage(`发现新版本 ${latestTag}！正在为你打开 GitHub...`);
+      if (res.status === 403) {
+        const currentVersion = 'v1.0.4';
+        const normalize = (v: string) => v.replace(/^v/i, '').trim();
+        try {
+          const rawRes = await fetch(
+            `https://raw.githubusercontent.com/RubenCampoa/Beta-music-player/main/package.json?t=${Date.now()}`
+          );
+          if (rawRes.ok) {
+            const pkg = await rawRes.json();
+            const latestTag = `v${pkg.version}`;
+            if (normalize(latestTag) !== normalize(currentVersion)) {
+              setToastMessage(`发现新版本 ${latestTag}！可在设置中点击检查更新进行查看与升级`);
+              window.open('https://github.com/RubenCampoa/Beta-music-player/releases', '_blank');
+            } else {
+              setToastMessage(`当前已经是最新版本 (${currentVersion})`);
+            }
+            return;
+          }
+        } catch {
+          // Ignore raw fallback error
+        }
+        setToastMessage('GitHub API 请求过于频繁，请稍后再试');
+        return;
+      }
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      const latestTag = (data.tag_name || '').trim();
+      const currentVersion = 'v1.0.4';
+
+      const normalize = (v: string) => v.replace(/^v/i, '').trim();
+
+      if (latestTag && normalize(latestTag) !== normalize(currentVersion)) {
+        setToastMessage(`发现新版本 ${latestTag}！可在设置中点击检查更新进行查看与升级`);
         if (data.html_url) {
           window.open(data.html_url, '_blank');
         }
       } else {
-        setToastMessage(`当前已是最新版本 (v1.0.3)`);
+        setToastMessage(`当前已经是最新版本 (${currentVersion})`);
       }
-    } catch {
-      setToastMessage('当前已是最新版本 (v1.0.3)');
+    } catch (err: any) {
+      console.error('Failed to check update:', err);
+      setToastMessage('检查更新失败，请检查网络连接');
+    } finally {
+      setIsCheckingUpdate(false);
     }
   };
 
   return (
     <div className="flex-1 overflow-y-auto p-8 space-y-8 max-w-4xl mx-auto select-none pb-32 animate-fadeIn">
-      {/* Page Title */}
+      {/* Header */}
       <div className="flex items-center justify-between border-b border-white/10 pb-4">
         <div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">设置</h1>
-          <p className="text-sm text-white/50 mt-1">管理你的播放器偏好、音质输出与全套动效开关</p>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight flex items-center space-x-3">
+            <Settings className="w-8 h-8 text-apple-red" />
+            <span>系统设置</span>
+          </h1>
+          <p className="text-sm text-white/50 mt-1">
+            偏好设置、播放器行为与软件关于信息
+          </p>
         </div>
         <div className="flex items-center space-x-3">
           <div className="px-3 py-1 bg-white/5 rounded-full border border-white/10 text-xs text-white/60 font-medium">
-            Beta Music Player v1.0.3
+            Beta Music Player v1.0.4
           </div>
           <button
             onClick={handleCheckUpdate}
+            disabled={isCheckingUpdate}
             className="px-3 py-1 bg-apple-red/80 hover:bg-apple-red text-white rounded-full text-xs font-semibold shadow-sm transition-all flex items-center space-x-1"
           >
             <Sparkles className="w-3.5 h-3.5" />
