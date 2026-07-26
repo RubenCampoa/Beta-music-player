@@ -11,6 +11,8 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
   isFullLyricsMode = false,
 }) => {
   const isFluidBgEnabled = usePlayerStore((state) => state.isFluidBgEnabled);
+  const isPlaying = usePlayerStore((state) => state.isPlaying);
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const colorsRef = useRef<string[]>([
     '#ff2d55', '#5856d6', '#af52de', '#ff9500'
@@ -61,16 +63,16 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
     };
   }, [coverUrl]);
 
-  const isPlaying = usePlayerStore((state) => state.isPlaying);
-
-  // Fluid Mesh Animation Loop
+  // Ultra-optimized Fluid Mesh Animation Loop (Zero CPU/GPU usage when paused or tab hidden)
   useEffect(() => {
+    if (!isFluidBgEnabled) return;
+
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    let animationFrameId: number;
+    let animationFrameId: number | null = null;
     let time = 0;
 
     const handleResize = () => {
@@ -81,86 +83,104 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
     handleResize();
     window.addEventListener('resize', handleResize);
 
-    let isTabHidden = document.hidden;
+    const drawFrame = () => {
+      if (isPlaying) time += 0.006;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const render = () => {
-      // Render frame only if tab is visible and music is playing or initial frame
-      if (!isTabHidden && (isPlaying || time === 0)) {
-        if (isPlaying) time += 0.006;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const width = canvas.width;
+      const height = canvas.height;
+      const colors = colorsRef.current;
 
-        const width = canvas.width;
-        const height = canvas.height;
-        const colors = colorsRef.current;
+      // Draw dark underlying base
+      ctx.fillStyle = '#0f0f12';
+      ctx.fillRect(0, 0, width, height);
 
-        // Draw dark underlying base
-        ctx.fillStyle = '#0f0f12';
-        ctx.fillRect(0, 0, width, height);
+      // Blobs trajectories
+      const blobs = [
+        {
+          x: width * (0.3 + 0.2 * Math.sin(time * 0.8)),
+          y: height * (0.3 + 0.2 * Math.cos(time * 0.6)),
+          r: width * 0.5,
+          color: colors[0] || '#ff2d55',
+        },
+        {
+          x: width * (0.7 + 0.2 * Math.cos(time * 0.7)),
+          y: height * (0.4 + 0.25 * Math.sin(time * 0.9)),
+          r: width * 0.55,
+          color: colors[1] || '#5856d6',
+        },
+        {
+          x: width * (0.4 + 0.25 * Math.sin(time * 0.5 + 1)),
+          y: height * (0.7 + 0.2 * Math.cos(time * 0.8)),
+          r: width * 0.45,
+          color: colors[2] || '#af52de',
+        },
+        {
+          x: width * (0.8 + 0.15 * Math.cos(time * 1.1)),
+          y: height * (0.8 + 0.15 * Math.sin(time * 0.7)),
+          r: width * 0.4,
+          color: colors[3] || '#ff9500',
+        },
+      ];
 
-        // Blobs trajectories
-        const blobs = [
-          {
-            x: width * (0.3 + 0.2 * Math.sin(time * 0.8)),
-            y: height * (0.3 + 0.2 * Math.cos(time * 0.6)),
-            r: width * 0.5,
-            color: colors[0] || '#ff2d55',
-          },
-          {
-            x: width * (0.7 + 0.2 * Math.cos(time * 0.7)),
-            y: height * (0.4 + 0.25 * Math.sin(time * 0.9)),
-            r: width * 0.55,
-            color: colors[1] || '#5856d6',
-          },
-          {
-            x: width * (0.4 + 0.25 * Math.sin(time * 0.5 + 1)),
-            y: height * (0.7 + 0.2 * Math.cos(time * 0.8)),
-            r: width * 0.45,
-            color: colors[2] || '#af52de',
-          },
-          {
-            x: width * (0.8 + 0.15 * Math.cos(time * 1.1)),
-            y: height * (0.8 + 0.15 * Math.sin(time * 0.7)),
-            r: width * 0.4,
-            color: colors[3] || '#ff9500',
-          },
-        ];
+      blobs.forEach((blob) => {
+        const gradient = ctx.createRadialGradient(
+          blob.x,
+          blob.y,
+          0,
+          blob.x,
+          blob.y,
+          blob.r
+        );
+        gradient.addColorStop(0, blob.color);
+        gradient.addColorStop(1, 'transparent');
 
-        blobs.forEach((blob) => {
-          const gradient = ctx.createRadialGradient(
-            blob.x,
-            blob.y,
-            0,
-            blob.x,
-            blob.y,
-            blob.r
-          );
-          gradient.addColorStop(0, blob.color);
-          gradient.addColorStop(1, 'transparent');
-
-          ctx.fillStyle = gradient;
-          ctx.globalCompositeOperation = 'screen';
-          ctx.beginPath();
-          ctx.arc(blob.x, blob.y, blob.r, 0, Math.PI * 2);
-          ctx.fill();
-        });
-      }
-
-      animationFrameId = requestAnimationFrame(render);
+        ctx.fillStyle = gradient;
+        ctx.globalCompositeOperation = 'screen';
+        ctx.beginPath();
+        ctx.arc(blob.x, blob.y, blob.r, 0, Math.PI * 2);
+        ctx.fill();
+      });
     };
 
+    const renderLoop = () => {
+      if (document.hidden) {
+        animationFrameId = null;
+        return;
+      }
+
+      drawFrame();
+
+      if (isPlaying) {
+        animationFrameId = requestAnimationFrame(renderLoop);
+      } else {
+        animationFrameId = null;
+      }
+    };
+
+    // Draw initial static frame
+    drawFrame();
+
+    // Start animation loop only if playing and visible
+    if (isPlaying && !document.hidden) {
+      renderLoop();
+    }
+
     const handleVisibilityChange = () => {
-      isTabHidden = document.hidden;
+      if (!document.hidden && isPlaying && animationFrameId === null) {
+        renderLoop();
+      }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    render();
-
     return () => {
-      cancelAnimationFrame(animationFrameId);
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+      }
       window.removeEventListener('resize', handleResize);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [isPlaying]);
+  }, [isPlaying, isFluidBgEnabled]);
 
   if (!isFluidBgEnabled) {
     return <div className="fixed inset-0 pointer-events-none z-0 bg-[#0a0a0d]" />;

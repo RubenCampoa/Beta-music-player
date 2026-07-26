@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { TitleBar } from './components/TitleBar/TitleBar';
 import { Sidebar } from './components/Sidebar/Sidebar';
 import { PlayerBar } from './components/Player/PlayerBar';
@@ -45,9 +45,26 @@ export const App: React.FC = () => {
 
   const { autoCheckUpdate } = usePlayerStore();
 
-  // Continuously sync lyric data to Electron main process for Desktop Lyric Window
+  // Continuously sync lyric data to Electron main process for Desktop Lyric Window (Throttled for ultra-low IPC overhead)
+  const lastSyncRef = useRef<{ time: number; songId: string | number | null; isPlaying: boolean }>({
+    time: 0,
+    songId: null,
+    isPlaying: false,
+  });
+
   useEffect(() => {
-    if (window.electronAPI?.sendDesktopLyricData) {
+    if (!window.electronAPI?.sendDesktopLyricData) return;
+
+    const now = Date.now();
+    const songId = currentSong?.id || null;
+    const timeDelta = now - lastSyncRef.current.time;
+    const isStateChanged =
+      lastSyncRef.current.songId !== songId ||
+      lastSyncRef.current.isPlaying !== isPlaying;
+
+    // Send IPC update every 120ms or immediately on song/play state change
+    if (timeDelta >= 120 || isStateChanged) {
+      lastSyncRef.current = { time: now, songId, isPlaying };
       window.electronAPI.sendDesktopLyricData({
         currentSong,
         lyrics,

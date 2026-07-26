@@ -256,7 +256,7 @@ let lastHoverState = false;
 function startLyricHoverCheck() {
   if (hoverCheckInterval) return;
   hoverCheckInterval = setInterval(() => {
-    if (!desktopLyricWindow || desktopLyricWindow.isDestroyed()) {
+    if (!desktopLyricWindow || desktopLyricWindow.isDestroyed() || !desktopLyricWindow.isVisible()) {
       if (hoverCheckInterval) clearInterval(hoverCheckInterval);
       hoverCheckInterval = null;
       lastHoverState = false;
