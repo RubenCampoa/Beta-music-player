@@ -46,7 +46,7 @@ export const App: React.FC = () => {
   const { autoCheckUpdate } = usePlayerStore();
 
   // Continuously sync lyric data to Electron main process for Desktop Lyric Window (Throttled for ultra-low IPC overhead)
-  const lastSyncRef = useRef<{ time: number; songId: string | number | null; isPlaying: boolean }>({
+  const lastSyncRef = React.useRef<{ time: number; songId: string | number | null; isPlaying: boolean }>({
     time: 0,
     songId: null,
     isPlaying: false,
