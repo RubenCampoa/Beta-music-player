@@ -26,6 +26,8 @@ class NeteaseApiService {
 
   public clearCookie() {
     this.cookie = '';
+    this.audioUrlCache.clear();
+    this.activeBaseIndex = 0;
     localStorage.removeItem('netease_cookie');
   }
 
@@ -274,7 +276,9 @@ class NeteaseApiService {
       return cached.url;
     }
 
-    const levels = [level, 'exhigh', 'standard'];
+    // Non-VIP tracks should start from standard quality instead of waiting
+    // for lossless/exhigh requests that are unavailable to the account.
+    const levels = Array.from(new Set([level, 'exhigh', 'standard']));
 
     // 1. Try official NetEase /song/url/v1 with authenticated VIP Cookie
     for (const lvl of levels) {

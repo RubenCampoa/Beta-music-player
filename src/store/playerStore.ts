@@ -177,23 +177,26 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
     const queueIndex = queue.findIndex((s) => s.id === song.id);
     const isNeteaseSong = song.source === 'netease' && Boolean(song.neteaseId);
+    const canPlayPublicly = isNeteaseSong && !isVipSong && !neteaseApi.getCookie();
+    const shouldResolveAudio = isNeteaseSong && !canPlayPublicly;
 
     set({
       // Do not start the temporary outer URL and then swap it for the
       // authenticated URL. That source replacement is the audible stutter
       // users hear on VIP tracks.
-      currentSong: isNeteaseSong ? { ...song, audioUrl: '' } : song,
+      currentSong: shouldResolveAudio ? { ...song, audioUrl: '' } : song,
       queue,
       queueIndex,
-      isPlaying: !isNeteaseSong,
+      isPlaying: !shouldResolveAudio,
       currentTime: 0,
     });
 
     // Fetch authenticated high-quality VIP audio stream URL & lyrics concurrently
-    if (isNeteaseSong && song.neteaseId) {
+    if (shouldResolveAudio && song.neteaseId) {
       // Resolve playback independently from lyrics. Waiting for Promise.all
       // made a slow lyrics request delay an already available VIP audio URL.
-      neteaseApi.getSongAudioUrl(song.neteaseId, 'lossless').then((fetchedUrl) => {
+      const preferredLevel = song.isVip || song.fee === 1 ? 'lossless' : 'standard';
+      neteaseApi.getSongAudioUrl(song.neteaseId, preferredLevel).then((fetchedUrl) => {
         set((state) => state.currentSong?.id === song.id
           ? fetchedUrl
             ? {
