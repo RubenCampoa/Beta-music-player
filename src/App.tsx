@@ -108,7 +108,7 @@ export const App: React.FC = () => {
         if (res.ok) {
           const data = await res.json();
           const latestTag = (data.tag_name || '').trim();
-          const currentVersion = 'v1.0.4';
+          const currentVersion = 'v1.0.5';
           const normalize = (v: string) => v.replace(/^v/i, '').trim();
           if (latestTag && normalize(latestTag) !== normalize(currentVersion)) {
             setToastMessage(`发现新版本 ${latestTag}！可在设置中点击检查更新进行查看与升级`);

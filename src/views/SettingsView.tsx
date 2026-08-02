@@ -82,7 +82,7 @@ export const SettingsView: React.FC = () => {
       );
 
       if (res.status === 403) {
-        const currentVersion = 'v1.0.4';
+        const currentVersion = 'v1.0.5';
         const normalize = (v: string) => v.replace(/^v/i, '').trim();
         try {
           const rawRes = await fetch(
@@ -112,7 +112,7 @@ export const SettingsView: React.FC = () => {
 
       const data = await res.json();
       const latestTag = (data.tag_name || '').trim();
-      const currentVersion = 'v1.0.4';
+      const currentVersion = 'v1.0.5';
 
       const normalize = (v: string) => v.replace(/^v/i, '').trim();
 
@@ -147,7 +147,7 @@ export const SettingsView: React.FC = () => {
         </div>
         <div className="flex items-center space-x-3">
           <div className="px-3 py-1 bg-white/5 rounded-full border border-white/10 text-xs text-white/60 font-medium">
-            Beta Music Player v1.0.4
+            Beta Music Player v1.0.5
           </div>
           <button
             onClick={handleCheckUpdate}

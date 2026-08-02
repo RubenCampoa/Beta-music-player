@@ -17,9 +17,28 @@ export const ChangelogView: React.FC = () => {
         </div>
         <div className="px-3 py-1 bg-apple-red/20 rounded-full border border-apple-red/30 text-xs text-apple-red font-semibold flex items-center space-x-1.5">
           <Disc className="w-3.5 h-3.5 animate-spin" />
-          <span>当前版本 v1.0.4</span>
+          <span>当前版本 v1.0.5</span>
         </div>
       </div>
+
+      {/* Release v1.0.5 */}
+      <section className="glass-panel p-6 rounded-2xl space-y-5 border border-apple-red/30 shadow-2xl relative overflow-hidden">
+        <div className="flex items-center justify-between border-b border-white/10 pb-4">
+          <div className="flex items-center space-x-3">
+            <span className="text-2xl font-extrabold text-white tracking-tight">v1.0.5</span>
+            <span className="px-2.5 py-0.5 rounded-full bg-apple-red text-white text-[10px] font-bold uppercase tracking-wider shadow-sm">
+              最新版本
+            </span>
+          </div>
+          <span className="text-xs font-mono text-white/40">2026-08-02</span>
+        </div>
+        <div className="space-y-2 text-xs text-white/70 leading-relaxed">
+          <p>• 新增纯歌词全屏模式与经典双栏歌词模式切换。</p>
+          <p>• 桌面歌词支持长歌词自动横向滚动显示。</p>
+          <p>• 优化网易云 VIP 音源鉴权、解析、缓存与播放启动速度。</p>
+          <p>• 修复 VIP 音源解析失败停留在 0:00、Cookie 外发和音频切换卡顿问题。</p>
+        </div>
+      </section>
 
       {/* Release v1.0.4 */}
       <section className="glass-panel p-6 rounded-2xl space-y-5 border border-white/15 shadow-2xl relative overflow-hidden">

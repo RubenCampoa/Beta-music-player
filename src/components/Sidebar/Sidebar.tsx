@@ -142,7 +142,7 @@ export const Sidebar: React.FC = () => {
       {/* Footer Info */}
       <div className="px-3 py-2 border-t border-white/10 text-[11px] text-white/40 flex items-center justify-between">
         <span>Beta music player</span>
-        <span className="bg-white/10 text-white/60 px-1.5 py-0.5 rounded text-[9px]">v1.0.4</span>
+        <span className="bg-white/10 text-white/60 px-1.5 py-0.5 rounded text-[9px]">v1.0.5</span>
       </div>
     </aside>
   );
