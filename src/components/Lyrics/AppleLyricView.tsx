@@ -63,7 +63,6 @@ export const AppleLyricView: React.FC = () => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
   const userScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const scrollAnimRef = useRef<number | null>(null);
 
   // Synchronous active index calculation (150ms natural vocal alignment offset)
   const syncTime = currentTime + 0.15;
@@ -97,10 +96,6 @@ export const AppleLyricView: React.FC = () => {
 
   // Handle user manual scroll interaction (pause auto-scroll for 4s)
   const handleUserScroll = () => {
-    if (scrollAnimRef.current !== null) {
-      cancelAnimationFrame(scrollAnimRef.current);
-      scrollAnimRef.current = null;
-    }
     setIsUserScrolling(true);
     if (userScrollTimeoutRef.current) clearTimeout(userScrollTimeoutRef.current);
     userScrollTimeoutRef.current = setTimeout(() => {
@@ -108,43 +103,16 @@ export const AppleLyricView: React.FC = () => {
     }, 4000);
   };
 
-  // Apple Music Signature Custom Fluid Scroll Engine (easeOutQuart, 750ms)
+  // Let Chromium perform the scroll on its compositor thread. Driving
+  // scrollTop with requestAnimationFrame here competed with Framer Motion's
+  // lyric transitions and caused a visible pause before each line changed.
   const animateContainerScroll = (container: HTMLElement, targetTop: number, smooth: boolean = true) => {
-    if (scrollAnimRef.current !== null) {
-      cancelAnimationFrame(scrollAnimRef.current);
-      scrollAnimRef.current = null;
-    }
-
     if (!smooth) {
       container.scrollTop = targetTop;
       return;
     }
-
-    const startTop = container.scrollTop;
-    const distance = targetTop - startTop;
-    if (Math.abs(distance) < 1) return;
-
-    const durationMs = 750;
-    const startTime = performance.now();
-
-    const step = (now: number) => {
-      const elapsed = now - startTime;
-      const progress = Math.min(1, elapsed / durationMs);
-      // Apple Music Signature Fluid Ease Out Quart
-      const ease = 1 - Math.pow(1 - progress, 4);
-
-      if (containerRef.current) {
-        containerRef.current.scrollTop = startTop + distance * ease;
-      }
-
-      if (progress < 1) {
-        scrollAnimRef.current = requestAnimationFrame(step);
-      } else {
-        scrollAnimRef.current = null;
-      }
-    };
-
-    scrollAnimRef.current = requestAnimationFrame(step);
+    if (Math.abs(targetTop - container.scrollTop) < 1) return;
+    container.scrollTo({ top: targetTop, behavior: 'smooth' });
   };
 
   // Center active lyric line in container smoothly
@@ -508,15 +476,15 @@ export const AppleLyricView: React.FC = () => {
                           ref={(el) => (lineRefs.current[idx] = el)}
                           onClick={() => handleLyricClick(line.time)}
                           animate={{
-                            scale: isActive ? 1.04 : 0.97,
+                            scale: isActive ? 1.03 : 0.97,
                             opacity: targetOpacity,
                             filter: `blur(${targetBlur}px)`,
                           }}
                           transition={{
-                            duration: enableLyricAnimation ? 0.75 : 0.05,
-                            ease: [0.16, 1, 0.3, 1],
+                            duration: enableLyricAnimation ? 0.32 : 0.05,
+                            ease: [0.22, 1, 0.36, 1],
                           }}
-                          className="cursor-pointer text-left origin-left space-y-1 py-1 px-2 -mx-2 transition-colors hover:opacity-100 max-w-full break-words"
+                        className="cursor-pointer text-left origin-left space-y-1 py-1 px-2 -mx-2 hover:opacity-100 max-w-full break-words"
                         >
                           {/* Main Lyric Line */}
                           <div
@@ -606,15 +574,15 @@ export const AppleLyricView: React.FC = () => {
                         ref={(el) => (lineRefs.current[idx] = el)}
                         onClick={() => handleLyricClick(line.time)}
                         animate={{
-                          scale: isActive ? 1.05 : 0.96,
+                          scale: isActive ? 1.04 : 0.96,
                           opacity: targetOpacity,
                           filter: `blur(${targetBlur}px)`,
                         }}
                         transition={{
-                          duration: enableLyricAnimation ? 0.75 : 0.05,
-                          ease: [0.16, 1, 0.3, 1],
+                          duration: enableLyricAnimation ? 0.32 : 0.05,
+                          ease: [0.22, 1, 0.36, 1],
                         }}
-                        className="cursor-pointer text-center origin-center space-y-2 py-1 px-2 -mx-2 transition-colors hover:opacity-100 max-w-3xl break-words"
+                        className="cursor-pointer text-center origin-center space-y-2 py-1 px-2 -mx-2 hover:opacity-100 max-w-3xl break-words"
                       >
                         {/* Giant Centered Main Line */}
                         <div
