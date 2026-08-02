@@ -120,11 +120,12 @@ function registerGlobalMediaShortcuts() {
 
 function getAppIconPath() {
   const possibleIconPaths = [
+    // Use the same source as the installer icon in every packaged window.
+    path.join(app.getAppPath(), 'public/icon.png'),
     path.join(__dirname, '../public/icon.png'),
     path.join(__dirname, '../dist/icon.png'),
     path.join(process.resourcesPath, 'public/icon.png'),
     path.join(process.resourcesPath, 'dist/icon.png'),
-    path.join(app.getAppPath(), 'public/icon.png'),
     path.join(app.getAppPath(), 'dist/icon.png'),
   ];
   for (const p of possibleIconPaths) {

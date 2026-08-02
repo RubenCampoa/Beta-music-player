@@ -15,6 +15,18 @@
     "directories": {
       "output": "release"
     },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json",
+      "public/icon.png",
+      "!**/*.map",
+      "!android/**",
+      "!src/**",
+      "!electron/**",
+      "!build/**",
+      "!release/**"
+    ],
     "extraResources": [
       "public/icon.png"
     ],

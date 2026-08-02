@@ -191,29 +191,32 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       currentTime: 0,
     });
 
-    // Fetch authenticated high-quality VIP audio stream URL & lyrics concurrently
-    if (shouldResolveAudio && song.neteaseId) {
-      // Resolve playback independently from lyrics. Waiting for Promise.all
-      // made a slow lyrics request delay an already available VIP audio URL.
-      const preferredLevel = song.isVip || song.fee === 1 ? 'lossless' : 'standard';
-      neteaseApi.getSongAudioUrl(song.neteaseId, preferredLevel).then((fetchedUrl) => {
-        set((state) => state.currentSong?.id === song.id
-          ? fetchedUrl
-            ? {
-                currentSong: { ...state.currentSong, audioUrl: fetchedUrl },
-                isPlaying: true,
-              }
-            : {
-                isPlaying: false,
-                toastMessage: 'VIP 音源解析失败，请重新登录网易云账号后重试',
-              }
-          : {});
-      }).catch(() => {
-        // Do not silently switch to an unplayable public outer link.
-        set((state) => state.currentSong?.id === song.id
-          ? { isPlaying: false, toastMessage: 'VIP 音源解析失败，请检查本地 API 或重新登录' }
-          : {});
-      });
+    // Lyrics are available for every NetEase track, regardless of whether it
+    // uses a public stream or an authenticated VIP stream.
+    if (isNeteaseSong && song.neteaseId) {
+      if (shouldResolveAudio) {
+        // Resolve playback independently from lyrics. Waiting for Promise.all
+        // made a slow lyrics request delay an already available VIP audio URL.
+        const preferredLevel = song.isVip || song.fee === 1 ? 'lossless' : 'standard';
+        neteaseApi.getSongAudioUrl(song.neteaseId, preferredLevel).then((fetchedUrl) => {
+          set((state) => state.currentSong?.id === song.id
+            ? fetchedUrl
+              ? {
+                  currentSong: { ...state.currentSong, audioUrl: fetchedUrl },
+                  isPlaying: true,
+                }
+              : {
+                  isPlaying: false,
+                  toastMessage: 'VIP 音源解析失败，请重新登录网易云账号后重试',
+                }
+            : {});
+        }).catch(() => {
+          // Do not silently switch to an unplayable public outer link.
+          set((state) => state.currentSong?.id === song.id
+            ? { isPlaying: false, toastMessage: 'VIP 音源解析失败，请检查本地 API 或重新登录' }
+            : {});
+        });
+      }
 
       neteaseApi.getSongLyrics(song.neteaseId).then((fetchedLyrics) => {
         set((state) => state.currentSong?.id === song.id ? { lyrics: fetchedLyrics } : {});
