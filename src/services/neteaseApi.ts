@@ -13,6 +13,7 @@ const API_BASE_ENDPOINTS = [
 class NeteaseApiService {
   private cookie: string = localStorage.getItem('netease_cookie') || '';
   private activeBaseIndex: number = 0;
+  private audioUrlCache = new Map<string, { url: string; expiresAt: number }>();
 
   public setCookie(cookie: string) {
     this.cookie = cookie;
@@ -28,33 +29,44 @@ class NeteaseApiService {
     localStorage.removeItem('netease_cookie');
   }
 
-  // Resilient fetchApi with automatic failover mirror switching
-  private async fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  // Resilient fetchApi with automatic failover mirror switching.
+  // VIP URL generation can take several seconds while the API performs
+  // encryption and account entitlement checks, so a 2.5s timeout is too short.
+  private async fetchApi<T>(endpoint: string, options: RequestInit = {}, timeoutMs = 10000): Promise<T> {
     const hasQuery = endpoint.includes('?');
+    // Authenticated requests must stay on the bundled local API. Sending a
+    // MUSIC_U cookie to public mirrors exposes the user's account session.
+    const endpointIndexes = this.cookie ? [0] : API_BASE_ENDPOINTS.map((_, index) => index);
 
-    for (let i = 0; i < API_BASE_ENDPOINTS.length; i++) {
-      const idx = (this.activeBaseIndex + i) % API_BASE_ENDPOINTS.length;
+    for (const offset of endpointIndexes) {
+      const idx = this.cookie ? 0 : (this.activeBaseIndex + offset) % API_BASE_ENDPOINTS.length;
       const baseUrl = API_BASE_ENDPOINTS[idx];
       let url = `${baseUrl}${endpoint}${hasQuery ? '&' : '?'}timestamp=${Date.now()}`;
 
-      if (this.cookie) {
+      if (this.cookie && idx === 0) {
         url += `&cookie=${encodeURIComponent(this.cookie)}`;
       }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
       try {
         const response = await fetch(url, {
           ...options,
+          signal: controller.signal,
           headers: {
             'Content-Type': 'application/json',
             ...(options.headers || {}),
           },
         });
+        clearTimeout(timeoutId);
 
         if (response.ok) {
           this.activeBaseIndex = idx; // Lock on working API endpoint
           return await response.json();
         }
       } catch (error) {
+        clearTimeout(timeoutId);
         console.warn(`NetEase API endpoint attempt failed [${baseUrl}${endpoint}], trying next mirror...`);
       }
     }
@@ -100,12 +112,37 @@ class NeteaseApiService {
       }>('/user/account');
       
       if (res.code === 200 && res.profile) {
+        // /user/account is not consistent across API versions: some versions
+        // omit profile.vipType and expose the current entitlement via
+        // /user/subcount instead. Without this lookup a logged-in VIP user is
+        // shown as non-VIP even though the playback cookie is valid.
+        let vipType = res.profile.vipType;
+        try {
+          const sub = await this.fetchApi<{
+            code?: number;
+            subed?: boolean;
+            associator?: { vipCode?: number };
+            musicPackage?: { vipCode?: number };
+            redplus?: { vipCode?: number };
+          }>('/user/subcount');
+          if (
+            sub.subed ||
+            (sub.associator?.vipCode ?? 0) > 0 ||
+            (sub.musicPackage?.vipCode ?? 0) > 0 ||
+            (sub.redplus?.vipCode ?? 0) > 0
+          ) {
+            vipType = vipType || 1;
+          }
+        } catch {
+          // Keep profile.vipType when this optional entitlement lookup fails.
+        }
+
         return {
           userId: res.profile.userId,
           nickname: res.profile.nickname,
           avatarUrl: res.profile.avatarUrl,
           signature: res.profile.signature,
-          vipType: res.profile.vipType,
+          vipType,
           isLoggedIn: true,
         };
       }
@@ -229,65 +266,166 @@ class NeteaseApiService {
     }
   }
 
-  // --- Song Playable Audio URL ---
-  public async getSongAudioUrl(songId: number): Promise<string> {
+  // --- Song Playable Audio URL (Supports VIP signed CDN URLs, Meting Unblock & Multi-level fallback) ---
+  public async getSongAudioUrl(songId: number, level: string = 'lossless'): Promise<string> {
+    const cacheKey = `${songId}:${level}`;
+    const cached = this.audioUrlCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.url;
+    }
+
+    const levels = [level, 'exhigh', 'standard'];
+
+    // 1. Try official NetEase /song/url/v1 with authenticated VIP Cookie
+    for (const lvl of levels) {
+      try {
+        const res = await this.fetchApi<{ data: { url: string; code?: number }[] }>(
+          `/song/url/v1?id=${songId}&level=${lvl}`,
+          {},
+          4500,
+        );
+        if (res.data && res.data[0] && res.data[0].url) {
+          const url = res.data[0].url;
+          // Signed CDN URLs are short-lived. Cache briefly to avoid another
+          // network round trip when the same track is replayed.
+          this.audioUrlCache.set(cacheKey, { url, expiresAt: Date.now() + 5 * 60 * 1000 });
+          return url; // Retain original CDN URL without forcing https to prevent SSL handshake timeouts
+        }
+      } catch {
+        // Try next audio quality level
+      }
+    }
+
+    // 2. Some VIP tracks return an empty player URL but do return the same
+    // authenticated CDN address through the official download endpoint.
+    for (const lvl of [level, 'exhigh']) {
+      try {
+        const res = await this.fetchApi<{ data: { url: string; code?: number }[] }>(
+          `/song/download/url/v1?id=${songId}&level=${lvl}`,
+          {},
+          4500,
+        );
+        if (res.data && res.data[0] && res.data[0].url) {
+          const url = res.data[0].url;
+          this.audioUrlCache.set(cacheKey, { url, expiresAt: Date.now() + 5 * 60 * 1000 });
+          return url;
+        }
+      } catch {
+        // Try the next quality level or fallback endpoint.
+      }
+    }
+
+    // 3. Try legacy NetEase /song/url?id=xxx&br=320000
     try {
-      const res = await this.fetchApi<{ data: { url: string }[] }>(`/song/url/v1?id=${songId}&level=exhigh`);
+      const res = await this.fetchApi<{ data: { url: string }[] }>(
+        `/song/url?id=${songId}&br=320000`,
+        {},
+        4500,
+      );
       if (res.data && res.data[0] && res.data[0].url) {
-        return res.data[0].url.replace(/^http:/, 'https:');
+        const url = res.data[0].url;
+        this.audioUrlCache.set(cacheKey, { url, expiresAt: Date.now() + 5 * 60 * 1000 });
+        return url;
       }
     } catch {
-      // Fallback music stream URL
+      // Ignore
     }
-    return `https://music.163.com/song/media/outer/url?id=${songId}.mp3`;
+
+    // 4. High-Speed Meting Unblock Fallback Stream (Resolves VIP & restricted NetEase songs)
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const metingRes = await fetch(`https://api.i-meto.com/meting/v2?server=netease&type=url&id=${songId}`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (metingRes.ok) {
+        const metingData = await metingRes.json();
+        if (metingData && metingData.url) {
+          this.audioUrlCache.set(cacheKey, { url: metingData.url, expiresAt: Date.now() + 5 * 60 * 1000 });
+          return metingData.url;
+        }
+      }
+    } catch {
+      // Ignore fallback error
+    }
+
+    // Do not return the public outer link here: for VIP/restricted tracks it
+    // is usually not playable and makes the UI appear stuck at 0:00.
+    return '';
   }
 
   // --- Song Lyrics Parsing (Main LRC + Translation tlyric) ---
   public async getSongLyrics(songId: number): Promise<LyricLine[]> {
     try {
-      const res = await this.fetchApi<{ lrc?: { lyric: string }; tlyric?: { lyric: string } }>(`/lyric?id=${songId}`);
+      const res = await this.fetchApi<{ lrc?: { lyric: string }; tlyric?: { lyric: string }; nolyric?: boolean; uncollected?: boolean }>(`/lyric?id=${songId}`);
+      if (res.nolyric) {
+        return [{ time: 0, text: '♪ 纯音乐，无歌词', translation: 'Instrumental Track' }];
+      }
+      if (res.uncollected) {
+        return [{ time: 0, text: '暂无歌词' }];
+      }
+
       const mainLyrics = res.lrc?.lyric ? this.parseLrc(res.lrc.lyric) : [];
       const transLyrics = res.tlyric?.lyric ? this.parseLrc(res.tlyric.lyric) : [];
 
-      if (transLyrics.length > 0) {
-        return mainLyrics.map((line) => {
-          const matched = transLyrics.find((t) => Math.abs(t.time - line.time) < 1.2);
-          return {
-            ...line,
-            text: this.cleanTitle(line.text),
-            translation: matched?.text ? this.cleanTitle(matched.text) : undefined,
-          };
-        });
+      if (mainLyrics.length > 0) {
+        if (transLyrics.length > 0) {
+          return mainLyrics.map((line) => {
+            const matched = transLyrics.find((t) => Math.abs(t.time - line.time) < 1.2);
+            return {
+              ...line,
+              text: this.cleanTitle(line.text),
+              translation: matched?.text ? this.cleanTitle(matched.text) : undefined,
+            };
+          });
+        }
+        return mainLyrics.map((line) => ({
+          ...line,
+          text: this.cleanTitle(line.text),
+        }));
       }
-      return mainLyrics.map((line) => ({
-        ...line,
-        text: this.cleanTitle(line.text),
-      }));
     } catch {
       // Ignore
     }
     return [
-      { time: 0, text: '♪ 纯音乐，请欣赏', translation: 'Enjoy the Instrumental' },
-      { time: 10, text: 'Apple Music Fluid Visual Experience', translation: 'Apple Music 全景沉浸视听' },
+      { time: 0, text: '暂无歌词' },
     ];
   }
 
   // Parse LRC String into structured LyricLine array
   public parseLrc(lrcString: string): LyricLine[] {
-    const lines = lrcString.split('\n');
+    if (!lrcString) return [];
+    const lines = lrcString.split(/\r?\n/);
     const lyrics: LyricLine[] = [];
-    const timeReg = /\[(\d{2}):(\d{2})\.(\d{2,3})\]/;
+    const tagReg = /\[(\d+):(\d{2})(?:[\.\:](\d{1,3}))?\]/g;
+    const metaReg = /^\[(ti|ar|al|by|offset|length|re|ve):/i;
 
     for (const line of lines) {
-      const match = timeReg.exec(line);
-      if (match) {
+      const trimmed = line.trim();
+      if (!trimmed || metaReg.test(trimmed)) continue;
+
+      let match;
+      const times: number[] = [];
+      tagReg.lastIndex = 0;
+
+      while ((match = tagReg.exec(trimmed)) !== null) {
         const minutes = parseInt(match[1], 10);
         const seconds = parseInt(match[2], 10);
-        const millis = parseInt(match[3], 10);
-        const time = minutes * 60 + seconds + (millis > 99 ? millis / 1000 : millis / 100);
-        const text = this.cleanTitle(line.replace(timeReg, ''));
+        let millis = 0;
+        if (match[3]) {
+          const rawMs = match[3];
+          millis = rawMs.length === 3 ? parseInt(rawMs, 10) : parseInt(rawMs, 10) * 10;
+        }
+        times.push(minutes * 60 + seconds + millis / 1000);
+      }
+
+      if (times.length > 0) {
+        const text = this.cleanTitle(trimmed.replace(tagReg, '').trim());
         if (text) {
-          lyrics.push({ time, text });
+          for (const time of times) {
+            lyrics.push({ time, text });
+          }
         }
       }
     }

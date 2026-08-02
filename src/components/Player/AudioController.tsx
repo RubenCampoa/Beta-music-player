@@ -5,6 +5,7 @@ export const AudioController: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fadeAnimRef = useRef<number | null>(null);
   const currentSongIdRef = useRef<string | number | null>(null);
+  const currentAudioUrlRef = useRef<string | null>(null);
 
   const {
     currentSong,
@@ -75,14 +76,19 @@ export const AudioController: React.FC = () => {
       stopFade();
       audio.pause();
       currentSongIdRef.current = null;
+      currentAudioUrlRef.current = null;
       return;
     }
 
     const isSongChanged = currentSongIdRef.current !== currentSong.id;
+    const isUrlUpdated = currentAudioUrlRef.current !== currentSong.audioUrl;
 
-    if (isSongChanged) {
+    if (isSongChanged || isUrlUpdated) {
+      const prevTime = isUrlUpdated && !isSongChanged ? audio.currentTime : 0;
       currentSongIdRef.current = currentSong.id;
-      if (!audio.paused && audio.src) {
+      currentAudioUrlRef.current = currentSong.audioUrl;
+
+      if (isSongChanged && !audio.paused && audio.src) {
         // Fade out current song then load new song
         fadeTo(0, 180, () => {
           if (!audioRef.current) return;
@@ -97,12 +103,10 @@ export const AudioController: React.FC = () => {
         });
       } else {
         audio.src = currentSong.audioUrl;
-        audio.currentTime = 0;
+        if (prevTime > 0) audio.currentTime = prevTime;
         if (isPlaying) {
-          audio.volume = 0;
-          audio.play().then(() => {
-            fadeTo(targetVolume, 260);
-          }).catch(() => setIsPlaying(false));
+          audio.volume = targetVolume;
+          audio.play().catch(() => setIsPlaying(false));
         }
       }
     } else {
@@ -124,7 +128,7 @@ export const AudioController: React.FC = () => {
         }
       }
     }
-  }, [currentSong?.id, isPlaying]);
+  }, [currentSong?.id, currentSong?.audioUrl, isPlaying]);
 
   // Volume & Mute Sync when volume slider moves
   useEffect(() => {
@@ -169,6 +173,12 @@ export const AudioController: React.FC = () => {
           audioRef.current.play();
         } else {
           nextSong();
+        }
+      }}
+      onError={() => {
+        if (currentSong && isPlaying) {
+          setIsPlaying(false);
+          usePlayerStore.getState().setToastMessage('VIP 音源解析失败，请重新登录网易云账号后重试');
         }
       }}
     />

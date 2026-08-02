@@ -160,17 +160,15 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   playSong: async (song, newQueue) => {
     // Check VIP Streaming Access & Trigger Toast
     const isVipSong = Boolean(song.isVip || song.fee === 1);
-    if (isVipSong) {
-      const user = get().user;
-      const isUserVip = user && user.isLoggedIn && (user.vipType ?? 0) > 0;
-      if (!isUserVip) {
-        set({ toastMessage: '当前未开通网易云VIP，无法收听VIP歌曲' });
-        setTimeout(() => {
-          if (get().toastMessage === '当前未开通网易云VIP，无法收听VIP歌曲') {
-            set({ toastMessage: null });
-          }
-        }, 4000);
-      }
+    const user = get().user;
+    const isUserVip = user && user.isLoggedIn && (user.vipType ?? 0) > 0;
+    if (isVipSong && !isUserVip) {
+      set({ toastMessage: '当前未登录网易云 VIP 账号，播放 VIP 歌曲可能受限制' });
+      setTimeout(() => {
+        if (get().toastMessage === '当前未登录网易云 VIP 账号，播放 VIP 歌曲可能受限制') {
+          set({ toastMessage: null });
+        }
+      }, 4000);
     }
 
     let queue = newQueue || get().queue;
@@ -178,19 +176,47 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       queue = [song, ...queue];
     }
     const queueIndex = queue.findIndex((s) => s.id === song.id);
+    const isNeteaseSong = song.source === 'netease' && Boolean(song.neteaseId);
 
     set({
-      currentSong: song,
+      // Do not start the temporary outer URL and then swap it for the
+      // authenticated URL. That source replacement is the audible stutter
+      // users hear on VIP tracks.
+      currentSong: isNeteaseSong ? { ...song, audioUrl: '' } : song,
       queue,
       queueIndex,
-      isPlaying: true,
+      isPlaying: !isNeteaseSong,
       currentTime: 0,
     });
 
-    // Fetch lyrics if NetEase track or lyrics missing
-    if (song.source === 'netease' && song.neteaseId) {
-      const fetchedLyrics = await neteaseApi.getSongLyrics(song.neteaseId);
-      set({ lyrics: fetchedLyrics });
+    // Fetch authenticated high-quality VIP audio stream URL & lyrics concurrently
+    if (isNeteaseSong && song.neteaseId) {
+      // Resolve playback independently from lyrics. Waiting for Promise.all
+      // made a slow lyrics request delay an already available VIP audio URL.
+      neteaseApi.getSongAudioUrl(song.neteaseId, 'lossless').then((fetchedUrl) => {
+        set((state) => state.currentSong?.id === song.id
+          ? fetchedUrl
+            ? {
+                currentSong: { ...state.currentSong, audioUrl: fetchedUrl },
+                isPlaying: true,
+              }
+            : {
+                isPlaying: false,
+                toastMessage: 'VIP 音源解析失败，请重新登录网易云账号后重试',
+              }
+          : {});
+      }).catch(() => {
+        // Do not silently switch to an unplayable public outer link.
+        set((state) => state.currentSong?.id === song.id
+          ? { isPlaying: false, toastMessage: 'VIP 音源解析失败，请检查本地 API 或重新登录' }
+          : {});
+      });
+
+      neteaseApi.getSongLyrics(song.neteaseId).then((fetchedLyrics) => {
+        set((state) => state.currentSong?.id === song.id ? { lyrics: fetchedLyrics } : {});
+      }).catch(() => {
+        // Lyrics are optional and must not block playback.
+      });
     } else if (song.lyric) {
       set({ lyrics: song.lyric });
     } else {

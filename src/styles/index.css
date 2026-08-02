@@ -29,6 +29,46 @@
   background: rgba(255, 255, 255, 0.3);
 }
 
+/* Hide scrollbar utility */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Desktop lyric marquee for lines wider than the lyric window. */
+.desktop-lyric-marquee-text {
+  min-width: max-content;
+}
+
+.desktop-lyric-marquee-text[style],
+div[style*="--desktop-lyric-distance"] .desktop-lyric-marquee-text {
+  animation: desktop-lyric-marquee var(--desktop-lyric-duration) ease-in-out infinite;
+  animation-delay: 0.8s;
+  animation-fill-mode: both;
+  will-change: transform;
+}
+
+@keyframes desktop-lyric-marquee {
+  0%, 12% {
+    transform: translateX(0);
+  }
+  45%, 67% {
+    transform: translateX(calc(-1 * var(--desktop-lyric-distance)));
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desktop-lyric-marquee-text {
+    animation: none !important;
+  }
+}
+
 /* Window Drag Regions for Frameless Electron Window */
 .drag-region {
   -webkit-app-region: drag;

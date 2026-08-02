@@ -229,9 +229,9 @@ export const DesktopLyricView: React.FC = () => {
   };
 
   const getFontSizeClasses = () => {
-    if (fontSize === 'medium') return { line1: 'text-xl md:text-2xl', line2: 'text-xs md:text-sm' };
-    if (fontSize === 'xlarge') return { line1: 'text-3xl md:text-4xl', line2: 'text-sm md:text-base' };
-    return { line1: 'text-2xl md:text-3xl', line2: 'text-xs md:text-sm' };
+    if (fontSize === 'medium') return { line1: 'text-lg md:text-xl', line2: 'text-xs md:text-sm' };
+    if (fontSize === 'xlarge') return { line1: 'text-2xl md:text-3xl', line2: 'text-sm md:text-base' };
+    return { line1: 'text-xl md:text-2xl', line2: 'text-xs md:text-sm' };
   };
 
   const fontClasses = getFontSizeClasses();
@@ -241,7 +241,7 @@ export const DesktopLyricView: React.FC = () => {
       onMouseDown={handleMouseDown}
       className={`w-screen h-screen relative select-none overflow-hidden flex flex-col justify-between p-2 font-sans rounded-2xl transition-all duration-300 ${
         isHovered
-          ? 'bg-black/55 backdrop-blur-lg'
+          ? 'bg-black/65 backdrop-blur-lg'
           : 'bg-transparent backdrop-blur-none'
       } ${isLocked ? 'cursor-default' : 'cursor-move'}`}
     >
@@ -325,25 +325,25 @@ export const DesktopLyricView: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Dual-Line Lyric Content View: STRICTLY AT MOST 2 LINES DISPLAYED */}
+      {/* Main Dual-Line Lyric Content View: Vertical Smooth Slide & Natural Auto-Wrap */}
       <div className="flex-1 flex flex-col justify-center items-center text-center px-4 z-10 w-full overflow-hidden">
         <motion.div
           key={`desktop-lyric-${activeIndex}-${line1Text}`}
-          initial={{ opacity: 0.4, y: 6 }}
+          initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.45, ease: [0.25, 0.8, 0.25, 1.0] }}
-          className="w-full flex flex-col justify-center items-center space-y-1 transform-gpu"
+          transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+          className="w-full flex flex-col justify-center items-center space-y-1.5 transform-gpu"
         >
-          {/* Line 1: Active Main Line (Big, Bold, Precise Character Glyph Drop Shadow) */}
+          {/* Line 1: Active Main Line (Big, Bold, Natural Wrap, Precision Character Glow) */}
           <div
-            className={`tracking-tight ${fontClasses.line1} font-black ${activeTheme.activeTextColor} ${activeTheme.activeTextShadow} truncate max-w-full px-2 transition-all duration-300`}
+            className={`tracking-tight ${fontClasses.line1} font-black ${activeTheme.activeTextColor} ${activeTheme.activeTextShadow} max-w-full break-words whitespace-pre-wrap leading-tight text-center transition-all duration-300 px-2`}
           >
             {line1Text}
           </div>
 
-          {/* Line 2: Upcoming Next Line Preview (Noticeably Smaller, 50% Opacity) */}
+          {/* Line 2: Upcoming Next Line Preview (Noticeably Smaller, 60% Opacity) */}
           <div
-            className={`tracking-wide ${fontClasses.line2} font-semibold ${activeTheme.subTextColor} drop-shadow-[0_1px_4px_rgba(0,0,0,0.95)] truncate max-w-full px-2 transition-all duration-300`}
+            className={`tracking-wide ${fontClasses.line2} font-semibold ${activeTheme.subTextColor} drop-shadow-[0_1px_4px_rgba(0,0,0,0.95)] max-w-full break-words whitespace-pre-wrap leading-tight text-center transition-all duration-300 px-2`}
           >
             {line2Text}
           </div>

@@ -17,6 +17,8 @@ import {
   X,
   Minimize2,
   Maximize,
+  Columns,
+  AlignLeft,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { usePlayerStore } from '../../store/playerStore';
@@ -53,11 +55,29 @@ export const AppleLyricView: React.FC = () => {
     lyricFontSize,
   } = usePlayerStore();
 
-  const [activeIndex, setActiveIndex] = useState<number>(-1);
-  const [translateY, setTranslateY] = useState<number>(0);
   const [isHoverProgress, setIsHoverProgress] = useState(false);
   const [isWindowFullScreen, setIsWindowFullScreen] = useState(false);
+  const [isUserScrolling, setIsUserScrolling] = useState(false);
+  const [lyricLayoutMode, setLyricLayoutMode] = useState<'split' | 'full'>('split');
+
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const userScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const scrollAnimRef = useRef<number | null>(null);
+
+  // Synchronous active index calculation (150ms natural vocal alignment offset)
+  const syncTime = currentTime + 0.15;
+  let activeIndex = -1;
+  for (let i = 0; i < lyrics.length; i++) {
+    if (syncTime >= lyrics[i].time) {
+      activeIndex = i;
+    } else {
+      break;
+    }
+  }
+
+  // Focal index for scrolling & blur gradient (defaults to line 0 during prelude)
+  const focalIndex = activeIndex >= 0 ? activeIndex : 0;
 
   useEffect(() => {
     if (!isFullLyricsMode) return;
@@ -75,39 +95,91 @@ export const AppleLyricView: React.FC = () => {
     }
   }, [isFullLyricsMode]);
 
-  // De-bounce React re-renders to only update activeIndex on line changes
-  useEffect(() => {
-    const unsub = usePlayerStore.subscribe((state) => {
-      // 150ms natural vocal alignment offset
-      const syncTime = state.currentTime + 0.15;
-      const stateLyrics = state.lyrics;
-      let newIndex = -1;
-      for (let i = 0; i < stateLyrics.length; i++) {
-        if (syncTime >= stateLyrics[i].time) {
-          newIndex = i;
-        } else {
-          break;
-        }
-      }
-      setActiveIndex((prev) => (prev !== newIndex ? newIndex : prev));
-    });
-
-    return () => unsub();
-  }, []);
-
-  // Stable position offset calculation without layout reflow jank
-  useEffect(() => {
-    if (activeIndex >= 0 && lineRefs.current[activeIndex]) {
-      const activeEl = lineRefs.current[activeIndex];
-      if (activeEl) {
-        const top = activeEl.offsetTop;
-        const height = activeEl.offsetHeight;
-        setTranslateY(Math.max(0, top - 190 + height / 2));
-      }
-    } else if (activeIndex === -1) {
-      setTranslateY(0);
+  // Handle user manual scroll interaction (pause auto-scroll for 4s)
+  const handleUserScroll = () => {
+    if (scrollAnimRef.current !== null) {
+      cancelAnimationFrame(scrollAnimRef.current);
+      scrollAnimRef.current = null;
     }
-  }, [activeIndex, lyrics.length]);
+    setIsUserScrolling(true);
+    if (userScrollTimeoutRef.current) clearTimeout(userScrollTimeoutRef.current);
+    userScrollTimeoutRef.current = setTimeout(() => {
+      setIsUserScrolling(false);
+    }, 4000);
+  };
+
+  // Apple Music Signature Custom Fluid Scroll Engine (easeOutQuart, 750ms)
+  const animateContainerScroll = (container: HTMLElement, targetTop: number, smooth: boolean = true) => {
+    if (scrollAnimRef.current !== null) {
+      cancelAnimationFrame(scrollAnimRef.current);
+      scrollAnimRef.current = null;
+    }
+
+    if (!smooth) {
+      container.scrollTop = targetTop;
+      return;
+    }
+
+    const startTop = container.scrollTop;
+    const distance = targetTop - startTop;
+    if (Math.abs(distance) < 1) return;
+
+    const durationMs = 750;
+    const startTime = performance.now();
+
+    const step = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(1, elapsed / durationMs);
+      // Apple Music Signature Fluid Ease Out Quart
+      const ease = 1 - Math.pow(1 - progress, 4);
+
+      if (containerRef.current) {
+        containerRef.current.scrollTop = startTop + distance * ease;
+      }
+
+      if (progress < 1) {
+        scrollAnimRef.current = requestAnimationFrame(step);
+      } else {
+        scrollAnimRef.current = null;
+      }
+    };
+
+    scrollAnimRef.current = requestAnimationFrame(step);
+  };
+
+  // Center active lyric line in container smoothly
+  const scrollToActiveLine = (index: number, smooth: boolean = true) => {
+    const container = containerRef.current;
+    const activeEl = lineRefs.current[index];
+    if (!container || !activeEl) return;
+
+    const containerHeight = container.clientHeight;
+    const elTop = activeEl.offsetTop;
+    const elHeight = activeEl.offsetHeight;
+
+    const targetScrollTop = Math.max(0, elTop - containerHeight / 2 + elHeight / 2);
+
+    animateContainerScroll(container, targetScrollTop, smooth);
+  };
+
+  // Auto scroll to active lyric line on index/lyrics change
+  useEffect(() => {
+    if (!isFullLyricsMode) return;
+    if (lyrics.length > 0 && !isUserScrolling) {
+      const timer = requestAnimationFrame(() => {
+        scrollToActiveLine(focalIndex, enableLyricAnimation);
+      });
+      return () => cancelAnimationFrame(timer);
+    }
+  }, [focalIndex, lyrics, lyricFontSize, lyricLayoutMode, isUserScrolling, isFullLyricsMode, enableLyricAnimation]);
+
+  // Reset user scroll lock when changing song or opening full lyrics
+  useEffect(() => {
+    setIsUserScrolling(false);
+    if (lyrics.length > 0) {
+      scrollToActiveLine(focalIndex, false);
+    }
+  }, [currentSong?.id, isFullLyricsMode, lyricLayoutMode]);
 
   // ESC Key listener to exit full lyrics mode
   useEffect(() => {
@@ -123,6 +195,7 @@ export const AppleLyricView: React.FC = () => {
   if (!isFullLyricsMode) return null;
 
   const handleLyricClick = (time: number) => {
+    setIsUserScrolling(false);
     window.dispatchEvent(new CustomEvent('audio-seek', { detail: time }));
   };
 
@@ -155,15 +228,15 @@ export const AppleLyricView: React.FC = () => {
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.98 }}
       transition={{ duration: 0.35, ease: [0.25, 1, 0.5, 1] }}
-      className="fixed inset-0 z-50 flex flex-col justify-between p-8 pt-6 pb-8 select-none bg-[#0a0c14]/80 backdrop-blur-3xl overflow-hidden transform-gpu"
+      className="fixed inset-0 z-50 flex flex-col justify-between p-6 pt-5 pb-6 select-none bg-[#0a0c14]/85 backdrop-blur-3xl overflow-hidden transform-gpu"
     >
-      {/* Top Bar: Pull handle & Close buttons (z-50 isolate above lyrics) */}
-      <div className="relative z-50 flex items-center justify-between w-full px-2 no-drag pointer-events-auto">
+      {/* Top Bar: Controls & Layout Switcher */}
+      <div className="relative z-50 flex items-center justify-between w-full px-2 no-drag pointer-events-auto shrink-0">
         <div className="flex items-center space-x-3 no-drag">
           <button
             onClick={() => setFullLyricsMode(false)}
             className="w-11 h-11 rounded-full bg-white/10 hover:bg-white/25 text-white/80 hover:text-white flex items-center justify-center transition-all duration-200 backdrop-blur-md border border-white/15 hover:scale-105 active:scale-95 cursor-pointer shadow-md shrink-0 no-drag"
-            title="退出歌词全景模式 (或按 ESC 键)"
+            title="退出歌词模式 (或按 ESC 键)"
           >
             <ChevronDown className="w-6 h-6" />
           </button>
@@ -176,6 +249,25 @@ export const AppleLyricView: React.FC = () => {
         />
 
         <div className="flex items-center space-x-3 no-drag relative z-[100]">
+          {/* Layout Mode Switcher: Split (双栏) vs Pure Fullscreen Lyrics (纯歌词全屏) */}
+          <button
+            onClick={() => setLyricLayoutMode((prev) => (prev === 'split' ? 'full' : 'split'))}
+            className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-full border text-xs font-bold backdrop-blur-md bg-white/10 hover:bg-white/25 text-white/90 border-white/15 transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-md no-drag"
+            title={lyricLayoutMode === 'split' ? '切换为纯歌词全屏巨幕模式' : '切换为左右双栏模式'}
+          >
+            {lyricLayoutMode === 'split' ? (
+              <>
+                <AlignLeft className="w-4 h-4 text-cyan-400" />
+                <span>纯歌词全屏</span>
+              </>
+            ) : (
+              <>
+                <Columns className="w-4 h-4 text-pink-400" />
+                <span>双栏模式</span>
+              </>
+            )}
+          </button>
+
           {/* Software Window Fullscreen Toggle Button */}
           <button
             onClick={handleToggleWindowFullScreen}
@@ -210,248 +302,388 @@ export const AppleLyricView: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Split Layout: Left Player Column vs Right Dual-Line Lyrics */}
-      <div className="flex-1 flex items-center justify-center max-w-6xl w-full mx-auto grid grid-cols-1 md:grid-cols-2 gap-12 z-10 py-2">
-        {/* Left Column: Artwork + Metadata + Integrated Progress & Controls */}
-        <div className="flex flex-col items-center md:items-start justify-center space-y-5 max-w-md w-full mx-auto">
-          {/* Floating Album Artwork */}
-          <motion.div
-            initial={{ scale: 0.92, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{
-              duration: enableArtworkAnimation ? 0.8 : 0.05,
-              ease: [0.16, 1, 0.3, 1],
-            }}
-            className="relative group w-72 h-72 md:w-80 md:h-80 rounded-2xl overflow-hidden border border-white/20 shadow-[0_30px_70px_-15px_rgba(0,0,0,0.85)] transform-gpu mx-auto md:mx-0"
-          >
-            {currentSong ? (
-              <img
-                src={getOptimizedCoverUrl(currentSong.coverUrl, 600)}
-                alt={currentSong.name}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <div className="w-full h-full bg-white/5 flex items-center justify-center">
-                <Music className="w-16 h-16 text-white/30" />
-              </div>
-            )}
-          </motion.div>
-
-          {/* Song Meta + Action Button */}
-          {currentSong && (
-            <div className="w-full flex items-center justify-between pt-1">
-              <div className="flex flex-col truncate pr-2">
-                <h2 className="text-2xl font-bold text-white tracking-tight truncate drop-shadow-md">
-                  {neteaseApi.cleanTitle(currentSong.name)}
-                </h2>
-                <p className="text-base text-white/70 font-medium truncate drop-shadow">
-                  {neteaseApi.cleanTitle(currentSong.artist)}
-                </p>
-              </div>
-              <button
-                onClick={() => toggleFavorite(currentSong)}
-                className={`p-2.5 rounded-full backdrop-blur-md transition-all shrink-0 border border-white/15 hover:scale-105 active:scale-95 cursor-pointer shadow-md ${
-                  isFavorite(currentSong.id)
-                    ? 'bg-apple-red/20 text-apple-red border-apple-red/40'
-                    : 'bg-white/10 text-white/70 hover:text-white'
-                }`}
-                title={isFavorite(currentSong.id) ? '取消收藏歌曲' : '收藏歌曲'}
+      {/* Main Content Layout Container: Stretches to full available window height */}
+      <div className="flex-1 w-full max-w-7xl mx-auto z-10 flex flex-col min-h-0 pt-3 pb-2">
+        {lyricLayoutMode === 'split' ? (
+          /* Split View: Left Player Column + Right Full Height Lyrics */
+          <div className="flex-1 w-full grid grid-cols-1 md:grid-cols-2 gap-10 items-center min-h-0">
+            {/* Left Column: Artwork + Metadata + Integrated Progress & Controls */}
+            <div className="flex flex-col items-center md:items-start justify-center space-y-4 max-w-md w-full mx-auto my-auto">
+              {/* Floating Album Artwork */}
+              <motion.div
+                initial={{ scale: 0.92, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{
+                  duration: enableArtworkAnimation ? 0.8 : 0.05,
+                  ease: [0.16, 1, 0.3, 1],
+                }}
+                className="relative group w-64 h-64 md:w-80 md:h-80 rounded-2xl overflow-hidden border border-white/20 shadow-[0_30px_70px_-15px_rgba(0,0,0,0.85)] transform-gpu mx-auto md:mx-0 shrink-0"
               >
-                <Heart
-                  className={`w-5 h-5 transition-all ${
-                    isFavorite(currentSong.id) ? 'fill-current text-apple-red' : ''
+                {currentSong ? (
+                  <img
+                    src={getOptimizedCoverUrl(currentSong.coverUrl, 600)}
+                    alt={currentSong.name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-white/5 flex items-center justify-center">
+                    <Music className="w-16 h-16 text-white/30" />
+                  </div>
+                )}
+              </motion.div>
+
+              {/* Song Meta + Action Button */}
+              {currentSong && (
+                <div className="w-full flex items-center justify-between pt-1">
+                  <div className="flex flex-col truncate pr-2">
+                    <h2 className="text-2xl font-bold text-white tracking-tight truncate drop-shadow-md">
+                      {neteaseApi.cleanTitle(currentSong.name)}
+                    </h2>
+                    <p className="text-base text-white/70 font-medium truncate drop-shadow">
+                      {neteaseApi.cleanTitle(currentSong.artist)}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => toggleFavorite(currentSong)}
+                    className={`p-2.5 rounded-full backdrop-blur-md transition-all shrink-0 border border-white/15 hover:scale-105 active:scale-95 cursor-pointer shadow-md ${
+                      isFavorite(currentSong.id)
+                        ? 'bg-apple-red/20 text-apple-red border-apple-red/40'
+                        : 'bg-white/10 text-white/70 hover:text-white'
+                    }`}
+                    title={isFavorite(currentSong.id) ? '取消收藏歌曲' : '收藏歌曲'}
+                  >
+                    <Heart
+                      className={`w-5 h-5 transition-all ${
+                        isFavorite(currentSong.id) ? 'fill-current text-apple-red' : ''
+                      }`}
+                    />
+                  </button>
+                </div>
+              )}
+
+              {/* Interactive Progress Bar & Hi-Res Lossless Badge */}
+              <div className="w-full space-y-1.5 pt-1">
+                <div
+                  onClick={handleProgressSeek}
+                  onMouseEnter={() => setIsHoverProgress(true)}
+                  onMouseLeave={() => setIsHoverProgress(false)}
+                  className="relative w-full h-2 bg-white/20 hover:h-2.5 rounded-full cursor-pointer overflow-hidden transition-all"
+                >
+                  <div
+                    className="h-full bg-white rounded-full relative transition-all"
+                    style={{ width: `${progressPercent}%` }}
+                  >
+                    {isHoverProgress && (
+                      <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-md" />
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-xs font-mono text-white/50 px-0.5">
+                  <span>{formatTime(currentTime)}</span>
+
+                  {/* Center Audio Quality Badge */}
+                  <div className="flex items-center space-x-1 bg-white/10 text-white/70 px-2 py-0.5 rounded-full text-[10px] font-semibold border border-white/10">
+                    <Sparkles className="w-3 h-3 text-cyan-400" />
+                    <span>高解析无损</span>
+                  </div>
+
+                  <span>{formatRemainingTime(currentTime, duration)}</span>
+                </div>
+              </div>
+
+              {/* Playback Control Buttons Row */}
+              <div className="w-full flex items-center justify-center space-x-6 pt-1">
+                <button
+                  onClick={toggleShuffle}
+                  className={`p-2 rounded-full transition-colors ${
+                    isShuffle ? 'text-apple-red bg-apple-red/10' : 'text-white/50 hover:text-white'
                   }`}
-                />
-              </button>
-            </div>
-          )}
+                  title="随机播放"
+                >
+                  <Shuffle className="w-5 h-5" />
+                </button>
 
-          {/* Interactive Progress Bar & Hi-Res Lossless Badge */}
-          <div className="w-full space-y-1.5 pt-1">
-            <div
-              onClick={handleProgressSeek}
-              onMouseEnter={() => setIsHoverProgress(true)}
-              onMouseLeave={() => setIsHoverProgress(false)}
-              className="relative w-full h-2 bg-white/20 hover:h-2.5 rounded-full cursor-pointer overflow-hidden transition-all"
-            >
+                <button
+                  onClick={prevSong}
+                  className="text-white/80 hover:text-white hover:scale-110 active:scale-95 transition-all p-1"
+                  title="上一首"
+                >
+                  <SkipBack className="w-6 h-6 fill-current" />
+                </button>
+
+                <button
+                  onClick={togglePlayPause}
+                  className="w-12 h-12 rounded-full bg-white text-black flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-xl shadow-white/10"
+                  title={isPlaying ? '暂停' : '播放'}
+                >
+                  {isPlaying ? (
+                    <Pause className="w-6 h-6 fill-current" />
+                  ) : (
+                    <Play className="w-6 h-6 fill-current ml-0.5" />
+                  )}
+                </button>
+
+                <button
+                  onClick={nextSong}
+                  className="text-white/80 hover:text-white hover:scale-110 active:scale-95 transition-all p-1"
+                  title="下一首"
+                >
+                  <SkipForward className="w-6 h-6 fill-current" />
+                </button>
+
+                <button
+                  onClick={toggleRepeat}
+                  className={`p-2 rounded-full transition-colors ${
+                    repeatMode !== 'off' ? 'text-apple-red bg-apple-red/10' : 'text-white/50 hover:text-white'
+                  }`}
+                  title="单曲/循环"
+                >
+                  {repeatMode === 'one' ? <Repeat1 className="w-5 h-5" /> : <Repeat className="w-5 h-5" />}
+                </button>
+              </div>
+
+              {/* Volume Control Bar */}
+              <div className="w-full flex items-center space-x-3 pt-1">
+                <button onClick={toggleMute} className="text-white/60 hover:text-white transition-colors">
+                  {isMuted || volume === 0 ? (
+                    <VolumeX className="w-4 h-4 text-white/40" />
+                  ) : (
+                    <Volume2 className="w-4 h-4" />
+                  )}
+                </button>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={isMuted ? 0 : volume}
+                  onChange={(e) => setVolume(parseFloat(e.target.value))}
+                  className="flex-1 accent-white h-1.5 bg-white/20 rounded-lg cursor-pointer"
+                />
+                <Volume2 className="w-4 h-4 text-white/40" />
+              </div>
+            </div>
+
+            {/* Right Column: Full Screen Height Lyric Engine */}
+            <div className="relative h-full w-full min-h-0">
               <div
-                className="h-full bg-white rounded-full relative transition-all"
-                style={{ width: `${progressPercent}%` }}
+                ref={containerRef}
+                onWheel={handleUserScroll}
+                onTouchStart={handleUserScroll}
+                onMouseDown={handleUserScroll}
+                className="h-full w-full overflow-y-auto no-scrollbar relative px-4 md:px-8 flex flex-col items-start justify-start mask-v-fade"
               >
-                {isHoverProgress && (
-                  <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-md" />
+                {lyrics.length === 0 ? (
+                  <div className="text-white/40 text-lg font-medium italic my-auto self-center">
+                    暂无歌词
+                  </div>
+                ) : (
+                  <div className="w-full flex flex-col space-y-7 items-start pt-64 pb-80 pr-14 md:pr-20">
+                    {lyrics.map((line, idx) => {
+                      const isActive = idx === activeIndex;
+                      const distance = Math.abs(idx - focalIndex);
+
+                      // Proportional opacity gradient based on line distance
+                      let targetOpacity = 0.25;
+                      if (isActive) targetOpacity = 1;
+                      else if (activeIndex === -1 && idx === 0) targetOpacity = 0.85;
+                      else if (distance === 1) targetOpacity = 0.65;
+                      else if (distance === 2) targetOpacity = 0.45;
+                      else if (distance === 3) targetOpacity = 0.32;
+
+                      // Gradient Depth-of-Field Blur (DOF): Crisp near focus, soft further away
+                      let targetBlur = 0;
+                      if (enableLyricBlur) {
+                        if (isActive || (activeIndex === -1 && idx === 0)) targetBlur = 0;
+                        else if (distance === 1) targetBlur = 0.5;
+                        else if (distance === 2) targetBlur = 1.8;
+                        else if (distance === 3) targetBlur = 3.2;
+                        else targetBlur = Math.min(6, 3.2 + (distance - 3) * 0.8);
+                      }
+
+                      return (
+                        <motion.div
+                          key={idx}
+                          ref={(el) => (lineRefs.current[idx] = el)}
+                          onClick={() => handleLyricClick(line.time)}
+                          animate={{
+                            scale: isActive ? 1.04 : 0.97,
+                            opacity: targetOpacity,
+                            filter: `blur(${targetBlur}px)`,
+                          }}
+                          transition={{
+                            duration: enableLyricAnimation ? 0.75 : 0.05,
+                            ease: [0.16, 1, 0.3, 1],
+                          }}
+                          className="cursor-pointer text-left origin-left space-y-1 py-1 px-2 -mx-2 transition-colors hover:opacity-100 max-w-full break-words"
+                        >
+                          {/* Main Lyric Line */}
+                          <div
+                            className={`font-extrabold tracking-tight block break-words ${
+                              isActive ? 'text-white' : 'text-white/60 hover:text-white/90'
+                            } ${lyricFontSize === 'large' ? 'text-2xl md:text-4xl' : 'text-xl md:text-3xl'}`}
+                            style={{
+                              textShadow: enableLyricGlow && isActive
+                                ? '0 0 20px rgba(255, 255, 255, 0.7), 0 0 35px rgba(255, 45, 85, 0.35)'
+                                : 'none',
+                            }}
+                          >
+                            {neteaseApi.cleanTitle(line.text)}
+                          </div>
+
+                          {/* Translated Lyric Sub-line (if available) */}
+                          {line.translation && (
+                            <div
+                              className={`font-semibold tracking-wide block break-words ${
+                                isActive ? 'text-white/85' : 'text-white/35'
+                              } ${lyricFontSize === 'large' ? 'text-base md:text-xl' : 'text-xs md:text-base'}`}
+                            >
+                              {neteaseApi.cleanTitle(line.translation)}
+                            </div>
+                          )}
+                        </motion.div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
-            </div>
 
-            <div className="flex items-center justify-between text-xs font-mono text-white/50 px-0.5">
-              <span>{formatTime(currentTime)}</span>
-
-              {/* Center Audio Quality Badge */}
-              <div className="flex items-center space-x-1 bg-white/10 text-white/70 px-2 py-0.5 rounded-full text-[10px] font-semibold border border-white/10">
-                <Sparkles className="w-3 h-3 text-cyan-400" />
-                <span>高解析无损</span>
-              </div>
-
-              <span>{formatRemainingTime(currentTime, duration)}</span>
-            </div>
-          </div>
-
-          {/* Playback Control Buttons Row */}
-          <div className="w-full flex items-center justify-center space-x-6 pt-1">
-            <button
-              onClick={toggleShuffle}
-              className={`p-2 rounded-full transition-colors ${
-                isShuffle ? 'text-apple-red bg-apple-red/10' : 'text-white/50 hover:text-white'
-              }`}
-              title="随机播放"
-            >
-              <Shuffle className="w-5 h-5" />
-            </button>
-
-            <button
-              onClick={prevSong}
-              className="text-white/80 hover:text-white hover:scale-110 active:scale-95 transition-all p-1"
-              title="上一首"
-            >
-              <SkipBack className="w-6 h-6 fill-current" />
-            </button>
-
-            <button
-              onClick={togglePlayPause}
-              className="w-12 h-12 rounded-full bg-white text-black flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-xl shadow-white/10"
-              title={isPlaying ? '暂停' : '播放'}
-            >
-              {isPlaying ? (
-                <Pause className="w-6 h-6 fill-current" />
-              ) : (
-                <Play className="w-6 h-6 fill-current ml-0.5" />
+              {/* Floating return to current lyric pill button when user manually scrolls */}
+              {isUserScrolling && lyrics.length > 0 && (
+                <button
+                  onClick={() => {
+                    setIsUserScrolling(false);
+                    scrollToActiveLine(focalIndex, true);
+                  }}
+                  className="absolute bottom-4 right-8 z-30 flex items-center space-x-1.5 px-3.5 py-1.5 rounded-full bg-white/20 hover:bg-white/35 backdrop-blur-xl text-white text-xs font-semibold border border-white/25 shadow-xl transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                >
+                  <Disc className="w-3.5 h-3.5 text-apple-red animate-spin" />
+                  <span>回到当前歌词</span>
+                </button>
               )}
-            </button>
-
-            <button
-              onClick={nextSong}
-              className="text-white/80 hover:text-white hover:scale-110 active:scale-95 transition-all p-1"
-              title="下一首"
-            >
-              <SkipForward className="w-6 h-6 fill-current" />
-            </button>
-
-            <button
-              onClick={toggleRepeat}
-              className={`p-2 rounded-full transition-colors ${
-                repeatMode !== 'off' ? 'text-apple-red bg-apple-red/10' : 'text-white/50 hover:text-white'
-              }`}
-              title="单曲/循环"
-            >
-              {repeatMode === 'one' ? <Repeat1 className="w-5 h-5" /> : <Repeat className="w-5 h-5" />}
-            </button>
-          </div>
-
-          {/* Volume Control Bar */}
-          <div className="w-full flex items-center space-x-3 pt-1">
-            <button onClick={toggleMute} className="text-white/60 hover:text-white transition-colors">
-              {isMuted || volume === 0 ? (
-                <VolumeX className="w-4 h-4 text-white/40" />
-              ) : (
-                <Volume2 className="w-4 h-4" />
-              )}
-            </button>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value={isMuted ? 0 : volume}
-              onChange={(e) => setVolume(parseFloat(e.target.value))}
-              className="flex-1 accent-white h-1.5 bg-white/20 rounded-lg cursor-pointer"
-            />
-            <Volume2 className="w-4 h-4 text-white/40" />
-          </div>
-        </div>
-
-        {/* Right Column: 100% Continuous Reflow-Free Dual-Line Lyric Engine */}
-        <div className="h-[480px] overflow-visible relative px-4 md:px-8 flex flex-col items-start justify-start">
-          {lyrics.length === 0 ? (
-            <div className="text-white/40 text-lg font-medium italic my-auto">
-              暂无歌词
             </div>
-          ) : (
-            <motion.div
-              animate={{ y: -translateY }}
-              transition={{
-                duration: enableLyricAnimation ? 0.65 : 0.05,
-                ease: [0.25, 0.8, 0.25, 1.0],
-              }}
-              className="w-full flex flex-col space-y-6 items-start pt-32 pb-48 pr-16 transform-gpu"
+          </div>
+        ) : (
+          /* Pure Full-Screen Immersive Lyrics Mode (Centered Giant Lyrics) */
+          <div className="flex-1 w-full max-w-4xl mx-auto flex flex-col min-h-0 relative">
+            <div
+              ref={containerRef}
+              onWheel={handleUserScroll}
+              onTouchStart={handleUserScroll}
+              onMouseDown={handleUserScroll}
+              className="h-full w-full overflow-y-auto no-scrollbar relative px-4 md:px-12 flex flex-col items-center justify-start text-center mask-v-fade"
             >
-              {lyrics.map((line, idx) => {
-                const isActive = idx === activeIndex;
-                const distance = Math.abs(idx - activeIndex);
+              {lyrics.length === 0 ? (
+                <div className="text-white/40 text-xl font-medium italic my-auto">
+                  暂无歌词
+                </div>
+              ) : (
+                <div className="w-full flex flex-col space-y-8 items-center pt-64 pb-80">
+                  {lyrics.map((line, idx) => {
+                    const isActive = idx === activeIndex;
+                    const distance = Math.abs(idx - focalIndex);
 
-                // Proportional opacity gradient based on line distance
-                let targetOpacity = 0.22;
-                if (isActive) targetOpacity = 1;
-                else if (distance === 1) targetOpacity = 0.62;
-                else if (distance === 2) targetOpacity = 0.42;
-                else if (distance === 3) targetOpacity = 0.28;
+                    let targetOpacity = 0.25;
+                    if (isActive) targetOpacity = 1;
+                    else if (activeIndex === -1 && idx === 0) targetOpacity = 0.85;
+                    else if (distance === 1) targetOpacity = 0.65;
+                    else if (distance === 2) targetOpacity = 0.45;
+                    else if (distance === 3) targetOpacity = 0.32;
 
-                // Gradient Depth-of-Field Blur (DOF): 0px -> 1.5px -> 3.5px -> 5.5px -> 8px
-                let targetBlur = 0;
-                if (enableLyricBlur) {
-                  if (distance === 0) targetBlur = 0;
-                  else if (distance === 1) targetBlur = 1.5;
-                  else if (distance === 2) targetBlur = 3.5;
-                  else if (distance === 3) targetBlur = 5.5;
-                  else targetBlur = Math.min(9, 5.5 + (distance - 3) * 1.2);
-                }
+                    let targetBlur = 0;
+                    if (enableLyricBlur) {
+                      if (isActive || (activeIndex === -1 && idx === 0)) targetBlur = 0;
+                      else if (distance === 1) targetBlur = 0.5;
+                      else if (distance === 2) targetBlur = 1.8;
+                      else if (distance === 3) targetBlur = 3.2;
+                      else targetBlur = Math.min(6, 3.2 + (distance - 3) * 0.8);
+                    }
 
-                return (
-                  <motion.div
-                    key={idx}
-                    ref={(el) => (lineRefs.current[idx] = el)}
-                    onClick={() => handleLyricClick(line.time)}
-                    animate={{
-                      scale: isActive ? (lyricFontSize === 'large' ? 1.25 : 1.1) : 0.95,
-                      opacity: targetOpacity,
-                      filter: `blur(${targetBlur}px)`,
-                    }}
-                    transition={{
-                      duration: enableLyricAnimation ? 0.65 : 0.05,
-                      ease: [0.25, 0.8, 0.25, 1.0],
-                    }}
-                    className="cursor-pointer text-left origin-left transform-gpu space-y-1"
-                  >
-                    {/* Main Lyric Line */}
-                    <div
-                      className={`font-extrabold tracking-tight block ${
-                        isActive ? 'text-white' : 'text-white/50 hover:text-white/80'
-                      } ${lyricFontSize === 'large' ? 'text-2xl md:text-3xl' : 'text-xl md:text-2xl'}`}
-                      style={{
-                        textShadow: enableLyricGlow && isActive
-                          ? '0 0 24px rgba(255, 255, 255, 0.95), 0 0 45px rgba(255, 45, 85, 0.45)'
-                          : 'none',
-                      }}
-                    >
-                      {neteaseApi.cleanTitle(line.text)}
-                    </div>
-
-                    {/* Translated Lyric Sub-line (if available) */}
-                    {line.translation && (
-                      <div
-                        className={`font-semibold tracking-wide block ${
-                          isActive ? 'text-white/80' : 'text-white/30'
-                        } ${lyricFontSize === 'large' ? 'text-base md:text-lg' : 'text-xs md:text-sm'}`}
+                    return (
+                      <motion.div
+                        key={idx}
+                        ref={(el) => (lineRefs.current[idx] = el)}
+                        onClick={() => handleLyricClick(line.time)}
+                        animate={{
+                          scale: isActive ? 1.05 : 0.96,
+                          opacity: targetOpacity,
+                          filter: `blur(${targetBlur}px)`,
+                        }}
+                        transition={{
+                          duration: enableLyricAnimation ? 0.75 : 0.05,
+                          ease: [0.16, 1, 0.3, 1],
+                        }}
+                        className="cursor-pointer text-center origin-center space-y-2 py-1 px-2 -mx-2 transition-colors hover:opacity-100 max-w-3xl break-words"
                       >
-                        {neteaseApi.cleanTitle(line.translation)}
-                      </div>
-                    )}
-                  </motion.div>
-                );
-              })}
-            </motion.div>
-          )}
-        </div>
+                        {/* Giant Centered Main Line */}
+                        <div
+                          className={`font-black tracking-tight block break-words ${
+                            isActive ? 'text-white' : 'text-white/60 hover:text-white/90'
+                          } text-3xl md:text-5xl leading-tight`}
+                          style={{
+                            textShadow: enableLyricGlow && isActive
+                              ? '0 0 24px rgba(255, 255, 255, 0.8), 0 0 40px rgba(255, 45, 85, 0.4)'
+                              : 'none',
+                          }}
+                        >
+                          {neteaseApi.cleanTitle(line.text)}
+                        </div>
+
+                        {/* Centered Translation */}
+                        {line.translation && (
+                          <div
+                            className={`font-semibold tracking-wide block break-words ${
+                              isActive ? 'text-white/85' : 'text-white/35'
+                            } text-lg md:text-2xl`}
+                          >
+                            {neteaseApi.cleanTitle(line.translation)}
+                          </div>
+                        )}
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Floating Mini Player Controller at Bottom of Pure Lyrics View */}
+            {currentSong && (
+              <div className="shrink-0 flex items-center justify-between px-6 py-3 bg-black/40 backdrop-blur-2xl rounded-2xl border border-white/15 shadow-2xl mt-2 mx-auto max-w-xl w-full z-20">
+                <div className="flex items-center space-x-3 truncate">
+                  <img
+                    src={getOptimizedCoverUrl(currentSong.coverUrl, 100)}
+                    alt={currentSong.name}
+                    className="w-10 h-10 rounded-lg object-cover border border-white/20 shrink-0"
+                  />
+                  <div className="flex flex-col truncate">
+                    <span className="text-xs font-bold text-white truncate">
+                      {neteaseApi.cleanTitle(currentSong.name)}
+                    </span>
+                    <span className="text-[11px] text-white/60 truncate">
+                      {neteaseApi.cleanTitle(currentSong.artist)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-3">
+                  <button onClick={prevSong} className="text-white/80 hover:text-white p-1">
+                    <SkipBack className="w-5 h-5 fill-current" />
+                  </button>
+                  <button
+                    onClick={togglePlayPause}
+                    className="w-9 h-9 rounded-full bg-white text-black flex items-center justify-center hover:scale-105 active:scale-95 transition-all"
+                  >
+                    {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
+                  </button>
+                  <button onClick={nextSong} className="text-white/80 hover:text-white p-1">
+                    <SkipForward className="w-5 h-5 fill-current" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </motion.div>
   );
