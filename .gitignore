@@ -34,3 +34,19 @@ release/
 .env.local
 .env.development.local
 .env.production.local
+
+# Android & Gradle
+android/.gradle/
+android/.gradle-user-home/
+android/.gradle-dist/
+android/.android-user-home/
+android/.idea/
+android/.kotlin/
+android/build/
+android/app/build/
+android/local.properties
+
+# Scratch & Tooling
+.reasonix/
+reasonix.toml
+npm
