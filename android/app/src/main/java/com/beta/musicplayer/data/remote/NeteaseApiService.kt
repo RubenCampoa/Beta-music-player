@@ -359,6 +359,7 @@ class NeteaseApiService(
 
         private val FALLBACK_NODES = listOf(
             "https://netease-cloud-music-api-beta.vercel.app/",
+            "https://music-api.helingqi.com/",
             "https://music.api.666666.site/",
             "http://10.0.2.2:3000/",
             "http://192.168.0.105:3000/",
@@ -586,11 +587,21 @@ class NeteaseApiService(
     // --- 首页推荐 ---
 
     suspend fun getPersonalizedNewSongs(): List<Song> {
-        return safeNet {
+        val result = safeNet {
             api.getPersonalizedNewSongs(limit = 60).result?.mapNotNull { item ->
                 item.song?.let { formatTrackToSong(it) }
             } ?: emptyList()
         }.getOrDefault(emptyList())
+
+        if (result.isNotEmpty()) return result
+
+        // 自动高可用兜底：当网易云新歌推荐为空时，自动使用热门歌曲或预置精品单曲补全
+        val artistSongs = safeNet {
+            val topArtistId = api.getTopArtists(limit = 1, offset = 0).artists?.firstOrNull()?.id ?: 6452L
+            api.getArtistTopSongs(topArtistId).songs.orEmpty().take(30).map { formatTrackToSong(it) }
+        }.getOrDefault(emptyList())
+
+        return if (artistSongs.isNotEmpty()) artistSongs else getFallbackSongs()
     }
 
     suspend fun getPersonalizedPlaylists(): List<Playlist> {
