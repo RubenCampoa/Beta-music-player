@@ -17,12 +17,22 @@ data class Song(
     val fee: Int? = null,
 )
 
+/** 逐字/音节精确时间戳 */
+@Serializable
+data class LyricWord(
+    val startTime: Double, // 秒
+    val duration: Double,  // 秒
+    val text: String,
+)
+
 /** 歌词行 */
 @Serializable
 data class LyricLine(
     val time: Double,          // 秒
     val text: String,
     val translation: String? = null,
+    val isYrc: Boolean = false,
+    val words: List<LyricWord> = emptyList(),
 )
 
 /** 用户资料 */

@@ -54,6 +54,20 @@ import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 /**
  * 全屏播放页：无外框大底板，仅保留悬浮的液态玻璃控件与景深歌词。
  */
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
+
+/**
+ * 全屏播放页：无外框大底板，仅保留悬浮的液态玻璃控件与景深歌词。
+ */
 @Composable
 fun PlayerSheet(
     player: MusicPlayer,
@@ -70,6 +84,24 @@ fun PlayerSheet(
     }
     if (song == null) return
 
+    val lyricPositionProvider = remember(player) {
+        { player.exoPlayer.currentPosition.coerceAtLeast(0L) }
+    }
+
+    var showBottomControls by remember { mutableStateOf(true) }
+
+    // 4 秒无手势交互后自动隐藏底部播放操控区（参考图 2 体验）
+    LaunchedEffect(showBottomControls, playerState.isPlaying) {
+        if (showBottomControls && playerState.isPlaying) {
+            delay(4_000)
+            showBottomControls = false
+        }
+    }
+
+    val toggleBottomControls = remember {
+        { showBottomControls = !showBottomControls }
+    }
+
     Box(Modifier.fillMaxSize()) {
         val backdrop = rememberLayerBackdrop {
             drawRect(Color(0xFF0D0C12))
@@ -82,25 +114,24 @@ fun PlayerSheet(
                 .layerBackdrop(backdrop)
         ) {
             BackgroundLayer(song = song)
+            LyricsView(
+                lyrics = playerState.lyrics,
+                positionProvider = lyricPositionProvider,
+                onSeekTo = { positionMs ->
+                    showBottomControls = true
+                    player.seekTo(positionMs)
+                },
+                onTap = toggleBottomControls,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
 
         val liked = song.neteaseId?.let { it in likedIds } ?: false
         val progress = if (playerState.durationMs > 0) {
             (playerState.positionMs.toFloat() / playerState.durationMs).coerceIn(0f, 1f)
         } else 0f
-        val lyricPositionProvider = remember(player) {
-            { player.exoPlayer.currentPosition.coerceAtLeast(0L) }
-        }
 
-        // 1. 歌词层（全屏纵向排列，居中偏上焦点，上下包含留白 Padding）
-        LyricsView(
-            lyrics = playerState.lyrics,
-            positionProvider = lyricPositionProvider,
-            onSeekTo = { positionMs -> player.seekTo(positionMs) },
-            modifier = Modifier.fillMaxSize(),
-        )
-
-        // 2. 顶部常驻歌曲基本信息栏（无大框底板，悬浮按钮 + 封面 + 歌曲信息）
+        // 2. 顶部常驻歌曲基本信息栏（参考图 2：常驻顶部，不自动隐藏）
         Row(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -116,7 +147,7 @@ fun PlayerSheet(
                 onClick = onDismiss,
                 contentDescription = "收起",
                 size = 38.dp,
-                surfaceColor = Color.Unspecified,
+                surfaceColor = Color.White.copy(alpha = 0.12f),
             )
             Spacer(Modifier.width(10.dp))
             AsyncImage(
@@ -152,99 +183,131 @@ fun PlayerSheet(
             GlassIconButton(
                 backdrop = backdrop,
                 icon = if (liked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                onClick = { onToggleLike(song) },
+                onClick = {
+                    showBottomControls = true
+                    onToggleLike(song)
+                },
                 contentDescription = if (liked) "取消喜欢" else "喜欢",
                 size = 38.dp,
                 tint = if (liked) FavoriteRed else Color.White.copy(alpha = 0.85f),
-                surfaceColor = Color.Unspecified,
+                surfaceColor = Color.White.copy(alpha = 0.12f),
             )
         }
 
-        // 3. 底部常驻播放操控区（无大框底板，滑块 + 悬浮液态玻璃按钮）
-        Column(
+        // 3. 底部自动隐藏播放操控区（渐变显示/隐藏动画）
+        AnimatedVisibility(
+            visible = showBottomControls,
+            enter = fadeIn(tween(280)) + slideInVertically(tween(280)) { it / 2 },
+            exit = fadeOut(tween(280)) + slideOutVertically(tween(280)) { it / 2 },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .zIndex(2f)
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 24.dp, vertical = 14.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .fillMaxWidth(),
         ) {
-            GlassSlider(
-                backdrop = backdrop,
-                value = progress,
-                onValueChange = { fraction ->
-                    player.seekTo((fraction * playerState.durationMs).toLong())
-                },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(4.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp, vertical = 14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(
-                    text = Format.formatTime(playerState.positionMs / 1000f),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.White.copy(alpha = 0.55f),
-                )
-                Text(
-                    text = Format.formatTime(playerState.durationMs / 1000f),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.White.copy(alpha = 0.55f),
-                )
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                GlassIconButton(
+                GlassSlider(
                     backdrop = backdrop,
-                    icon = when (playerState.playMode) {
-                        MusicPlayer.PlayMode.REPEAT_ALL -> Icons.Rounded.Repeat
-                        MusicPlayer.PlayMode.REPEAT_ONE -> Icons.Rounded.RepeatOne
-                        MusicPlayer.PlayMode.SHUFFLE -> Icons.Rounded.Shuffle
+                    value = progress,
+                    onValueChange = { fraction ->
+                        showBottomControls = true
+                        player.seekTo((fraction * playerState.durationMs).toLong())
                     },
-                    onClick = onCyclePlayMode,
-                    contentDescription = "播放模式",
-                    size = 44.dp,
+                    modifier = Modifier.fillMaxWidth(),
                 )
-                GlassIconButton(
-                    backdrop = backdrop,
-                    icon = Icons.Rounded.SkipPrevious,
-                    onClick = { player.previous() },
-                    contentDescription = "上一首",
-                    size = 52.dp,
-                    iconSize = 28.dp,
-                )
-                GlassIconButton(
-                    backdrop = backdrop,
-                    icon = if (playerState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                    onClick = { player.togglePlay() },
-                    contentDescription = if (playerState.isPlaying) "暂停" else "播放",
-                    size = 68.dp,
-                    iconSize = 38.dp,
-                )
-                GlassIconButton(
-                    backdrop = backdrop,
-                    icon = Icons.Rounded.SkipNext,
-                    onClick = { player.next() },
-                    contentDescription = "下一首",
-                    size = 52.dp,
-                    iconSize = 28.dp,
-                )
-                GlassIconButton(
-                    backdrop = backdrop,
-                    icon = if (liked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                    onClick = { onToggleLike(song) },
-                    contentDescription = if (liked) "取消收藏" else "收藏",
-                    tint = if (liked) FavoriteRed else Color.White.copy(alpha = 0.9f),
-                    size = 44.dp,
-                )
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = Format.formatTime(playerState.positionMs / 1000f),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White.copy(alpha = 0.55f),
+                    )
+                    Text(
+                        text = Format.formatTime(playerState.durationMs / 1000f),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White.copy(alpha = 0.55f),
+                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    GlassIconButton(
+                        backdrop = backdrop,
+                        icon = when (playerState.playMode) {
+                            MusicPlayer.PlayMode.REPEAT_ALL -> Icons.Rounded.Repeat
+                            MusicPlayer.PlayMode.REPEAT_ONE -> Icons.Rounded.RepeatOne
+                            MusicPlayer.PlayMode.SHUFFLE -> Icons.Rounded.Shuffle
+                        },
+                        onClick = {
+                            showBottomControls = true
+                            onCyclePlayMode()
+                        },
+                        contentDescription = "播放模式",
+                        size = 44.dp,
+                        surfaceColor = Color.White.copy(alpha = 0.12f),
+                    )
+                    GlassIconButton(
+                        backdrop = backdrop,
+                        icon = Icons.Rounded.SkipPrevious,
+                        onClick = {
+                            showBottomControls = true
+                            player.previous()
+                        },
+                        contentDescription = "上一首",
+                        size = 52.dp,
+                        iconSize = 28.dp,
+                        surfaceColor = Color.White.copy(alpha = 0.12f),
+                    )
+                    GlassIconButton(
+                        backdrop = backdrop,
+                        icon = if (playerState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        onClick = {
+                            showBottomControls = true
+                            player.togglePlay()
+                        },
+                        contentDescription = if (playerState.isPlaying) "暂停" else "播放",
+                        size = 68.dp,
+                        iconSize = 38.dp,
+                        surfaceColor = Color.White.copy(alpha = 0.14f),
+                    )
+                    GlassIconButton(
+                        backdrop = backdrop,
+                        icon = Icons.Rounded.SkipNext,
+                        onClick = {
+                            showBottomControls = true
+                            player.next()
+                        },
+                        contentDescription = "下一首",
+                        size = 52.dp,
+                        iconSize = 28.dp,
+                        surfaceColor = Color.White.copy(alpha = 0.12f),
+                    )
+                    GlassIconButton(
+                        backdrop = backdrop,
+                        icon = if (liked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                        onClick = {
+                            showBottomControls = true
+                            onToggleLike(song)
+                        },
+                        contentDescription = if (liked) "取消收藏" else "收藏",
+                        tint = if (liked) FavoriteRed else Color.White.copy(alpha = 0.9f),
+                        size = 44.dp,
+                        surfaceColor = Color.White.copy(alpha = 0.12f),
+                    )
+                }
             }
         }
     }

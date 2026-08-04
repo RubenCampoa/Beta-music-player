@@ -122,6 +122,7 @@ data class SongUrlDto(val url: String? = null)
 @Serializable
 data class LyricResp(
     val lrc: LyricText? = null,
+    val yrc: LyricText? = null,
     val tlyric: LyricText? = null,
     val nolyric: Boolean? = null,
     val uncollected: Boolean? = null,
@@ -253,10 +254,18 @@ private interface NeteaseApi {
     ): PlaylistTracksResp
 
     @GET("/cloudsearch")
-    suspend fun cloudSearch(@Query("keywords") keywords: String): SearchResp
+    suspend fun cloudSearch(
+        @Query("keywords") keywords: String,
+        @Query("limit") limit: Int = 30,
+        @Query("type") type: Int = 1,
+    ): SearchResp
 
     @GET("/search")
-    suspend fun search(@Query("keywords") keywords: String): SearchResp
+    suspend fun search(
+        @Query("keywords") keywords: String,
+        @Query("limit") limit: Int = 30,
+        @Query("type") type: Int = 1,
+    ): SearchResp
 
     @GET("/song/detail")
     suspend fun getSongDetail(@Query("ids") ids: String): SongDetailResp
@@ -298,8 +307,13 @@ private class ApiEndpointInterceptor(
         val withParams = original.url.newBuilder()
             .addQueryParameter("timestamp", System.currentTimeMillis().toString())
             .apply {
-                val cookie = cookieProvider()
-                if (cookie.isNotBlank()) addQueryParameter("cookie", cookie)
+                val userCookie = cookieProvider()
+                if (userCookie.isNotBlank()) {
+                    addQueryParameter("cookie", userCookie)
+                } else {
+                    // 未登录状态注入默认 Guest 客户端 Cookie，解锁 Netease 后台对 VIP 歌曲搜索与预览的拦截
+                    addQueryParameter("cookie", "os=pc; osver=10.0.19042.0; appver=2.9.7; NMTID=anonymous")
+                }
             }
             .build()
         val request = original.newBuilder().url(withParams).build()
@@ -345,8 +359,15 @@ class NeteaseApiService(
         private const val FALLBACK_COVER =
             "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=400&h=400&fit=crop"
 
-        private const val DEFAULT_API_BASE_URL = "http://192.168.0.105:3000/"
+        private const val DEFAULT_API_BASE_URL = "https://netease-cloud-music-api-beta.vercel.app/"
         private const val LEGACY_EMULATOR_BASE_URL = "http://10.0.2.2:3000/"
+
+        private val FALLBACK_NODES = listOf(
+            "https://netease-cloud-music-api-beta.vercel.app/",
+            "https://music.api.666666.site/",
+            "http://10.0.2.2:3000/",
+            "http://192.168.0.105:3000/",
+        )
     }
 
     private val json = Json {
@@ -364,8 +385,8 @@ class NeteaseApiService(
 
     private val retrofit: Retrofit = run {
         val client = OkHttpClient.Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
             .addInterceptor(ApiEndpointInterceptor({ apiBaseUrl }) { cookie })
             .build()
@@ -378,16 +399,28 @@ class NeteaseApiService(
 
     private val api: NeteaseApi = retrofit.create(NeteaseApi::class.java)
 
-    /** 从 DataStore 恢复登录态（应用启动时调用） */
+    /** 从 DataStore 恢复登录态（应用启动时调用，若不可达自动切备用节点） */
     suspend fun restoreSession() {
         cookie = preferences.getCookie()
         val savedUrl = preferences.getApiBaseUrl()
-        if (savedUrl.isNotBlank() && savedUrl.trimEnd('/') != LEGACY_EMULATOR_BASE_URL.trimEnd('/')) {
+        if (savedUrl.isNotBlank()) {
             normalizeApiBaseUrl(savedUrl)?.let { apiBaseUrl = it }
-        } else if (savedUrl.isNotBlank()) {
-            // 升级旧 APK 时清掉模拟器专用地址，否则 DataStore 会永久覆盖新默认值。
+        } else {
             apiBaseUrl = DEFAULT_API_BASE_URL.toHttpUrl()
-            preferences.setApiBaseUrl(DEFAULT_API_BASE_URL)
+        }
+
+        // 检测当前节点连通性，不可达时自动在备用节点列表中轮询首个可用 API
+        val currentOk = safeNet { api.getTopArtists(limit = 1, offset = 0).code == 200 }.getOrDefault(false)
+        if (!currentOk) {
+            for (node in FALLBACK_NODES) {
+                val candidate = normalizeApiBaseUrl(node) ?: continue
+                apiBaseUrl = candidate
+                val nodeOk = safeNet { api.getTopArtists(limit = 1, offset = 0).code == 200 }.getOrDefault(false)
+                if (nodeOk) {
+                    preferences.setApiBaseUrl(candidate.toString())
+                    break
+                }
+            }
         }
     }
 
@@ -641,27 +674,52 @@ class NeteaseApiService(
     // --- 搜索 ---
 
     suspend fun searchSongs(keywords: String): List<Song> {
-        // 优先 /cloudsearch（原生带封面）
-        val cloudResult = safeNet {
-            api.cloudSearch(keywords).result?.songs?.map { formatTrackToSong(it) }
-        }.getOrNull()
-        if (!cloudResult.isNullOrEmpty()) return cloudResult
+        val trimmedQuery = keywords.trim()
+        if (trimmedQuery.isEmpty()) return emptyList()
 
-        // 兜底 /search，缺封面时用 /song/detail 补全
-        val searchResult = safeNet {
-            val songs = api.search(keywords).result?.songs
-            if (songs.isNullOrEmpty()) return@safeNet emptyList()
-
-            val needDetail = songs.first().al?.picUrl == null && songs.first().album?.picUrl == null
-            if (needDetail) {
-                val ids = songs.take(30).joinToString(",") { it.id.toString() }
-                val detail = safeNet { api.getSongDetail(ids).songs }.getOrNull()
-                if (!detail.isNullOrEmpty()) return@safeNet detail.map { formatTrackToSong(it) }
+        // 优先 /cloudsearch（原生带封面，带 limit=30 与 type=1）
+        val rawSongs = safeNet {
+            val cloudSongs = api.cloudSearch(trimmedQuery, limit = 30, type = 1).result?.songs
+            if (!cloudSongs.isNullOrEmpty()) {
+                cloudSongs
+            } else {
+                api.search(trimmedQuery, limit = 30, type = 1).result?.songs ?: emptyList()
             }
-            songs.map { formatTrackToSong(it) }
-        }.getOrNull()
+        }.getOrNull() ?: emptyList()
 
-        return searchResult ?: emptyList()
+        if (rawSongs.isEmpty()) return emptyList()
+
+        // 缺封面时用 /song/detail 批量补全
+        val needDetail = rawSongs.firstOrNull()?.let { it.al?.picUrl == null && it.album?.picUrl == null } ?: false
+        val finalTracks = if (needDetail) {
+            val ids = rawSongs.take(30).joinToString(",") { it.id.toString() }
+            safeNet { api.getSongDetail(ids).songs }.getOrNull() ?: rawSongs
+        } else {
+            rawSongs
+        }
+
+        val songs = finalTracks.map { formatTrackToSong(it) }
+
+        // 原版加权算法：精准歌名、非 Remix/DJ/翻唱/减速/片段优先置顶
+        val noiseKeywords = listOf("dj", "remix", "翻唱", "减速", "加速", "片段", "伴奏", "live", "抖音版", "cover", "能量版", "夜店")
+        return songs.sortedWith(
+            compareByDescending<Song> { song ->
+                val nameLower = song.name.trim().lowercase()
+                val queryLower = trimmedQuery.lowercase()
+                var score = 0
+
+                // 1. 完全或前缀匹配歌名
+                if (nameLower == queryLower) score += 100
+                else if (nameLower.startsWith(queryLower)) score += 60
+                else if (nameLower.contains(queryLower)) score += 30
+
+                // 2. 原版无 DJ/Remix/翻唱 等干扰关键词加分
+                val isNoise = noiseKeywords.any { nameLower.contains(it) }
+                if (!isNoise) score += 40
+
+                score
+            }
+        )
     }
 
     // --- 播放 URL 与歌词 ---
@@ -700,7 +758,8 @@ class NeteaseApiService(
             if (res.uncollected == true) {
                 return listOf(LyricLine(time = 0.0, text = "暂无歌词"))
             }
-            val main = res.lrc?.lyric?.let { LrcParser.parse(it) } ?: emptyList()
+            val yrcParsed = res.yrc?.lyric?.let { LrcParser.parseYrc(it) } ?: emptyList()
+            val main = if (yrcParsed.isNotEmpty()) yrcParsed else (res.lrc?.lyric?.let { LrcParser.parse(it) } ?: emptyList())
             if (main.isNotEmpty()) {
                 val trans = res.tlyric?.lyric?.let { LrcParser.parse(it) } ?: emptyList()
                 return if (trans.isNotEmpty()) LrcParser.mergeTranslation(main, trans) else main

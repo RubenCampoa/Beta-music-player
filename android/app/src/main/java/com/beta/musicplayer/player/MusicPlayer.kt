@@ -129,32 +129,37 @@ class MusicPlayer(
         }
     }
 
-    /** 用队列替换当前播放（startIndex 指定从第几首开始） */
+    /** 用队列替换当前播放（startIndex 指定从第几首开始，即点即播无卡顿） */
     fun playQueue(songs: List<Song>, startIndex: Int = 0) {
         if (songs.isEmpty()) return
         retriedNeteaseIds.clear()
         val safeStartIndex = startIndex.coerceIn(0, songs.lastIndex)
         val requestToken = ++playRequestToken
-        _state.update { it.copy(queue = songs, queueIndex = -1, currentSong = songs[safeStartIndex], lyrics = emptyList()) }
-        // 首曲不依赖 ExoPlayer 的 transition 回调，确保一按播放就请求 /lyric。
+        val targetSong = songs[safeStartIndex]
+        _state.update { it.copy(queue = songs, queueIndex = safeStartIndex, currentSong = targetSong, lyrics = emptyList()) }
+        // 首曲不依赖 ExoPlayer 的 transition 回调，一按播放即请求歌词。
         loadLyricsForCurrent()
-        // 不把易失效的 music.163.com outer 链接直接交给播放器。先通过
-        // api-enhanced 取得实际 CDN URL，首首歌曲切换时也会走同一条链路。
-        scope.launch {
-            val firstSong = songs[safeStartIndex]
-            val playableUrl = firstSong.neteaseId?.let { api.getSongAudioUrl(it) }
-            if (requestToken != playRequestToken) return@launch
-            val items = songs.mapIndexed { index, song ->
-                val url = if (index == safeStartIndex && !playableUrl.isNullOrBlank()) {
-                    playableUrl
-                } else {
-                    song.audioUrl
+
+        // 1. 立即加载 MediaItem 并平滑开始播放
+        val initialItems = songs.map { MediaItem.Builder().setUri(it.audioUrl).build() }
+        exoPlayer.setMediaItems(initialItems, safeStartIndex, 0L)
+        exoPlayer.prepare()
+        exoPlayer.playWhenReady = true
+
+        // 2. 后台异步升级真实 CDN URL（使用 replaceMediaItem 精准替换，杜绝全量 reset 造成的音频卡顿）
+        targetSong.neteaseId?.let { neteaseId ->
+            scope.launch {
+                val realUrl = api.getSongAudioUrl(neteaseId)
+                if (requestToken != playRequestToken) return@launch
+                if (!realUrl.isNullOrBlank() && realUrl != targetSong.audioUrl) {
+                    val currentIndex = exoPlayer.currentMediaItemIndex
+                    if (currentIndex == safeStartIndex && exoPlayer.mediaItemCount > safeStartIndex) {
+                        val isPlayingNow = exoPlayer.isPlaying
+                        exoPlayer.replaceMediaItem(safeStartIndex, MediaItem.Builder().setUri(realUrl).build())
+                        if (isPlayingNow) exoPlayer.playWhenReady = true
+                    }
                 }
-                MediaItem.Builder().setUri(url).build()
             }
-            exoPlayer.setMediaItems(items, safeStartIndex, 0L)
-            exoPlayer.prepare()
-            exoPlayer.playWhenReady = true
         }
     }
 
@@ -176,27 +181,6 @@ class MusicPlayer(
         exoPlayer.setMediaItems(items, safeStartIndex, 0L)
         exoPlayer.prepare()
         exoPlayer.playWhenReady = false
-        // 首页首次进入会预加载第一首；这里也提前替换成 API 返回的 CDN URL，
-        // 用户点击播放时无需先触发一次 outer-url 错误再重试。
-        val firstSong = songs[safeStartIndex]
-        firstSong.neteaseId?.let { neteaseId ->
-            scope.launch {
-                val playableUrl = api.getSongAudioUrl(neteaseId)
-                if (
-                    playableUrl.isNotBlank() &&
-                    _state.value.currentSong?.neteaseId == neteaseId &&
-                    exoPlayer.currentMediaItemIndex == safeStartIndex
-                ) {
-                    val updatedItems = (0 until exoPlayer.mediaItemCount)
-                        .map { exoPlayer.getMediaItemAt(it) }
-                        .toMutableList()
-                    updatedItems[safeStartIndex] = MediaItem.Builder().setUri(playableUrl).build()
-                    exoPlayer.setMediaItems(updatedItems, safeStartIndex, 0L)
-                    exoPlayer.prepare()
-                    exoPlayer.playWhenReady = false
-                }
-            }
-        }
     }
 
     fun togglePlay() {
@@ -209,16 +193,30 @@ class MusicPlayer(
 
     fun next() {
         if (_state.value.queue.isEmpty()) return
-        exoPlayer.seekToNextMediaItem()
+        if (exoPlayer.hasNextMediaItem()) {
+            exoPlayer.seekToNextMediaItem()
+        } else {
+            exoPlayer.seekTo(0, 0L)
+        }
+        val nextIdx = exoPlayer.currentMediaItemIndex
+        val nextSong = _state.value.queue.getOrNull(nextIdx)
+        _state.update { it.copy(queueIndex = nextIdx, currentSong = nextSong, lyrics = emptyList()) }
+        loadLyricsForCurrent()
     }
 
     fun previous() {
         if (_state.value.queue.isEmpty()) return
         if (exoPlayer.currentPosition > 3_000) {
             exoPlayer.seekTo(0)
-        } else {
+        } else if (exoPlayer.hasPreviousMediaItem()) {
             exoPlayer.seekToPreviousMediaItem()
+        } else {
+            exoPlayer.seekTo(_state.value.queue.lastIndex, 0L)
         }
+        val prevIdx = exoPlayer.currentMediaItemIndex
+        val prevSong = _state.value.queue.getOrNull(prevIdx)
+        _state.update { it.copy(queueIndex = prevIdx, currentSong = prevSong, lyrics = emptyList()) }
+        loadLyricsForCurrent()
     }
 
     fun setPlayMode(mode: PlayMode) {

@@ -1,12 +1,21 @@
 package com.beta.musicplayer.ui
 
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -15,8 +24,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -42,13 +49,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
@@ -61,10 +71,13 @@ import com.beta.musicplayer.ui.components.GlassIconButton
 import com.beta.musicplayer.ui.components.GlassProgressPlayButton
 import com.beta.musicplayer.ui.components.LiquidDockTab
 import com.beta.musicplayer.ui.components.LiquidDockTabs
-import com.beta.musicplayer.ui.components.liquidButton
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
 
 private val DockSelectedAccent = Color(0xFF0A84FF)
 
@@ -96,22 +109,7 @@ fun MainScreen() {
     }
 
     var selectedPageIndex by rememberSaveable { mutableIntStateOf(0) }
-    val pagerState = rememberPagerState(initialPage = selectedPageIndex) { pageTabs.size }
     var showPlayerSheet by rememberSaveable { mutableStateOf(false) }
-
-    // Dock 是页面选择的唯一真源；Pager 只负责渲染与切页动画。
-    // LaunchedEffect 会在快速连续点按时自动取消旧动画，避免多个 Job 争抢 Pager 状态。
-    LaunchedEffect(selectedPageIndex) {
-        if (pagerState.currentPage != selectedPageIndex || pagerState.currentPageOffsetFraction != 0f) {
-            pagerState.animateScrollToPage(
-                page = selectedPageIndex,
-                animationSpec = tween(
-                    durationMillis = 280,
-                    easing = FastOutSlowInEasing,
-                ),
-            )
-        }
-    }
 
     Box(Modifier.fillMaxSize()) {
         // 页面内部玻璃只采样稳定背景，避免玻璃组件录回自身形成采样闭环。
@@ -140,21 +138,83 @@ fun MainScreen() {
                 BackgroundLayer(song = playerState.currentSong)
             }
 
-            HorizontalPager(
-                state = pagerState,
-                userScrollEnabled = false,
-                beyondViewportPageCount = 1,
-                key = { pageTabs[it].name },
+            val saveableStateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .statusBarsPadding(),
-            ) { page ->
-                when (pageTabs[page]) {
-                    MainTab.ListenNow -> ListenNowView(viewModel, uiState, playerState, backgroundBackdrop)
-                    MainTab.Browse -> BrowseView(viewModel, uiState, backgroundBackdrop)
-                    MainTab.Artists -> ArtistsView(viewModel, uiState, backgroundBackdrop)
-                    MainTab.Me -> MeView(viewModel, uiState, backgroundBackdrop)
-                    MainTab.Search -> SearchView(viewModel, uiState, backgroundBackdrop)
+                    .statusBarsPadding()
+            ) {
+                pageTabs.forEachIndexed { index, tab ->
+                    val isSelected = index == selectedPageIndex
+                    val pageAlpha by androidx.compose.animation.core.animateFloatAsState(
+                        targetValue = if (isSelected) 1f else 0f,
+                        animationSpec = tween(durationMillis = 200, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+                        label = "tabAlpha_$index",
+                    )
+                    if (pageAlpha > 0f) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer { alpha = pageAlpha }
+                        ) {
+                            saveableStateHolder.SaveableStateProvider(key = tab.name) {
+                                when (tab) {
+                                    MainTab.ListenNow -> ListenNowView(viewModel, uiState, playerState, backgroundBackdrop)
+                                    MainTab.Browse -> BrowseView(viewModel, uiState, backgroundBackdrop)
+                                    MainTab.Artists -> ArtistsView(viewModel, uiState, backgroundBackdrop)
+                                    MainTab.Me -> MeView(viewModel, uiState, backgroundBackdrop)
+                                    MainTab.Search -> SearchView(viewModel, uiState, backgroundBackdrop)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 顶端沉浸式渐变遮罩 (Top Status Bar Mask)
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(72.dp)
+                .align(Alignment.TopCenter)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFF0D0C12).copy(alpha = 0.96f),
+                            Color(0xFF0D0C12).copy(alpha = 0.65f),
+                            Color(0xFF0D0C12).copy(alpha = 0.15f),
+                            Color.Transparent,
+                        )
+                    )
+                )
+        )
+
+        // 顶部 Toast 提示（Issue 6: 未登录时收藏歌曲提示）
+        AnimatedVisibility(
+            visible = uiState.toastMessage != null,
+            enter = fadeIn() + slideInVertically { -it },
+            exit = fadeOut() + slideOutVertically { -it },
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(top = 10.dp)
+                .zIndex(10f),
+        ) {
+            uiState.toastMessage?.let { msg ->
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(percent = 50))
+                        .background(Color(0xEE2A2930))
+                        .padding(horizontal = 20.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = msg,
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
                 }
             }
         }
@@ -262,12 +322,7 @@ private fun GlassBottomBar(
                 .height(64.dp),
         ) {
             navTabs.forEachIndexed { index, tab ->
-                val active = selectedIndex == index
-                val contentColor = if (active) {
-                    DockSelectedAccent
-                } else {
-                    Color.White.copy(alpha = 0.72f)
-                }
+                val contentColor = Color.White.copy(alpha = 0.72f)
                 LiquidDockTab(
                     onClick = { selectDockTab(index) },
                 ) {
@@ -281,7 +336,7 @@ private fun GlassBottomBar(
                         text = tab.label,
                         color = contentColor,
                         style = MaterialTheme.typography.labelSmall,
-                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                        fontWeight = FontWeight.Medium,
                     )
                 }
             }
@@ -302,7 +357,7 @@ private fun GlassBottomBar(
     }
 }
 
-/** 迷你播放条（全圆角胶囊 + 动态环形进度圈） */
+/** 迷你播放条（全圆角胶囊 + 动态环形进度圈，Issue 1 隔离点击区域） */
 @Composable
 private fun MiniPlayerBar(
     backdrop: Backdrop,
@@ -316,51 +371,76 @@ private fun MiniPlayerBar(
         (playerState.positionMs.toFloat() / playerState.durationMs.toFloat()).coerceIn(0f, 1f)
     } else 0f
 
-    val lyricSnippet = playerState.lyrics.firstOrNull()?.text ?: song.artist
+    val currentPositionSec = playerState.positionMs / 1000.0
+    val currentLyricText = remember(playerState.lyrics, currentPositionSec) {
+        if (playerState.lyrics.isEmpty()) null
+        else {
+            playerState.lyrics.lastOrNull { it.time <= currentPositionSec }?.text
+        }
+    }
+    val lyricSnippet = currentLyricText ?: song.artist
 
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(60.dp)
-            .liquidButton(
+            .drawBackdrop(
                 backdrop = backdrop,
-                onClick = onClick,
-                contentDescription = "打开播放页",
-                shape = RoundedCornerShape(percent = 50),
-            ),
+                shape = { RoundedCornerShape(percent = 50) },
+                effects = {
+                    vibrancy()
+                    blur(8.dp.toPx())
+                    lens(14.dp.toPx(), 28.dp.toPx())
+                },
+                onDrawSurface = { drawRect(Color.White.copy(alpha = 0.08f)) }
+            )
+            .clip(RoundedCornerShape(percent = 50))
+            .padding(horizontal = 6.dp),
+        contentAlignment = Alignment.Center,
     ) {
         Row(
-            Modifier
-                .fillMaxSize()
-                .padding(horizontal = 10.dp),
+            Modifier.fillMaxSize(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            AsyncImage(
-                model = Format.getOptimizedCoverUrl(song.coverUrl, 120),
-                contentDescription = null,
-                modifier = Modifier
-                    .size(46.dp)
-                    .clip(CircleShape),
-                contentScale = ContentScale.Crop,
-            )
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = song.name,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White,
+            Row(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clickable(
+                        interactionSource = null,
+                        indication = null,
+                        onClick = onClick
+                    )
+                    .padding(start = 6.dp, end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AsyncImage(
+                    model = Format.getOptimizedCoverUrl(song.coverUrl, 120),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Crop,
                 )
-                Text(
-                    text = lyricSnippet,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.White.copy(alpha = 0.65f),
-                )
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = song.name,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = lyricSnippet,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.65f),
+                    )
+                }
             }
-            Spacer(Modifier.width(8.dp))
             GlassProgressPlayButton(
                 backdrop = backdrop,
                 icon = if (playerState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,

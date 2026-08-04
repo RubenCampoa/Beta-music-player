@@ -47,11 +47,20 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlin.math.abs
 
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import com.beta.musicplayer.data.model.LyricWord
+
 /**
- * Apple Music 风格的全屏歌词。
- *
- * 排版尺寸在换句时保持不变，焦点仅通过 GPU 层的位移、缩放和透明度弹簧过渡，
- * 避免字体重排与列表滚动互相争抢主线程。程序滚动和用户拖动也使用独立状态。
+ * Apple Music 风格的全屏歌词：支持非当前句高质景深高斯模糊与 YRC 歌曲的非线性逐字跳跃动效。
  */
 @Composable
 fun LyricsView(
@@ -59,9 +68,21 @@ fun LyricsView(
     positionProvider: () -> Long,
     onSeekTo: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    onTap: (() -> Unit)? = null,
 ) {
     if (lyrics.isEmpty()) {
-        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .then(
+                    if (onTap != null) {
+                        Modifier.pointerInput(onTap) {
+                            detectTapGestures { onTap() }
+                        }
+                    } else Modifier
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
             Text(
                 text = "暂无歌词",
                 color = Color.White.copy(alpha = 0.45f),
@@ -71,8 +92,9 @@ fun LyricsView(
         return
     }
 
+    var currentPositionMs by remember { mutableStateOf(positionProvider()) }
     var currentIndex by remember(lyrics) {
-        mutableIntStateOf(lyrics.findCurrentIndex(positionProvider()))
+        mutableIntStateOf(lyrics.findCurrentIndex(currentPositionMs))
     }
     val listState = rememberLazyListState()
     val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
@@ -80,11 +102,12 @@ fun LyricsView(
     val density = LocalDensity.current
     val focusOffsetPx = with(density) { 116.dp.roundToPx() }
 
-    // 全屏歌词使用局部 20Hz 时钟，但只在歌词索引真正变化时写入状态。
-    // 因此切句延迟低于 50ms，也不会让整个播放器页面以 20Hz 重组。
+    // 全屏歌词 20Hz 局部高频更新，驱动逐字高亮与滚动。
     LaunchedEffect(lyrics, positionProvider) {
         while (isActive) {
-            val nextIndex = lyrics.findCurrentIndex(positionProvider())
+            val pos = positionProvider()
+            currentPositionMs = pos
+            val nextIndex = lyrics.findCurrentIndex(pos)
             if (nextIndex != currentIndex) currentIndex = nextIndex
             delay(50)
         }
@@ -94,6 +117,7 @@ fun LyricsView(
     LaunchedEffect(isUserDragging) {
         if (isUserDragging) {
             autoScrollPaused = true
+            onTap?.invoke()
         } else if (autoScrollPaused) {
             delay(1_600)
             autoScrollPaused = false
@@ -125,7 +149,15 @@ fun LyricsView(
 
     LazyColumn(
         state = listState,
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .then(
+                if (onTap != null) {
+                    Modifier.pointerInput(onTap) {
+                        detectTapGestures { onTap() }
+                    }
+                } else Modifier
+            ),
         contentPadding = PaddingValues(
             top = 112.dp,
             bottom = 224.dp,
@@ -152,8 +184,8 @@ fun LyricsView(
             val targetTranslationY = with(density) {
                 when {
                     isCurrent -> 0.dp
-                    index < currentIndex -> (-5).dp
-                    else -> 7.dp
+                    index < currentIndex -> (-4).dp
+                    else -> 6.dp
                 }.toPx()
             }
             val translationY by animateFloatAsState(
@@ -169,8 +201,8 @@ fun LyricsView(
             val restingAlpha = when (distance) {
                 0 -> 1f
                 1 -> 0.42f
-                2 -> 0.25f
-                else -> 0.13f
+                2 -> 0.26f
+                else -> 0.14f
             }
             val animatedAlpha by animateFloatAsState(
                 targetValue = restingAlpha,
@@ -181,22 +213,25 @@ fun LyricsView(
                 label = "lyricAlpha",
             )
             val clampedFocus = focusProgress.coerceIn(0f, 1f)
-            // focusProgress 可轻微超过 1，使当前句到位后产生自然的果冻回弹。
             val animatedScale = 0.92f + 0.08f * focusProgress
 
-            // 相邻两句保持清晰，焦点交接时不会突然切换 RenderEffect。
-            // 只有远端歌词使用缓存模糊，兼顾参考图的景深与滚动性能。
+            // 参考图高质景深模糊：非当前句根据距离呈现 7.5px..22px 磨砂玻璃 Blur。
             val blurBucket = when {
                 Build.VERSION.SDK_INT < Build.VERSION_CODES.S -> 0
-                distance <= 1 -> 0
-                distance == 2 -> 1
-                else -> 2
+                distance == 0 -> 0
+                distance == 1 -> 1
+                distance == 2 -> 2
+                else -> 3
             }
             val blurEffect = remember(blurBucket) {
                 if (blurBucket == 0) {
                     null
                 } else {
-                    val radius = if (blurBucket == 1) 3.5f else 6.5f
+                    val radius = when (blurBucket) {
+                        1 -> 7.5f
+                        2 -> 14f
+                        else -> 22f
+                    }
                     android.graphics.RenderEffect.createBlurEffect(
                         radius,
                         radius,
@@ -227,21 +262,28 @@ fun LyricsView(
                     .padding(vertical = 7.dp),
                 horizontalAlignment = Alignment.Start,
             ) {
-                Text(
-                    text = line.text,
-                    modifier = Modifier.fillMaxWidth(),
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        shadow = Shadow(
-                            color = Color.White.copy(alpha = 0.22f * clampedFocus),
-                            blurRadius = 11f * clampedFocus,
+                if (isCurrent && line.isYrc && line.words.isNotEmpty()) {
+                    YrcKaraokeLine(
+                        words = line.words,
+                        currentPositionMs = currentPositionMs,
+                    )
+                } else {
+                    Text(
+                        text = line.text,
+                        modifier = Modifier.fillMaxWidth(),
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            shadow = Shadow(
+                                color = Color.White.copy(alpha = 0.22f * clampedFocus),
+                                blurRadius = 11f * clampedFocus,
+                            ),
                         ),
-                    ),
-                    color = Color.White,
-                    fontSize = 28.sp,
-                    lineHeight = 34.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    textAlign = TextAlign.Start,
-                )
+                        color = Color.White,
+                        fontSize = 28.sp,
+                        lineHeight = 34.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        textAlign = TextAlign.Start,
+                    )
+                }
 
                 line.translation?.takeIf { it.isNotBlank() }?.let { translation ->
                     Spacer(Modifier.height(3.dp))
@@ -257,6 +299,69 @@ fun LyricsView(
                     )
                 }
             }
+        }
+    }
+}
+
+/** 仅在支持 YRC 逐字歌词的歌曲上启用的非线性 3D 跳跃高亮组件 */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun YrcKaraokeLine(
+    words: List<LyricWord>,
+    currentPositionMs: Long,
+) {
+    val currentSec = currentPositionMs / 1000.0
+    val density = LocalDensity.current
+
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Start,
+    ) {
+        words.forEach { word ->
+            val wordStart = word.startTime
+            val wordEnd = word.startTime + word.duration
+            val wordProgress = if (word.duration > 0) {
+                ((currentSec - wordStart) / word.duration).coerceIn(0.0, 1.0).toFloat()
+            } else 0f
+
+            val isSinging = currentSec >= wordStart && currentSec < wordEnd
+            val isSung = currentSec >= wordEnd
+
+            // 非线性抛物线跳跃与 Spring 回弹（sin(progress * PI) 弧形跃起 7dp）
+            val jumpYPx = if (isSinging) {
+                (kotlin.math.sin(wordProgress * Math.PI).toFloat() * -7f * density.density)
+            } else 0f
+
+            val scale = if (isSinging) {
+                1.0f + (kotlin.math.sin(wordProgress * Math.PI).toFloat() * 0.16f)
+            } else 1.0f
+
+            val alpha = when {
+                isSinging -> 1f
+                isSung -> 1f
+                else -> 0.40f
+            }
+
+            Text(
+                text = word.text,
+                modifier = Modifier
+                    .graphicsLayer {
+                        this.translationY = jumpYPx
+                        this.scaleX = scale
+                        this.scaleY = scale
+                        this.alpha = alpha
+                    },
+                style = MaterialTheme.typography.titleLarge.copy(
+                    shadow = if (isSinging) Shadow(
+                        color = Color.White.copy(alpha = 0.95f),
+                        blurRadius = 18f,
+                    ) else null,
+                ),
+                color = Color.White,
+                fontSize = 28.sp,
+                lineHeight = 34.sp,
+                fontWeight = if (isSinging || isSung) FontWeight.ExtraBold else FontWeight.Bold,
+            )
         }
     }
 }

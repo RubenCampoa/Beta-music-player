@@ -184,6 +184,7 @@ fun LiquidDockTabs(
                     val targetIndex = targetValue.fastRoundToInt().fastCoerceIn(0, tabsCount - 1)
                     currentIndex = targetIndex
                     animateToValue(targetIndex.toFloat())
+                    onTabSelected(targetIndex)
                     animationScope.launch {
                         offsetAnimation.animateTo(0f, spring(1f, 300f, 0.5f))
                     }
@@ -202,14 +203,9 @@ fun LiquidDockTabs(
 
         LaunchedEffect(selectedTabIndex) {
             snapshotFlow { selectedTabIndex().coerceIn(0, tabsCount - 1) }
-                .collectLatest { index -> currentIndex = index }
-        }
-        LaunchedEffect(dragAnimation) {
-            snapshotFlow { currentIndex }
-                .drop(1)
                 .collectLatest { index ->
+                    currentIndex = index
                     dragAnimation.animateToValue(index.toFloat())
-                    onTabSelected(index)
                 }
         }
 
@@ -379,9 +375,9 @@ private class DockDampedDragAnimation(
 
     val value: Float get() = valueAnimation.value
     val targetValue: Float get() = valueAnimation.targetValue
-    val pressProgress: Float get() = pressProgressAnimation.value
-    val scaleX: Float get() = scaleXAnimation.value
-    val scaleY: Float get() = scaleYAnimation.value
+    val pressProgress: Float get() = pressProgressAnimation.value.coerceIn(0f, 1f)
+    val scaleX: Float get() = scaleXAnimation.value.coerceAtLeast(0.01f)
+    val scaleY: Float get() = scaleYAnimation.value.coerceAtLeast(0.01f)
     val velocity: Float get() = velocityAnimation.value
 
     val modifier: Modifier = Modifier.pointerInput(Unit) {
@@ -435,14 +431,9 @@ private class DockDampedDragAnimation(
     }
 
     fun animateToValue(value: Float) {
+        val coerced = value.coerceIn(valueRange)
         animationScope.launch {
-            mutatorMutex.mutate {
-                press()
-                val coerced = value.coerceIn(valueRange)
-                launch { valueAnimation.animateTo(coerced, valueAnimationSpec) }
-                if (velocity != 0f) launch { velocityAnimation.animateTo(0f, velocityAnimationSpec) }
-                release()
-            }
+            valueAnimation.animateTo(coerced, valueAnimationSpec)
         }
     }
 

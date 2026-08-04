@@ -51,6 +51,7 @@ data class MainUiState(
     val isPhoneLoginLoading: Boolean = false,
     val phoneLoginMessage: String? = null,
     val apiBaseUrl: String = "",
+    val toastMessage: String? = null,
 )
 
 class MainViewModel(private val container: AppContainer) : ViewModel() {
@@ -298,10 +299,22 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { container.preferences.setPlayMode(next.name) }
     }
 
+    fun showToast(message: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(toastMessage = message) }
+            delay(2500)
+            _uiState.update { if (it.toastMessage == message) it.copy(toastMessage = null) else it }
+        }
+    }
+
     // --- 红心收藏 ---
 
     fun toggleLike(song: Song) {
         val id = song.neteaseId ?: return
+        if (_uiState.value.user == null) {
+            showToast("请登录后再操作")
+            return
+        }
         viewModelScope.launch {
             val liked = id in _uiState.value.likedIds
             val success = container.neteaseApi.likeSong(id, !liked)

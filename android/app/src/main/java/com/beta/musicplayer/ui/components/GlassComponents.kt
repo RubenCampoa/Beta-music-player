@@ -7,6 +7,7 @@ import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
@@ -20,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -38,6 +40,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -197,10 +200,10 @@ fun Modifier.liquidButton(
             awaitEachGesture {
                 val down = awaitFirstDown(
                     requireUnconsumed = false,
-                    pass = PointerEventPass.Initial,
+                    pass = PointerEventPass.Main,
                 )
                 startPosition = down.position
-                down.consume()
+                val touchSlop = viewConfiguration.touchSlop
                 animationScope.launch {
                     launch { pointerOffsetAnim.snapTo(Offset.Zero) }
                     launch { pressProgress.animateTo(1f, LiquidButtonPressSpec) }
@@ -208,21 +211,28 @@ fun Modifier.liquidButton(
 
                 var pressed = true
                 var released = false
+                var isDragOverSlop = false
                 while (pressed) {
-                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    val event = awaitPointerEvent(PointerEventPass.Main)
                     val change = event.changes.firstOrNull { it.id == down.id } ?: break
                     val currentOffset = change.position - startPosition
+                    if (currentOffset.getDistance() > touchSlop) {
+                        isDragOverSlop = true
+                        pressed = false
+                        released = false
+                        break
+                    }
                     animationScope.launch { pointerOffsetAnim.snapTo(currentOffset) }
                     pressed = change.pressed
                     released = !pressed
-                    change.consume()
+                    if (pressed) change.consume()
                 }
 
                 animationScope.launch {
                     launch { pressProgress.animateTo(0f, LiquidButtonPressSpec) }
                     launch { pointerOffsetAnim.animateTo(Offset.Zero, LiquidButtonOffsetSpec) }
                 }
-                if (released) latestOnClick()
+                if (released && !isDragOverSlop) latestOnClick()
             }
         }
         .semantics {
@@ -270,7 +280,7 @@ fun GlassIconButton(
     }
 }
 
-/** 液态玻璃交互卡片（歌单卡片/艺术家卡片）：具备完整点按、拖拽位移形变、高光跟手与 Spring 回弹。 */
+/** 液态玻璃交互卡片（歌单卡片/艺术家卡片）：完美兼容 LazyRow / LazyColumn 列表与网格滑动。 */
 @Composable
 fun GlassCard(
     backdrop: Backdrop,
@@ -281,12 +291,25 @@ fun GlassCard(
     content: @Composable () -> Unit,
 ) {
     Box(
-        modifier = modifier.liquidButton(
-            backdrop = backdrop,
-            onClick = onClick,
-            surfaceColor = surfaceColor,
-            shape = shape,
-        ),
+        modifier = modifier
+            .drawBackdrop(
+                backdrop = backdrop,
+                shape = { shape },
+                effects = {
+                    vibrancy()
+                    blur(8.dp.toPx())
+                    lens(12.dp.toPx(), 24.dp.toPx())
+                },
+                onDrawSurface = {
+                    if (surfaceColor.isSpecified) drawRect(surfaceColor)
+                },
+            )
+            .clip(shape)
+            .clickable(
+                interactionSource = null,
+                indication = null,
+                onClick = onClick,
+            ),
     ) {
         content()
     }
@@ -294,7 +317,7 @@ fun GlassCard(
 
 /**
  * 液态玻璃进度滑块（播放进度/拖动）。
- * value 范围 0f..1f。
+ * value 范围 0f..1f，具备顺滑果冻感与物理晶莹球形液态透镜。
  */
 @Composable
 fun GlassSlider(
@@ -302,9 +325,8 @@ fun GlassSlider(
     value: Float,
     onValueChange: (Float) -> Unit,
     modifier: Modifier = Modifier,
-    trackHeight: Dp = 6.dp,
-    thumbWidth: Dp = 40.dp,
-    thumbHeight: Dp = 24.dp,
+    trackHeight: Dp = 8.dp,
+    thumbSize: Dp = 24.dp,
 ) {
     val density = LocalDensity.current
     var widthPx by remember { mutableIntStateOf(0) }
@@ -313,79 +335,126 @@ fun GlassSlider(
     val trackBackdrop = rememberLayerBackdrop()
     val combinedBackdrop = rememberCombinedBackdrop(backdrop, trackBackdrop)
 
-    val current = if (dragging >= 0f) dragging else value
-    val thumbWidthPx = with(density) { thumbWidth.toPx() }
+    val animationScope = rememberCoroutineScope()
+    val animatedValue = remember { Animatable(value) }
+    val pressScale = remember { Animatable(1f) }
+    val velocitySquishX = remember { Animatable(1f) }
+    val velocitySquishY = remember { Animatable(1f) }
+
+    val current = if (dragging >= 0f) dragging else animatedValue.value
+    val thumbSizePx = with(density) { thumbSize.toPx() }
+
+    LaunchedEffect(value, dragging) {
+        if (dragging < 0f) {
+            animatedValue.animateTo(
+                targetValue = value.coerceIn(0f, 1f),
+                animationSpec = spring(dampingRatio = 0.65f, stiffness = 350f)
+            )
+        }
+    }
 
     Box(
         modifier
             .fillMaxWidth()
-            .height(40.dp)
+            .height(36.dp)
             .onSizeChanged { widthPx = it.width }
-            .pointerInput(widthPx, thumbWidthPx) {
+            .pointerInput(widthPx, thumbSizePx) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
-                    val travel = (widthPx - thumbWidthPx).coerceAtLeast(1f)
+                    val travel = (widthPx - thumbSizePx).coerceAtLeast(1f)
                     fun fractionAt(x: Float): Float =
-                        ((x - thumbWidthPx / 2f) / travel).coerceIn(0f, 1f)
+                        ((x - thumbSizePx / 2f) / travel).coerceIn(0f, 1f)
 
-                    dragging = fractionAt(down.position.x)
+                    var lastX = down.position.x
+                    val target = fractionAt(down.position.x)
+                    dragging = target
+                    animationScope.launch {
+                        launch { animatedValue.snapTo(target) }
+                        launch { pressScale.animateTo(1.22f, spring(0.55f, 400f)) }
+                    }
                     down.consume()
 
                     var pressed = true
                     while (pressed) {
                         val event = awaitPointerEvent()
                         val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                        dragging = fractionAt(change.position.x)
+                        val nextTarget = fractionAt(change.position.x)
+                        val deltaX = change.position.x - lastX
+                        lastX = change.position.x
+
+                        dragging = nextTarget
+                        animationScope.launch {
+                            launch { animatedValue.snapTo(nextTarget) }
+                            val stretch = (deltaX / 15f).coerceIn(-0.25f, 0.25f)
+                            launch { velocitySquishX.snapTo(1f + abs(stretch)) }
+                            launch { velocitySquishY.snapTo(1f - abs(stretch) * 0.5f) }
+                        }
                         pressed = change.pressed
                         change.consume()
                     }
 
-                    latestOnValueChange(dragging.coerceIn(0f, 1f))
+                    val finalVal = dragging.coerceIn(0f, 1f)
+                    latestOnValueChange(finalVal)
                     dragging = -1f
+                    animationScope.launch {
+                        launch { pressScale.animateTo(1f, spring(0.45f, 300f)) }
+                        launch { velocitySquishX.animateTo(1f, spring(0.45f, 300f)) }
+                        launch { velocitySquishY.animateTo(1f, spring(0.45f, 300f)) }
+                        launch { animatedValue.animateTo(finalVal, spring(0.6f, 300f)) }
+                    }
                 }
             },
         contentAlignment = Alignment.CenterStart,
     ) {
-        // Glass Slider 教程：先把轨道录入独立 backdrop。
+        // 进度底轨
         Box(
             Modifier
                 .fillMaxWidth()
                 .height(trackHeight)
                 .layerBackdrop(trackBackdrop)
                 .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.18f))
+                .background(Color.White.copy(alpha = 0.22f))
         ) {
             Canvas(Modifier.fillMaxSize()) {
                 drawRoundRect(
                     color = IosProgressBlue,
                     topLeft = Offset.Zero,
-                    size = Size(size.width * current, size.height),
+                    size = Size(size.width * current.coerceIn(0f, 1f), size.height),
                     cornerRadius = CornerRadius(size.height / 2),
                 )
             }
         }
 
-        // 拇指同时折射页面背景和进度轨道，并开启色散。
+        // 晶莹球形液态玻璃拇指（与 24dp 圆形等高，绝无拉伸断层）
         Box(
             Modifier
                 .align(Alignment.CenterStart)
                 .offset {
                     IntOffset(
-                        x = (current * (widthPx - thumbWidthPx)).roundToInt(),
+                        x = (current.coerceIn(0f, 1f) * (widthPx - thumbSizePx)).roundToInt(),
                         y = 0,
                     )
                 }
-                .size(thumbWidth, thumbHeight)
+                .size(thumbSize)
+                .graphicsLayer {
+                    scaleX = (pressScale.value * velocitySquishX.value).coerceAtLeast(0.01f)
+                    scaleY = (pressScale.value * velocitySquishY.value).coerceAtLeast(0.01f)
+                }
                 .drawBackdrop(
                     backdrop = combinedBackdrop,
                     shape = { CircleShape },
                     effects = {
+                        vibrancy()
+                        blur(2.dp.toPx())
                         lens(
-                            refractionHeight = 12.dp.toPx(),
-                            refractionAmount = 16.dp.toPx(),
+                            refractionHeight = 8.dp.toPx(),
+                            refractionAmount = 14.dp.toPx(),
                             chromaticAberration = true,
                         )
                     },
+                    onDrawSurface = {
+                        drawCircle(Color.White.copy(alpha = 0.15f))
+                    }
                 )
         )
     }
