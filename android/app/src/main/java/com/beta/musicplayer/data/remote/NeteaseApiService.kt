@@ -308,12 +308,7 @@ private class ApiEndpointInterceptor(
             .addQueryParameter("timestamp", System.currentTimeMillis().toString())
             .apply {
                 val userCookie = cookieProvider()
-                if (userCookie.isNotBlank()) {
-                    addQueryParameter("cookie", userCookie)
-                } else {
-                    // 未登录状态注入默认 Guest 客户端 Cookie，解锁 Netease 后台对 VIP 歌曲搜索与预览的拦截
-                    addQueryParameter("cookie", "os=pc; osver=10.0.19042.0; appver=2.9.7; NMTID=anonymous")
-                }
+                if (userCookie.isNotBlank()) addQueryParameter("cookie", userCookie)
             }
             .build()
         val request = original.newBuilder().url(withParams).build()
