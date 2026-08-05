@@ -191,34 +191,6 @@ fun MainScreen() {
                 )
         )
 
-        // 顶部 Toast 提示（Issue 6: 未登录时收藏歌曲提示）
-        AnimatedVisibility(
-            visible = uiState.toastMessage != null,
-            enter = fadeIn() + slideInVertically { -it },
-            exit = fadeOut() + slideOutVertically { -it },
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .statusBarsPadding()
-                .padding(top = 10.dp)
-                .zIndex(10f),
-        ) {
-            uiState.toastMessage?.let { msg ->
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(percent = 50))
-                        .background(Color(0xEE2A2930))
-                        .padding(horizontal = 20.dp, vertical = 10.dp)
-                ) {
-                    Text(
-                        text = msg,
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-            }
-        }
-
         // 悬浮操控层位于 dockBackdrop 之外，避免 Dock 把自己录入采样源。
         Column(
             modifier = Modifier
@@ -263,6 +235,36 @@ fun MainScreen() {
             onCyclePlayMode = { viewModel.cyclePlayMode() },
             onDismiss = { showPlayerSheet = false },
         )
+    }
+
+    // 顶部 Toast 提示（顶层绘制：主页与全屏播放页均可见，如未登录时收藏歌曲提示）
+    Box(Modifier.fillMaxSize()) {
+        AnimatedVisibility(
+            visible = uiState.toastMessage != null,
+            enter = fadeIn() + slideInVertically { -it },
+            exit = fadeOut() + slideOutVertically { -it },
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(top = 10.dp)
+                .zIndex(10f),
+        ) {
+            uiState.toastMessage?.let { msg ->
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(percent = 50))
+                        .background(Color(0xEE2A2930))
+                        .padding(horizontal = 20.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = msg,
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        }
     }
 }
 

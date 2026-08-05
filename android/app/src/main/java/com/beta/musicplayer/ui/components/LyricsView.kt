@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -30,6 +31,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -44,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.beta.musicplayer.data.model.LyricLine
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlin.math.abs
 
@@ -69,11 +72,15 @@ fun LyricsView(
     onSeekTo: (Long) -> Unit,
     modifier: Modifier = Modifier,
     onTap: (() -> Unit)? = null,
+    // 底部控制区隐藏时禁止歌词行点击跳转，此时任意位置点击只负责调出 UI
+    lineSeekEnabled: Boolean = true,
+    // 聚焦行在视口中的垂直位置比例：null = 默认距顶 116dp；横屏传 0.5f 让当前行垂直居中
+    focusFraction: Float? = null,
 ) {
     if (lyrics.isEmpty()) {
         Box(
             modifier = modifier
-                .fillMaxSize()
+                .fillMaxHeight()
                 .then(
                     if (onTap != null) {
                         Modifier.pointerInput(onTap) {
@@ -127,9 +134,42 @@ fun LyricsView(
     // 列表负责连续位移；相邻换句使用可回弹的滚动弹簧，远距离跳转则直接定位。
     LaunchedEffect(currentIndex, autoScrollPaused, lyrics) {
         if (!autoScrollPaused && currentIndex in lyrics.indices) {
+            val fraction = focusFraction
             val currentItem = listState.layoutInfo.visibleItemsInfo
                 .firstOrNull { it.index == currentIndex }
-            if (currentItem == null) {
+            if (fraction != null) {
+                // 横屏居中模式：把当前行的行中心对齐到视口指定比例处（0.5f = 垂直居中）
+                val targetCenter = (listState.layoutInfo.viewportSize.height * fraction).toInt()
+                if (currentItem == null) {
+                    listState.scrollToItem(currentIndex)
+                    val laidOut = snapshotFlow {
+                        listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == currentIndex }
+                    }.first { it != null }!!
+                    val distance = laidOut.offset + laidOut.size / 2 - targetCenter
+                    if (abs(distance) > 0.5f) {
+                        listState.animateScrollBy(
+                            value = distance.toFloat(),
+                            animationSpec = spring(
+                                dampingRatio = 0.72f,
+                                stiffness = 360f,
+                                visibilityThreshold = 0.5f,
+                            ),
+                        )
+                    }
+                } else {
+                    val distance = currentItem.offset + currentItem.size / 2 - targetCenter
+                    if (abs(distance) > 0.5f) {
+                        listState.animateScrollBy(
+                            value = distance.toFloat(),
+                            animationSpec = spring(
+                                dampingRatio = 0.72f,
+                                stiffness = 360f,
+                                visibilityThreshold = 0.5f,
+                            ),
+                        )
+                    }
+                }
+            } else if (currentItem == null) {
                 listState.scrollToItem(currentIndex, scrollOffset = -focusOffsetPx)
             } else {
                 val distanceToFocus = (currentItem.offset - focusOffsetPx).toFloat()
@@ -147,10 +187,12 @@ fun LyricsView(
         }
     }
 
+    // 只撑满高度、不覆盖宽度：横屏时外部会传入固定宽度约束（如 0.58f 宽靠右），
+    // 若此处 fillMaxSize 会把宽度重新撑到约束上限导致歌词铺满全屏与封面重叠。
     LazyColumn(
         state = listState,
         modifier = modifier
-            .fillMaxSize()
+            .fillMaxHeight()
             .then(
                 if (onTap != null) {
                     Modifier.pointerInput(onTap) {
@@ -158,12 +200,22 @@ fun LyricsView(
                     }
                 } else Modifier
             ),
-        contentPadding = PaddingValues(
-            top = 112.dp,
-            bottom = 224.dp,
-            start = 22.dp,
-            end = 22.dp,
-        ),
+        contentPadding = if (focusFraction != null) {
+            // 居中模式需要上下留出约半屏的可滚空间，才能让首/尾行也对齐到视口中部
+            PaddingValues(
+                top = 300.dp,
+                bottom = 300.dp,
+                start = 22.dp,
+                end = 22.dp,
+            )
+        } else {
+            PaddingValues(
+                top = 112.dp,
+                bottom = 224.dp,
+                start = 22.dp,
+                end = 22.dp,
+            )
+        },
     ) {
         itemsIndexed(
             items = lyrics,
@@ -200,7 +252,7 @@ fun LyricsView(
 
             val restingAlpha = when (distance) {
                 0 -> 1f
-                1 -> 0.42f
+                1 -> 0.36f
                 2 -> 0.26f
                 else -> 0.14f
             }
@@ -213,7 +265,7 @@ fun LyricsView(
                 label = "lyricAlpha",
             )
             val clampedFocus = focusProgress.coerceIn(0f, 1f)
-            val animatedScale = 0.92f + 0.08f * focusProgress
+            val animatedScale = 0.86f + 0.14f * focusProgress
 
             // 参考图高质景深模糊：非当前句根据距离呈现 7.5px..22px 磨砂玻璃 Blur。
             val blurBucket = when {
@@ -246,6 +298,7 @@ fun LyricsView(
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
+                        enabled = lineSeekEnabled,
                         onClick = {
                             autoScrollPaused = false
                             onSeekTo((line.time * 1_000).toLong())
@@ -273,14 +326,14 @@ fun LyricsView(
                         modifier = Modifier.fillMaxWidth(),
                         style = MaterialTheme.typography.titleLarge.copy(
                             shadow = Shadow(
-                                color = Color.White.copy(alpha = 0.22f * clampedFocus),
-                                blurRadius = 11f * clampedFocus,
+                                color = Color.White.copy(alpha = 0.5f * clampedFocus),
+                                blurRadius = 18f * clampedFocus,
                             ),
                         ),
                         color = Color.White,
                         fontSize = 28.sp,
                         lineHeight = 34.sp,
-                        fontWeight = FontWeight.ExtraBold,
+                        fontWeight = FontWeight.Black,
                         textAlign = TextAlign.Start,
                     )
                 }

@@ -211,17 +211,12 @@ fun Modifier.liquidButton(
 
                 var pressed = true
                 var released = false
-                var isDragOverSlop = false
                 while (pressed) {
                     val event = awaitPointerEvent(PointerEventPass.Main)
                     val change = event.changes.firstOrNull { it.id == down.id } ?: break
                     val currentOffset = change.position - startPosition
-                    if (currentOffset.getDistance() > touchSlop) {
-                        isDragOverSlop = true
-                        pressed = false
-                        released = false
-                        break
-                    }
+                    // 拖动超过触摸阈值视为拖动手势，不触发点击
+                    if (currentOffset.getDistance() > touchSlop) break
                     animationScope.launch { pointerOffsetAnim.snapTo(currentOffset) }
                     pressed = change.pressed
                     released = !pressed
@@ -232,7 +227,7 @@ fun Modifier.liquidButton(
                     launch { pressProgress.animateTo(0f, LiquidButtonPressSpec) }
                     launch { pointerOffsetAnim.animateTo(Offset.Zero, LiquidButtonOffsetSpec) }
                 }
-                if (released && !isDragOverSlop) latestOnClick()
+                if (released) latestOnClick()
             }
         }
         .semantics {
@@ -331,6 +326,10 @@ fun GlassSlider(
     val density = LocalDensity.current
     var widthPx by remember { mutableIntStateOf(0) }
     var dragging by remember { mutableFloatStateOf(-1f) }
+    // 松手后的位置保持：外部 value（播放器进度）追平松手位置前，
+    // 不允许 value 驱动的动画把滑块拉回旧进度，消除 seek 后的回跳抽搐。
+    var releasedHoldValue by remember { mutableFloatStateOf(-1f) }
+    var holdUntilMs by remember { mutableStateOf(0L) }
     val latestOnValueChange by rememberUpdatedState(onValueChange)
     val trackBackdrop = rememberLayerBackdrop()
     val combinedBackdrop = rememberCombinedBackdrop(backdrop, trackBackdrop)
@@ -346,6 +345,14 @@ fun GlassSlider(
 
     LaunchedEffect(value, dragging) {
         if (dragging < 0f) {
+            if (releasedHoldValue >= 0f) {
+                val caughtUp = abs(value - releasedHoldValue) <= 0.02f
+                if (caughtUp || System.currentTimeMillis() >= holdUntilMs) {
+                    releasedHoldValue = -1f
+                } else {
+                    return@LaunchedEffect
+                }
+            }
             animatedValue.animateTo(
                 targetValue = value.coerceIn(0f, 1f),
                 animationSpec = spring(dampingRatio = 0.65f, stiffness = 350f)
@@ -396,6 +403,8 @@ fun GlassSlider(
                     val finalVal = dragging.coerceIn(0f, 1f)
                     latestOnValueChange(finalVal)
                     dragging = -1f
+                    releasedHoldValue = finalVal
+                    holdUntilMs = System.currentTimeMillis() + 1_500
                     animationScope.launch {
                         launch { pressScale.animateTo(1f, spring(0.45f, 300f)) }
                         launch { velocitySquishX.animateTo(1f, spring(0.45f, 300f)) }

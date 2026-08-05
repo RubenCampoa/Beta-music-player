@@ -1,6 +1,7 @@
 package com.beta.musicplayer.player
 
 import android.content.Context
+import android.os.SystemClock
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -49,6 +50,13 @@ class MusicPlayer(
     private var lyricLoadToken = 0
     private var playRequestToken = 0
 
+    // seek 目标位置缓存：seek 后立即向 UI 上报目标进度，消除进度条回跳抽搐。
+    private var pendingSeekMs: Long? = null
+    private var seekPendingSince = 0L
+
+    // 错误自动跳歌的连续失败计数，防止整列失效时无限循环。
+    private var consecutiveErrorSkips = 0
+
     private val _state = MutableStateFlow(PlayerState())
     val state: StateFlow<PlayerState> = _state.asStateFlow()
 
@@ -66,6 +74,7 @@ class MusicPlayer(
         addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 _state.update { it.copy(isPlaying = isPlaying) }
+                if (isPlaying) consecutiveErrorSkips = 0
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -73,7 +82,11 @@ class MusicPlayer(
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                val prevNeteaseId = _state.value.currentSong?.neteaseId
                 val idx = exoPlayer.currentMediaItemIndex
+                // 离开出错曲目后清除其重试标记，允许稍后再次自动恢复
+                if (prevNeteaseId != null) retriedNeteaseIds.remove(prevNeteaseId)
+                pendingSeekMs = null
                 _state.update {
                     it.copy(
                         queueIndex = idx,
@@ -85,13 +98,19 @@ class MusicPlayer(
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                // 兜底 URL 播放失败时，尝试用 /song/url/v1 获取真实 URL 重试一次（保留完整队列）
+                // 失效/过期 CDN URL 兜底：用 /song/url/v1 获取真实 URL 重试一次（保留完整队列）；
+                // 重试不可行时自动跳下一首，杜绝播放器停留在错误态卡死。
                 val song = _state.value.currentSong ?: return
-                val neteaseId = song.neteaseId ?: return
-                if (neteaseId in retriedNeteaseIds) return
+                val neteaseId = song.neteaseId
+                if (neteaseId == null || neteaseId in retriedNeteaseIds) {
+                    skipToNextAfterError()
+                    return
+                }
                 retriedNeteaseIds.add(neteaseId)
                 scope.launch {
                     val realUrl = api.getSongAudioUrl(neteaseId)
+                    // 竞态保护：异步取 URL 期间用户已切歌，则不要干扰当前播放
+                    if (_state.value.currentSong?.neteaseId != neteaseId) return@launch
                     if (realUrl.isNotBlank()) {
                         val index = exoPlayer.currentMediaItemIndex
                         val items = (0 until exoPlayer.mediaItemCount)
@@ -104,12 +123,35 @@ class MusicPlayer(
                             exoPlayer.setMediaItem(MediaItem.Builder().setUri(realUrl).build())
                             exoPlayer.seekTo(0, 0L)
                         }
+                        consecutiveErrorSkips = 0
                         exoPlayer.prepare()
                         exoPlayer.playWhenReady = true
+                    } else {
+                        skipToNextAfterError()
                     }
                 }
             }
         })
+    }
+
+    /** 出错且无法恢复时自动跳下一首；连续失败超过队列长度则停止，避免无限循环。 */
+    private fun skipToNextAfterError() {
+        consecutiveErrorSkips++
+        if (_state.value.queue.isEmpty() ||
+            consecutiveErrorSkips > _state.value.queue.size.coerceAtLeast(1)
+        ) {
+            consecutiveErrorSkips = 0
+            exoPlayer.playWhenReady = false
+            return
+        }
+        next()
+    }
+
+    /** 错误残留的 STATE_IDLE 下 seek/切换操作不会生效，需要重新 prepare。 */
+    private fun ensurePrepared() {
+        if (exoPlayer.playbackState == Player.STATE_IDLE) {
+            exoPlayer.prepare()
+        }
     }
 
     init {
@@ -118,7 +160,7 @@ class MusicPlayer(
             while (isActive) {
                 _state.update {
                     it.copy(
-                        positionMs = exoPlayer.currentPosition.coerceAtLeast(0),
+                        positionMs = effectivePositionMs(),
                         durationMs = exoPlayer.duration.coerceAtLeast(0),
                     )
                 }
@@ -129,6 +171,24 @@ class MusicPlayer(
         }
     }
 
+    /**
+     * seek 后 ExoPlayer 的 currentPosition 需要一小段时间才反映目标位置，
+     * 期间直接上报目标值，避免进度条先回跳旧位置再前进的“抽搐”。
+     */
+    private fun effectivePositionMs(): Long {
+        val real = exoPlayer.currentPosition.coerceAtLeast(0)
+        val pending = pendingSeekMs ?: return real
+        val caughtUp = kotlin.math.abs(real - pending) < 1_500 &&
+            exoPlayer.playbackState != Player.STATE_BUFFERING
+        val timedOut = SystemClock.elapsedRealtime() - seekPendingSince > 3_000
+        return if (caughtUp || timedOut) {
+            pendingSeekMs = null
+            real
+        } else {
+            pending
+        }
+    }
+
     /** 用队列替换当前播放（startIndex 指定从第几首开始，即点即播无卡顿） */
     fun playQueue(songs: List<Song>, startIndex: Int = 0) {
         if (songs.isEmpty()) return
@@ -136,6 +196,7 @@ class MusicPlayer(
         val safeStartIndex = startIndex.coerceIn(0, songs.lastIndex)
         val requestToken = ++playRequestToken
         val targetSong = songs[safeStartIndex]
+        pendingSeekMs = null
         _state.update { it.copy(queue = songs, queueIndex = safeStartIndex, currentSong = targetSong, lyrics = emptyList()) }
         // 首曲不依赖 ExoPlayer 的 transition 回调，一按播放即请求歌词。
         loadLyricsForCurrent()
@@ -151,6 +212,9 @@ class MusicPlayer(
             scope.launch {
                 val realUrl = api.getSongAudioUrl(neteaseId)
                 if (requestToken != playRequestToken) return@launch
+                // 快速切歌竞态保护：仅当目标曲目仍是当前播放曲目时才替换，
+                // 防止往返切歌时替换错曲目导致播放中断重播。
+                if (_state.value.currentSong?.neteaseId != neteaseId) return@launch
                 if (!realUrl.isNullOrBlank() && realUrl != targetSong.audioUrl) {
                     val currentIndex = exoPlayer.currentMediaItemIndex
                     if (currentIndex == safeStartIndex && exoPlayer.mediaItemCount > safeStartIndex) {
@@ -177,6 +241,7 @@ class MusicPlayer(
         retriedNeteaseIds.clear()
         val safeStartIndex = startIndex.coerceIn(0, songs.lastIndex)
         val items = songs.map { MediaItem.Builder().setUri(it.audioUrl).build() }
+        pendingSeekMs = null
         _state.update { it.copy(queue = songs, queueIndex = safeStartIndex, currentSong = songs[safeStartIndex], lyrics = emptyList()) }
         exoPlayer.setMediaItems(items, safeStartIndex, 0L)
         exoPlayer.prepare()
@@ -188,7 +253,10 @@ class MusicPlayer(
     }
 
     fun seekTo(ms: Long) {
-        exoPlayer.seekTo(ms.coerceAtLeast(0))
+        val target = ms.coerceAtLeast(0)
+        pendingSeekMs = target
+        seekPendingSince = SystemClock.elapsedRealtime()
+        exoPlayer.seekTo(target)
     }
 
     fun next() {
@@ -200,7 +268,9 @@ class MusicPlayer(
         }
         val nextIdx = exoPlayer.currentMediaItemIndex
         val nextSong = _state.value.queue.getOrNull(nextIdx)
+        pendingSeekMs = null
         _state.update { it.copy(queueIndex = nextIdx, currentSong = nextSong, lyrics = emptyList()) }
+        ensurePrepared()
         loadLyricsForCurrent()
     }
 
@@ -215,7 +285,9 @@ class MusicPlayer(
         }
         val prevIdx = exoPlayer.currentMediaItemIndex
         val prevSong = _state.value.queue.getOrNull(prevIdx)
+        pendingSeekMs = null
         _state.update { it.copy(queueIndex = prevIdx, currentSong = prevSong, lyrics = emptyList()) }
+        ensurePrepared()
         loadLyricsForCurrent()
     }
 

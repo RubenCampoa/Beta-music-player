@@ -65,12 +65,16 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             // Application.onCreate 的恢复任务与首屏 ViewModel 可能并发；这里显式等待，
             // 避免首次请求仍使用旧 baseUrl，或登录 cookie 尚未恢复就加载账号。
-            container.init()
-            _uiState.update { it.copy(apiBaseUrl = container.neteaseApi.getApiBaseUrl()) }
+            try {
+                container.init()
+            } catch (e: Throwable) {
+                android.util.Log.e("MainViewModel", "Container init failed", e)
+            }
+            _uiState.update { it.copy(apiBaseUrl = container.netEaseApi.getApiBaseUrl()) }
             loadRecommendations()
             loadArtists()
             // 启动恢复：用户资料、搜索历史
-            val user = container.neteaseApi.getUserAccount()
+            val user = container.netEaseApi.getUserAccount()
             container.preferences.setUserProfile(user)
             _uiState.update { it.copy(user = user) }
 
@@ -99,13 +103,13 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
 
     private suspend fun loadUserData(user: UserProfile) {
         viewModelScope.launch {
-            val playlists = container.neteaseApi.getUserPlaylists(user.userId)
-            val likedIds = container.neteaseApi.getLikelist(user.userId).toSet()
+            val playlists = container.netEaseApi.getUserPlaylists(user.userId)
+            val likedIds = container.netEaseApi.getLikelist(user.userId).toSet()
             _uiState.update { it.copy(userPlaylists = playlists, likedIds = likedIds) }
             container.preferences.setLikedSongs(likedIds)
 
             _uiState.update { it.copy(isLoadingLiked = true) }
-            val likedSongs = container.neteaseApi.getSongsByIds(likedIds.toList())
+            val likedSongs = container.netEaseApi.getSongsByIds(likedIds.toList())
             _uiState.update { it.copy(likedSongs = likedSongs, isLoadingLiked = false) }
         }
     }
@@ -113,8 +117,8 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
     private fun loadRecommendations() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingRecommendations = true) }
-            val recSongs = container.neteaseApi.getPersonalizedNewSongs()
-            val recPlaylists = container.neteaseApi.getPersonalizedPlaylists()
+            val recSongs = container.netEaseApi.getPersonalizedNewSongs()
+            val recPlaylists = container.netEaseApi.getPersonalizedPlaylists()
             _uiState.update {
                 it.copy(
                     recommendedSongs = recSongs,
@@ -131,7 +135,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
     fun loadArtists() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingArtists = true, artistsError = null) }
-            val artists = container.neteaseApi.getTopArtists()
+            val artists = container.netEaseApi.getTopArtists()
             _uiState.update {
                 it.copy(
                     artists = artists,
@@ -154,7 +158,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
             )
         }
         artistDetailJob = viewModelScope.launch {
-            val songs = container.neteaseApi.getArtistTopSongs(artist.id)
+            val songs = container.netEaseApi.getArtistTopSongs(artist.id)
             _uiState.update { state ->
                 if (state.selectedArtist?.id != artist.id) {
                     state
@@ -202,7 +206,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         searchJob = viewModelScope.launch {
             delay(300)
             _uiState.update { it.copy(isSearching = true) }
-            val results = container.neteaseApi.searchSongs(query)
+            val results = container.netEaseApi.searchSongs(query)
             _uiState.update { it.copy(searchResults = results, isSearching = false) }
             container.preferences.addSearchHistory(query)
         }
@@ -224,7 +228,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
     /** 加载歌单并开始播放 */
     fun playPlaylist(playlist: Playlist, onDone: () -> Unit = {}) {
         viewModelScope.launch {
-            val songs = container.neteaseApi.getPlaylistSongs(playlist.id)
+            val songs = container.netEaseApi.getPlaylistSongs(playlist.id)
             if (songs.isNotEmpty()) {
                 container.player.playQueue(songs, 0)
             }
@@ -244,7 +248,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
             )
         }
         playlistDetailJob = viewModelScope.launch {
-            val songs = container.neteaseApi.getPlaylistSongs(playlist.id)
+            val songs = container.netEaseApi.getPlaylistSongs(playlist.id)
             _uiState.update { state ->
                 if (state.selectedPlaylist?.id != playlist.id) {
                     state
@@ -317,7 +321,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         }
         viewModelScope.launch {
             val liked = id in _uiState.value.likedIds
-            val success = container.neteaseApi.likeSong(id, !liked)
+            val success = container.netEaseApi.likeSong(id, !liked)
             if (success) {
                 val newIds = if (liked) _uiState.value.likedIds - id else _uiState.value.likedIds + id
                 _uiState.update { it.copy(likedIds = newIds) }
@@ -326,7 +330,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
                 if (liked) {
                     _uiState.update { it.copy(likedSongs = it.likedSongs.filterNot { s -> s.neteaseId == id }) }
                 } else if (_uiState.value.likedSongs.none { it.neteaseId == id }) {
-                    val fresh = container.neteaseApi.getSongsByIds(listOf(id))
+                    val fresh = container.netEaseApi.getSongsByIds(listOf(id))
                     _uiState.update { it.copy(likedSongs = listOfNotNull(fresh.firstOrNull()) + it.likedSongs) }
                 }
             }
@@ -349,12 +353,12 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
                     phoneLoginMessage = null,
                 )
             }
-            val key = container.neteaseApi.getQrKey()
+            val key = container.netEaseApi.getQrKey()
             if (key.isBlank()) {
                 _uiState.update { it.copy(isLoginLoading = false, qrMessage = "获取二维码失败，请检查网络") }
                 return@launch
             }
-            val image = container.neteaseApi.getQrImage(key)
+            val image = container.netEaseApi.getQrImage(key)
             if (image.isBlank()) {
                 _uiState.update { it.copy(isLoginLoading = false, qrMessage = "获取二维码失败，请检查网络") }
                 return@launch
@@ -367,7 +371,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
     private suspend fun pollQr(key: String) {
         while (true) {
             delay(1500)
-            val res = container.neteaseApi.checkQrStatus(key)
+            val res = container.netEaseApi.checkQrStatus(key)
             when {
                 res.code == 800 -> {
                     _uiState.update { it.copy(qrMessage = "二维码已过期，请重新获取", qrImage = null, qrKey = "") }
@@ -376,8 +380,8 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
                 res.code == 801 -> _uiState.update { it.copy(qrMessage = "请使用网易云音乐 App 扫码") }
                 res.code == 802 -> _uiState.update { it.copy(qrMessage = "已扫码，请在手机上确认") }
                 res.code == 803 -> {
-                    container.neteaseApi.setCookie(res.cookie ?: "")
-                    val user = container.neteaseApi.getUserAccount()
+                    container.netEaseApi.setCookie(res.cookie ?: "")
+                    val user = container.netEaseApi.getUserAccount()
                     container.preferences.setUserProfile(user)
                     _uiState.update {
                         it.copy(
@@ -432,7 +436,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
             _uiState.update {
                 it.copy(isCaptchaSending = true, phoneLoginMessage = null, isLoginSheetVisible = true)
             }
-            val result = container.neteaseApi.sendPhoneCaptcha(phone, countryCode)
+            val result = container.netEaseApi.sendPhoneCaptcha(phone, countryCode)
             _uiState.update {
                 it.copy(
                     isCaptchaSending = false,
@@ -450,13 +454,13 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
             _uiState.update {
                 it.copy(isPhoneLoginLoading = true, phoneLoginMessage = null, isLoginSheetVisible = true)
             }
-            val result = container.neteaseApi.loginWithPhoneCaptcha(phone, captcha, countryCode)
+            val result = container.netEaseApi.loginWithPhoneCaptcha(phone, captcha, countryCode)
             if (!result.success) {
                 _uiState.update { it.copy(isPhoneLoginLoading = false, phoneLoginMessage = result.message) }
                 return@launch
             }
 
-            val user = container.neteaseApi.getUserAccount()
+            val user = container.netEaseApi.getUserAccount()
             if (user == null) {
                 _uiState.update {
                     it.copy(
@@ -484,10 +488,10 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
 
     fun updateApiBaseUrl(value: String) {
         viewModelScope.launch {
-            if (container.neteaseApi.setApiBaseUrl(value)) {
+            if (container.netEaseApi.setApiBaseUrl(value)) {
                 _uiState.update {
                     it.copy(
-                        apiBaseUrl = container.neteaseApi.getApiBaseUrl(),
+                        apiBaseUrl = container.netEaseApi.getApiBaseUrl(),
                         qrMessage = "服务已连接，正在重新加载网易云数据",
                         qrImage = null,
                         qrKey = "",
@@ -509,7 +513,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         playlistDetailJob?.cancel()
         artistDetailJob?.cancel()
         viewModelScope.launch {
-            container.neteaseApi.logoutAccount()
+            container.netEaseApi.logoutAccount()
             container.preferences.setUserProfile(null)
             container.preferences.setLikedSongs(emptySet())
             _uiState.update {

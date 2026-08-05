@@ -354,15 +354,15 @@ class NeteaseApiService(
         private const val FALLBACK_COVER =
             "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=400&h=400&fit=crop"
 
-        private const val DEFAULT_API_BASE_URL = "https://netease-cloud-music-api-beta.vercel.app/"
+        // Android 安装包不能把电脑上的 Node api-enhanced 一起打进去，默认连接开发机局域网服务。
+        // 真机请确保电脑启动 server.js 且端口 3000 对局域网开放；地址可在登录面板修改。
+        private const val DEFAULT_API_BASE_URL = "http://127.0.0.1:3000/"
         private const val LEGACY_EMULATOR_BASE_URL = "http://10.0.2.2:3000/"
 
         private val FALLBACK_NODES = listOf(
-            "https://netease-cloud-music-api-beta.vercel.app/",
-            "https://music-api.helingqi.com/",
-            "https://music.api.666666.site/",
-            "http://10.0.2.2:3000/",
-            "http://192.168.0.105:3000/",
+            DEFAULT_API_BASE_URL,
+            LEGACY_EMULATOR_BASE_URL,
+            "http://127.0.0.1:3000/",
         )
     }
 
@@ -378,6 +378,9 @@ class NeteaseApiService(
 
     @Volatile
     private var apiBaseUrl: HttpUrl = DEFAULT_API_BASE_URL.toHttpUrl()
+
+    @Volatile
+    private var apiReachable: Boolean = true
 
     private val retrofit: Retrofit = run {
         val client = OkHttpClient.Builder()
@@ -396,7 +399,7 @@ class NeteaseApiService(
     private val api: NeteaseApi = retrofit.create(NeteaseApi::class.java)
 
     /** 从 DataStore 恢复登录态（应用启动时调用，若不可达自动切备用节点） */
-    suspend fun restoreSession() {
+    suspend fun restoreSession(): Boolean {
         cookie = preferences.getCookie()
         val savedUrl = preferences.getApiBaseUrl()
         if (savedUrl.isNotBlank()) {
@@ -407,17 +410,20 @@ class NeteaseApiService(
 
         // 检测当前节点连通性，不可达时自动在备用节点列表中轮询首个可用 API
         val currentOk = safeNet { api.getTopArtists(limit = 1, offset = 0).code == 200 }.getOrDefault(false)
+        apiReachable = currentOk
         if (!currentOk) {
             for (node in FALLBACK_NODES) {
                 val candidate = normalizeApiBaseUrl(node) ?: continue
                 apiBaseUrl = candidate
                 val nodeOk = safeNet { api.getTopArtists(limit = 1, offset = 0).code == 200 }.getOrDefault(false)
                 if (nodeOk) {
+                    apiReachable = true
                     preferences.setApiBaseUrl(candidate.toString())
                     break
                 }
             }
         }
+        return apiReachable
     }
 
     fun getCookie(): String = cookie
@@ -427,14 +433,17 @@ class NeteaseApiService(
     suspend fun setApiBaseUrl(value: String): Boolean {
         val normalized = normalizeApiBaseUrl(value) ?: return false
         val previous = apiBaseUrl
+        val previousReachable = apiReachable
         apiBaseUrl = normalized
         val reachable = safeNet {
             api.getTopArtists(limit = 1, offset = 0).code == 200
         }.getOrDefault(false)
         if (!reachable) {
             apiBaseUrl = previous
+            apiReachable = previousReachable
             return false
         }
+        apiReachable = true
         preferences.setApiBaseUrl(normalized.toString())
         return true
     }
@@ -587,24 +596,48 @@ class NeteaseApiService(
     // --- 首页推荐 ---
 
     suspend fun getPersonalizedNewSongs(): List<Song> {
-        val result = safeNet {
+        if (!apiReachable) return getFallbackSongs()
+
+        val newSongs = safeNet {
             api.getPersonalizedNewSongs(limit = 60).result?.mapNotNull { item ->
                 item.song?.let { formatTrackToSong(it) }
             } ?: emptyList()
         }.getOrDefault(emptyList())
 
-        if (result.isNotEmpty()) return result
-
-        // 自动高可用兜底：当网易云新歌推荐为空时，自动使用热门歌曲或预置精品单曲补全
-        val artistSongs = safeNet {
-            val topArtistId = api.getTopArtists(limit = 1, offset = 0).artists?.firstOrNull()?.id ?: 6452L
-            api.getArtistTopSongs(topArtistId).songs.orEmpty().take(30).map { formatTrackToSong(it) }
+        // 不同 api-enhanced 版本可能把 /personalized/newsong 限制为 10 首，
+        // 因此额外读取推荐歌单曲目，合并后再去重，首页保持完整可播放列表。
+        val playlistSongs = safeNet {
+            val playlists = api.getPersonalizedPlaylists(limit = 12).result.orEmpty()
+            playlists.take(4).flatMap { playlist ->
+                val tracks = api.getPlaylistTracks(
+                    id = playlist.id,
+                    limit = 100,
+                    offset = 0,
+                ).songs ?: emptyList()
+                tracks.map { formatTrackToSong(it) }
+            }
         }.getOrDefault(emptyList())
 
-        return if (artistSongs.isNotEmpty()) artistSongs else getFallbackSongs()
+        val artistSongs = if (newSongs.size + playlistSongs.size < 30) {
+            safeNet {
+                val topArtistId = api.getTopArtists(limit = 1, offset = 0)
+                    .artists?.firstOrNull()?.id ?: 6452L
+                api.getArtistTopSongs(topArtistId).songs.orEmpty()
+                    .take(30)
+                    .map { formatTrackToSong(it) }
+            }.getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+
+        val merged = (newSongs + playlistSongs + artistSongs)
+            .distinctBy { it.neteaseId ?: it.id }
+            .take(60)
+        return if (merged.isNotEmpty()) merged else getFallbackSongs()
     }
 
     suspend fun getPersonalizedPlaylists(): List<Playlist> {
+        if (!apiReachable) return emptyList()
         return safeNet {
             (api.getPersonalizedPlaylists().result ?: emptyList()).map {
                 Playlist(
@@ -622,6 +655,7 @@ class NeteaseApiService(
     // --- 艺术家 ---
 
     suspend fun getTopArtists(): List<Artist> {
+        if (!apiReachable) return emptyList()
         return safeNet {
             api.getTopArtists(limit = 50).artists.orEmpty().mapNotNull { dto ->
                 if (dto.id == 0L || dto.name.isBlank()) return@mapNotNull null

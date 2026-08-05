@@ -328,9 +328,11 @@ fun LiquidDockTabs(
                     layerBlock = {
                         scaleX = dragAnimation.scaleX
                         scaleY = dragAnimation.scaleY
-                        val velocity = dragAnimation.velocity / 10f
-                        scaleX /= 1f - (velocity * 0.75f).fastCoerceIn(-0.2f, 0.2f)
-                        scaleY *= 1f - (velocity * 0.25f).fastCoerceIn(-0.2f, 0.2f)
+                        val velocity = (dragAnimation.velocity / 10f) * dragAnimation.pressProgress
+                        if (velocity != 0f) {
+                            scaleX /= 1f - (velocity * 0.75f).fastCoerceIn(-0.2f, 0.2f)
+                            scaleY *= 1f - (velocity * 0.25f).fastCoerceIn(-0.2f, 0.2f)
+                        }
                     },
                     onDrawSurface = {
                         val progress = dragAnimation.pressProgress
@@ -410,16 +412,10 @@ private class DockDampedDragAnimation(
 
     private fun release() {
         animationScope.launch {
-            withFrameNanos { }
-            if (value != targetValue) {
-                val threshold = (valueRange.endInclusive - valueRange.start) * 0.025f
-                snapshotFlow { valueAnimation.value }
-                    .filter { abs(it - valueAnimation.targetValue) < threshold }
-                    .first()
-            }
             launch { pressProgressAnimation.animateTo(0f, pressProgressAnimationSpec) }
             launch { scaleXAnimation.animateTo(initialScale, scaleXAnimationSpec) }
             launch { scaleYAnimation.animateTo(initialScale, scaleYAnimationSpec) }
+            launch { velocityAnimation.animateTo(0f, velocityAnimationSpec) }
         }
     }
 
@@ -433,7 +429,11 @@ private class DockDampedDragAnimation(
     fun animateToValue(value: Float) {
         val coerced = value.coerceIn(valueRange)
         animationScope.launch {
-            valueAnimation.animateTo(coerced, valueAnimationSpec)
+            launch { valueAnimation.animateTo(coerced, valueAnimationSpec) }
+            launch { velocityAnimation.animateTo(0f, velocityAnimationSpec) }
+            launch { pressProgressAnimation.animateTo(0f, pressProgressAnimationSpec) }
+            launch { scaleXAnimation.animateTo(initialScale, scaleXAnimationSpec) }
+            launch { scaleYAnimation.animateTo(initialScale, scaleYAnimationSpec) }
         }
     }
 

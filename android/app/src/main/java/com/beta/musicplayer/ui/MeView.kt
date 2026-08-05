@@ -7,6 +7,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -288,6 +289,7 @@ private fun LoginSheet(viewModel: MainViewModel, uiState: MainUiState) {
     var phone by rememberSaveable { mutableStateOf("") }
     var captcha by rememberSaveable { mutableStateOf("") }
     var captchaCountdown by remember { mutableIntStateOf(0) }
+    var showAdvancedApi by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(uiState.captchaSentAt) {
         while (uiState.captchaSentAt > 0L) {
@@ -362,6 +364,51 @@ private fun LoginSheet(viewModel: MainViewModel, uiState: MainUiState) {
                     }
                 }
                 Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = { showAdvancedApi = !showAdvancedApi }) {
+                        Text(if (showAdvancedApi) "隐藏自定义服务" else "自定义服务")
+                    }
+                }
+                if (showAdvancedApi) {
+                Text(
+                    text = "网易云 API 服务地址",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color.White.copy(alpha = 0.9f),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "手机不能访问电脑的 localhost；请先在电脑启动 api-enhanced，再填写电脑局域网地址，例如 http://192.168.0.105:3000/",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.55f),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedTextField(
+                        value = apiBaseUrl,
+                        onValueChange = { apiBaseUrl = it },
+                        label = { Text("API 地址") },
+                        placeholder = { Text("http://127.0.0.1:3000/") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(
+                        onClick = { viewModel.updateApiBaseUrl(apiBaseUrl) },
+                        enabled = apiBaseUrl.isNotBlank() && !uiState.isLoginLoading,
+                    ) {
+                        Text("连接")
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                }
 
                 if (phoneMode) {
                     Text(
