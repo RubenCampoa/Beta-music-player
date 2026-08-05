@@ -131,58 +131,26 @@ fun LyricsView(
         }
     }
 
-    // 列表负责连续位移；相邻换句使用可回弹的滚动弹簧，远距离跳转则直接定位。
+    // 列表负责连续位移；横屏时根据 focusFraction 自动垂直居中到视口正中央
     LaunchedEffect(currentIndex, autoScrollPaused, lyrics) {
         if (!autoScrollPaused && currentIndex in lyrics.indices) {
             val fraction = focusFraction
-            val currentItem = listState.layoutInfo.visibleItemsInfo
-                .firstOrNull { it.index == currentIndex }
             if (fraction != null) {
-                // 横屏居中模式：把当前行的行中心对齐到视口指定比例处（0.5f = 垂直居中）
-                val targetCenter = (listState.layoutInfo.viewportSize.height * fraction).toInt()
-                if (currentItem == null) {
-                    listState.scrollToItem(currentIndex)
-                    val laidOut = snapshotFlow {
-                        listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == currentIndex }
-                    }.first { it != null }!!
-                    val distance = laidOut.offset + laidOut.size / 2 - targetCenter
-                    if (abs(distance) > 0.5f) {
-                        listState.animateScrollBy(
-                            value = distance.toFloat(),
-                            animationSpec = spring(
-                                dampingRatio = 0.72f,
-                                stiffness = 360f,
-                                visibilityThreshold = 0.5f,
-                            ),
-                        )
-                    }
-                } else {
-                    val distance = currentItem.offset + currentItem.size / 2 - targetCenter
-                    if (abs(distance) > 0.5f) {
-                        listState.animateScrollBy(
-                            value = distance.toFloat(),
-                            animationSpec = spring(
-                                dampingRatio = 0.72f,
-                                stiffness = 360f,
-                                visibilityThreshold = 0.5f,
-                            ),
-                        )
-                    }
-                }
-            } else if (currentItem == null) {
-                listState.scrollToItem(currentIndex, scrollOffset = -focusOffsetPx)
+                val viewportHeight = listState.layoutInfo.viewportSize.height
+                val visibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == currentIndex }
+                val itemHeight = visibleItem?.size ?: with(density) { 60.dp.roundToPx() }
+                val targetCenterPx = if (viewportHeight > 0) (viewportHeight * fraction).toInt() else with(density) { 240.dp.roundToPx() }
+                val scrollOffsetPx = -(targetCenterPx - itemHeight / 2)
+
+                listState.animateScrollToItem(
+                    index = currentIndex,
+                    scrollOffset = scrollOffsetPx,
+                )
             } else {
-                val distanceToFocus = (currentItem.offset - focusOffsetPx).toFloat()
-                if (abs(distanceToFocus) > 0.5f) {
-                    listState.animateScrollBy(
-                        value = distanceToFocus,
-                        animationSpec = spring(
-                            dampingRatio = 0.72f,
-                            stiffness = 360f,
-                            visibilityThreshold = 0.5f,
-                        ),
-                    )
-                }
+                listState.animateScrollToItem(
+                    index = currentIndex,
+                    scrollOffset = -focusOffsetPx,
+                )
             }
         }
     }

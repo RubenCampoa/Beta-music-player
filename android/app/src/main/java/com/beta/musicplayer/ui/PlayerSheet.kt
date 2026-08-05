@@ -28,7 +28,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
@@ -86,7 +85,7 @@ import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
 /**
- * 全屏播放页：支持竖屏与横屏（1:1 匹配 Apple Music iPad 横屏播放器布局）
+ * 全屏播放页：支持竖屏与横屏（1:1 匹配 Apple Music iPad 横屏播放器布局，通透干净不拥挤）
  */
 @Composable
 fun PlayerSheet(
@@ -157,20 +156,20 @@ fun PlayerSheet(
         }
 
         if (isLandscape) {
-            // 横屏布局：完全 1:1 匹配 Apple Music iPad 界面（左侧封面+歌曲信息+控制区，右侧全屏景深歌词与悬浮按钮）
+            // 横屏布局：完全 1:1 匹配 Apple Music iPad 界面（左侧舒展封面+歌曲信息+控制区，右侧歌词垂直居中）
             Row(
                 modifier = Modifier
                     .fillMaxSize()
                     .statusBarsPadding()
                     .navigationBarsPadding()
                     .padding(horizontal = 24.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(24.dp),
+                horizontalArrangement = Arrangement.spacedBy(28.dp),
             ) {
-                // 左侧列：封面 + 歌曲信息 + 进度条 + 控制组件 + 音量条
+                // 左侧列：收起按钮 + 封面 + 歌曲信息 + 进度条 + 5个控制组件 + 音量条
                 Column(
                     modifier = Modifier
                         .fillMaxHeight()
-                        .weight(0.44f),
+                        .weight(0.42f),
                     verticalArrangement = Arrangement.SpaceBetween,
                 ) {
                     // 1. 顶部收起按钮
@@ -188,7 +187,7 @@ fun PlayerSheet(
                         )
                     }
 
-                    // 2. 正方形大封面
+                    // 2. 正方形大封面（占比适中不挤压）
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -199,9 +198,9 @@ fun PlayerSheet(
                             model = Format.getOptimizedCoverUrl(song.coverUrl, 800),
                             contentDescription = song.name,
                             modifier = Modifier
-                                .fillMaxWidth(0.92f)
+                                .fillMaxWidth(0.82f)
                                 .aspectRatio(1f)
-                                .clip(RoundedCornerShape(20.dp)),
+                                .clip(RoundedCornerShape(18.dp)),
                             contentScale = ContentScale.Crop,
                         )
                     }
@@ -216,9 +215,9 @@ fun PlayerSheet(
                                 text = song.name,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.titleLarge.copy(
+                                style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 20.sp,
+                                    fontSize = 19.sp,
                                 ),
                                 color = Color.White,
                             )
@@ -258,9 +257,9 @@ fun PlayerSheet(
                         }
                     }
 
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(4.dp))
 
-                    // 4. 进度条与质量徽章（杜比全景声 / Dolby Atmos）
+                    // 4. 进度条与质量徽章（Dolby Atmos）
                     Column(modifier = Modifier.fillMaxWidth()) {
                         val progress = if (playerState.durationMs > 0) {
                             (playerState.positionMs.toFloat() / playerState.durationMs).coerceIn(0f, 1f)
@@ -310,9 +309,9 @@ fun PlayerSheet(
                         }
                     }
 
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(4.dp))
 
-                    // 5. 播放控制按钮组 (模式、上一首、播放/暂停、下一首、单曲循环)
+                    // 5. 5个核心控制按钮 (随机/顺序、上一首、播放/暂停、下一首、循环模式)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -320,13 +319,9 @@ fun PlayerSheet(
                     ) {
                         GlassIconButton(
                             backdrop = backdrop,
-                            icon = when (playerState.playMode) {
-                                MusicPlayer.PlayMode.REPEAT_ALL -> Icons.Rounded.Repeat
-                                MusicPlayer.PlayMode.REPEAT_ONE -> Icons.Rounded.RepeatOne
-                                MusicPlayer.PlayMode.SHUFFLE -> Icons.Rounded.Shuffle
-                            },
+                            icon = Icons.Rounded.Shuffle,
                             onClick = onCyclePlayMode,
-                            contentDescription = "播放模式",
+                            contentDescription = "随机播放",
                             size = 38.dp,
                             iconSize = 20.dp,
                             surfaceColor = Color.White.copy(alpha = 0.12f),
@@ -336,7 +331,7 @@ fun PlayerSheet(
                             icon = Icons.Rounded.SkipPrevious,
                             onClick = { player.previous() },
                             contentDescription = "上一首",
-                            size = 46.dp,
+                            size = 44.dp,
                             iconSize = 24.dp,
                             surfaceColor = Color.White.copy(alpha = 0.12f),
                         )
@@ -345,8 +340,8 @@ fun PlayerSheet(
                             icon = if (playerState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                             onClick = { player.togglePlay() },
                             contentDescription = if (playerState.isPlaying) "暂停" else "播放",
-                            size = 56.dp,
-                            iconSize = 32.dp,
+                            size = 54.dp,
+                            iconSize = 30.dp,
                             surfaceColor = Color.White.copy(alpha = 0.16f),
                         )
                         GlassIconButton(
@@ -354,13 +349,17 @@ fun PlayerSheet(
                             icon = Icons.Rounded.SkipNext,
                             onClick = { player.next() },
                             contentDescription = "下一首",
-                            size = 46.dp,
+                            size = 44.dp,
                             iconSize = 24.dp,
                             surfaceColor = Color.White.copy(alpha = 0.12f),
                         )
                         GlassIconButton(
                             backdrop = backdrop,
-                            icon = Icons.Rounded.Repeat,
+                            icon = when (playerState.playMode) {
+                                MusicPlayer.PlayMode.REPEAT_ALL -> Icons.Rounded.Repeat
+                                MusicPlayer.PlayMode.REPEAT_ONE -> Icons.Rounded.RepeatOne
+                                MusicPlayer.PlayMode.SHUFFLE -> Icons.Rounded.Shuffle
+                            },
                             onClick = onCyclePlayMode,
                             contentDescription = "循环模式",
                             size = 38.dp,
@@ -369,32 +368,17 @@ fun PlayerSheet(
                         )
                     }
 
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(4.dp))
 
-                    // 6. 音量调节与 AirPlay/投屏 图标
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        GlassIconButton(
-                            backdrop = backdrop,
-                            icon = Icons.Rounded.Cast,
-                            onClick = { },
-                            contentDescription = "设备投屏",
-                            size = 28.dp,
-                            iconSize = 16.dp,
-                            surfaceColor = Color.Transparent,
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        VolumeSliderRow(backdrop = backdrop, modifier = Modifier.weight(1f))
-                    }
+                    // 6. 音量调节整洁行（精简无用图标，保留音量滑块）
+                    VolumeSliderRow(backdrop = backdrop, modifier = Modifier.fillMaxWidth())
                 }
 
-                // 右侧列：顶部指示线 + 浮动功能按钮 + 全屏景深歌词
+                // 右侧列：顶部指示线 + 浮动功能按钮 + 自动居中景深歌词
                 Box(
                     modifier = Modifier
                         .fillMaxHeight()
-                        .weight(0.56f),
+                        .weight(0.58f),
                 ) {
                     // 顶部拖拽指示线
                     Box(
@@ -435,13 +419,13 @@ fun PlayerSheet(
                         )
                     }
 
-                    // 歌词区（居中偏左对齐，1:1 匹配目标图字号与景深效果）
+                    // 歌词区（50% 垂直居中正中央对齐，匹配 Apple Music 横屏视觉）
                     LyricsView(
                         lyrics = playerState.lyrics,
                         positionProvider = lyricPositionProvider,
                         onSeekTo = { positionMs -> player.seekTo(positionMs) },
                         onTap = { },
-                        focusFraction = 0.40f,
+                        focusFraction = 0.50f,
                         modifier = Modifier.fillMaxSize(),
                     )
 
@@ -591,7 +575,7 @@ fun PlayerSheet(
     }
 }
 
-/** 播放控制：进度滑块 + 时间 + 控制按钮行（支持音量滑块参数） */
+/** 播放控制：进度滑块 + 时间 + 控制按钮行 */
 @Composable
 private fun PlaybackControls(
     backdrop: Backdrop,
