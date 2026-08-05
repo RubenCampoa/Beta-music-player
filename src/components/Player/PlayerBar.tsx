@@ -17,14 +17,48 @@ import {
 } from 'lucide-react';
 import { usePlayerStore } from '../../store/playerStore';
 import { neteaseApi, getOptimizedCoverUrl } from '../../services/neteaseApi';
-import { formatTime, formatRemainingTime } from '../../utils/format';
+import { formatTime } from '../../utils/format';
+import { shallow } from 'zustand/shallow';
 
-export const PlayerBar: React.FC = () => {
+const PlayerProgress = React.memo(() => {
+  const { currentTime, duration } = usePlayerStore(
+    (state) => ({ currentTime: state.currentTime, duration: state.duration }),
+    shallow,
+  );
+
+  const handleProgressSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const percent = Math.max(0, Math.min(1, clickX / rect.width));
+    window.dispatchEvent(new CustomEvent('audio-seek', { detail: percent * duration }));
+  };
+
+  const progressPercent = duration ? Math.min(100, (currentTime / duration) * 100) : 0;
+
+  return (
+    <div className="w-full flex items-center space-x-2.5 text-[11px] font-mono text-[#9aa3af]">
+      <span>{formatTime(currentTime)}</span>
+      <div
+        onClick={handleProgressSeek}
+        className="progress-track relative flex-1 h-1.5 hover:h-2 rounded-full cursor-pointer overflow-visible transition-all"
+      >
+        <div
+          className="progress-fill h-full rounded-full relative transition-[width] duration-150 ease-out"
+          style={{ width: `${progressPercent}%` }}
+        >
+          <div className="progress-thumb absolute right-0 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full shadow-md" />
+        </div>
+      </div>
+      <span>{formatTime(duration)}</span>
+    </div>
+  );
+});
+
+export const PlayerBar: React.FC = React.memo(() => {
   const {
     currentSong,
     isPlaying,
-    currentTime,
-    duration,
     volume,
     isMuted,
     repeatMode,
@@ -42,7 +76,30 @@ export const PlayerBar: React.FC = () => {
     toggleQueueDrawer,
     toggleFavorite,
     isFavorite,
-  } = usePlayerStore();
+  } = usePlayerStore(
+    (state) => ({
+      currentSong: state.currentSong,
+      isPlaying: state.isPlaying,
+      volume: state.volume,
+      isMuted: state.isMuted,
+      repeatMode: state.repeatMode,
+      isShuffle: state.isShuffle,
+      isFullLyricsMode: state.isFullLyricsMode,
+      isQueueOpen: state.isQueueOpen,
+      togglePlayPause: state.togglePlayPause,
+      nextSong: state.nextSong,
+      prevSong: state.prevSong,
+      toggleRepeat: state.toggleRepeat,
+      toggleShuffle: state.toggleShuffle,
+      setVolume: state.setVolume,
+      toggleMute: state.toggleMute,
+      setFullLyricsMode: state.setFullLyricsMode,
+      toggleQueueDrawer: state.toggleQueueDrawer,
+      toggleFavorite: state.toggleFavorite,
+      isFavorite: state.isFavorite,
+    }),
+    shallow,
+  );
 
   const [isDesktopLyricActive, setIsDesktopLyricActive] = useState(false);
 
@@ -54,19 +111,6 @@ export const PlayerBar: React.FC = () => {
       return cleanup;
     }
   }, []);
-
-  const handleProgressSeek = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!duration) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const percent = Math.max(0, Math.min(1, clickX / rect.width));
-    const seekTime = percent * duration;
-
-    // Dispatch custom audio-seek event to AudioController
-    window.dispatchEvent(new CustomEvent('audio-seek', { detail: seekTime }));
-  };
-
-  const progressPercent = duration ? Math.min(100, (currentTime / duration) * 100) : 0;
 
   return (
     <footer className="player-dock h-20 w-full glass-player fixed bottom-0 left-0 right-0 z-[60] flex items-center justify-between px-6 select-none border-t border-black/8">
@@ -177,22 +221,8 @@ export const PlayerBar: React.FC = () => {
           </button>
         </div>
 
-        {/* Progress Bar */}
-        <div className="w-full flex items-center space-x-2.5 text-[11px] font-mono text-[#9aa3af]">
-          <span>{formatTime(currentTime)}</span>
-          <div
-            onClick={handleProgressSeek}
-            className="progress-track relative flex-1 h-1.5 hover:h-2 rounded-full cursor-pointer overflow-visible transition-all"
-          >
-            <div
-              className="progress-fill h-full rounded-full relative transition-[width] duration-150 ease-out"
-              style={{ width: `${progressPercent}%` }}
-            >
-              <div className="progress-thumb absolute right-0 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full shadow-md" />
-            </div>
-          </div>
-          <span>{formatTime(duration)}</span>
-        </div>
+        {/* Progress Bar (isolated from the rest of the dock's store updates) */}
+        <PlayerProgress />
       </div>
 
       {/* Right Volume, Queue Drawer & Lyric Toggle */}
@@ -258,4 +288,4 @@ export const PlayerBar: React.FC = () => {
       </div>
     </footer>
   );
-};
+});

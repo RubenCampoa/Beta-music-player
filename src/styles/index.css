@@ -94,22 +94,22 @@ div[style*="--desktop-lyric-distance"] .desktop-lyric-marquee-text {
 /* Glassmorphism Classes */
 .glass-panel {
   background: var(--glass-bg);
-  backdrop-filter: blur(22px) saturate(130%);
-  -webkit-backdrop-filter: blur(22px) saturate(130%);
+  backdrop-filter: blur(14px) saturate(115%);
+  -webkit-backdrop-filter: blur(14px) saturate(115%);
   border: 1px solid var(--glass-border);
 }
 
 .glass-sidebar {
   background: var(--sidebar-bg);
-  backdrop-filter: blur(24px) saturate(130%);
-  -webkit-backdrop-filter: blur(24px) saturate(130%);
+  backdrop-filter: blur(14px) saturate(115%);
+  -webkit-backdrop-filter: blur(14px) saturate(115%);
   border-right: 1px solid rgba(31, 41, 55, 0.07);
 }
 
 .glass-player {
   background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(26px) saturate(130%);
-  -webkit-backdrop-filter: blur(26px) saturate(130%);
+  backdrop-filter: blur(16px) saturate(115%);
+  -webkit-backdrop-filter: blur(16px) saturate(115%);
   border-top: 1px solid rgba(31, 41, 55, 0.08);
 }
 
@@ -326,6 +326,12 @@ div[style*="--desktop-lyric-distance"] .desktop-lyric-marquee-text {
   border-radius: 20px;
   overflow: hidden;
   border: 0;
+  /* The fullscreen surface covers the paper UI immediately on entry. Keep
+     its background out of the normal shell transition so the old light
+     surface cannot flash around the 10px lyric inset. */
+  transition:
+    border-radius 620ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 460ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .app-shell:not(.full-lyrics-host) {
@@ -385,7 +391,9 @@ div[style*="--desktop-lyric-distance"] .desktop-lyric-marquee-text {
 }
 
 .view-transition {
-  will-change: transform, opacity, filter;
+  /* Do not pin the entire scrolling view to a compositor layer while it is
+     idle. Framer Motion promotes it only during a route transition. */
+  will-change: auto;
 }
 
 /* Existing secondary views inherit the same paper palette while keeping their layout. */
@@ -635,7 +643,6 @@ div[style*="--desktop-lyric-distance"] .desktop-lyric-marquee-text {
   cursor: pointer;
   background: #e2e6ec;
   transition: transform 300ms cubic-bezier(0.2, 0.9, 0.25, 1), box-shadow 240ms ease, filter 240ms ease, opacity 240ms ease;
-  will-change: transform;
 }
 
 .daily-art-button img {
@@ -730,7 +737,11 @@ div[style*="--desktop-lyric-distance"] .desktop-lyric-marquee-text {
 .quick-mix-card p { margin: 5px 0 0; color: #8a94a4; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .quick-mix-arrow { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin-left: auto; flex: 0 0 auto; color: #657083; border: 1px solid rgba(70, 81, 98, 0.14); border-radius: 50%; }
 
-.home-section { margin-top: 28px; }
+.home-section {
+  margin-top: 28px;
+  content-visibility: auto;
+  contain-intrinsic-size: 240px;
+}
 .section-heading-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 14px; }
 .section-heading-row h2 { font-size: 20px; }
 .section-heading-row .section-kicker { margin-bottom: 5px; }

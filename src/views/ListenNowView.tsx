@@ -142,6 +142,7 @@ export const ListenNowView: React.FC = () => {
                 src={getOptimizedCoverUrl(song.coverUrl, 420)}
                 alt=""
                 draggable={false}
+                decoding="async"
               />
               <span className="daily-art-play" aria-hidden="true">
                 <Play className="h-5 w-5 fill-current" />
@@ -160,7 +161,7 @@ export const ListenNowView: React.FC = () => {
             className="quick-mix-card"
           >
             <div className={`quick-mix-art quick-mix-art-${index}`}>
-              <img src={getOptimizedCoverUrl(playlist.coverImgUrl, 180)} alt="" />
+              <img src={getOptimizedCoverUrl(playlist.coverImgUrl, 180)} alt="" loading="lazy" decoding="async" />
             </div>
             <div className="min-w-0 text-left">
               <h3>{index === 0 ? '私人漫游' : '私人雷达'}</h3>
@@ -187,7 +188,7 @@ export const ListenNowView: React.FC = () => {
             <button key={song.id} onClick={() => playSong(song, recommendSongs)} className="track-row">
               <span className="track-number">{String(index + 1).padStart(2, '0')}</span>
               <div className="track-cover-wrap">
-                <img src={getOptimizedCoverUrl(song.coverUrl, 120)} alt="" className="track-cover" />
+                <img src={getOptimizedCoverUrl(song.coverUrl, 120)} alt="" loading="lazy" decoding="async" className="track-cover" />
                 <span className="track-play"><Play className="h-3.5 w-3.5 fill-current" /></span>
               </div>
               <div className="min-w-0 flex-1 text-left">
@@ -215,7 +216,7 @@ export const ListenNowView: React.FC = () => {
         <div className="playlist-grid">
           {personalPlaylists.slice(0, 4).map((playlist) => (
             <button key={playlist.id} onClick={() => setSelectedPlaylist(playlist)} className="playlist-card">
-              <img src={getOptimizedCoverUrl(playlist.coverImgUrl, 320)} alt="" />
+              <img src={getOptimizedCoverUrl(playlist.coverImgUrl, 320)} alt="" loading="lazy" decoding="async" />
               <div className="playlist-card-overlay" />
               <span className="playlist-card-play"><Play className="h-4 w-4 fill-current" /></span>
               <div className="playlist-card-copy">

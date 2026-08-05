@@ -15,14 +15,10 @@ let windowBoundsAnimation: NodeJS.Timeout | null = null;
 let isAnimatingWindowBounds = false;
 let isProgrammaticMinimize = false;
 
-// Enable full GPU hardware acceleration & zero-copy GPU rasterization
-app.commandLine.appendSwitch('ignore-gpu-blocklist');
-app.commandLine.appendSwitch('enable-gpu-rasterization');
-app.commandLine.appendSwitch('enable-zero-copy');
-app.commandLine.appendSwitch('disable-gpu-vsync');
-app.commandLine.appendSwitch('max-gum-fps', '120');
+// Let Chromium choose the platform's normal compositor and frame pacing. The
+// old forced-rasterization flags disabled vsync for the transparent window,
+// which made the main page redraw continuously even while it was idle.
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512');
-app.commandLine.appendSwitch('enable-features', 'ParallelDownloading,CanvasOopRasterization');
 
 // Keep the native application identity aligned with the product branding.
 // This also prevents Windows from grouping the packaged app under "Electron".

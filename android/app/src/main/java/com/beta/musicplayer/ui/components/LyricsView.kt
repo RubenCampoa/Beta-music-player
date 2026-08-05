@@ -43,6 +43,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import com.beta.musicplayer.data.model.LyricLine
 import kotlinx.coroutines.delay
@@ -76,6 +77,8 @@ fun LyricsView(
     lineSeekEnabled: Boolean = true,
     // 聚焦行在视口中的垂直位置比例：null = 默认距顶 116dp；横屏传 0.5f 让当前行垂直居中
     focusFraction: Float? = null,
+    // 竖屏景深模糊开关：横屏传 false 切换 Apple Music 式"清晰度/尺寸层次"（无重度磨砂 Blur）
+    depthBlurEnabled: Boolean = true,
 ) {
     if (lyrics.isEmpty()) {
         Box(
@@ -131,25 +134,39 @@ fun LyricsView(
         }
     }
 
-    // 列表负责连续位移；横屏时根据 focusFraction 自动垂直居中到视口正中央
+    // 列表负责连续位移；横屏居中 / 竖屏距顶 116dp 均按实测行位置用 animateScrollBy 对齐
+    // （不能用 animateScrollToItem 传负 scrollOffset：该参数要求 >= 0，负值会导致滚动失效）
     LaunchedEffect(currentIndex, autoScrollPaused, lyrics) {
         if (!autoScrollPaused && currentIndex in lyrics.indices) {
-            val fraction = focusFraction
-            if (fraction != null) {
-                val viewportHeight = listState.layoutInfo.viewportSize.height
-                val visibleItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == currentIndex }
-                val itemHeight = visibleItem?.size ?: with(density) { 60.dp.roundToPx() }
-                val targetCenterPx = if (viewportHeight > 0) (viewportHeight * fraction).toInt() else with(density) { 240.dp.roundToPx() }
-                val scrollOffsetPx = -(targetCenterPx - itemHeight / 2)
-
-                listState.animateScrollToItem(
-                    index = currentIndex,
-                    scrollOffset = scrollOffsetPx,
-                )
+            val centered = focusFraction != null
+            val targetPx = if (centered) {
+                (listState.layoutInfo.viewportSize.height * focusFraction!!).toInt()
             } else {
-                listState.animateScrollToItem(
-                    index = currentIndex,
-                    scrollOffset = -focusOffsetPx,
+                focusOffsetPx
+            }
+            var item = listState.layoutInfo.visibleItemsInfo
+                .firstOrNull { it.index == currentIndex }
+            if (item == null) {
+                // 远距离跳转：先无动画定位，等布局完成后再按实测位置精确对齐
+                listState.scrollToItem(currentIndex)
+                item = snapshotFlow {
+                    listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == currentIndex }
+                }.first { it != null }!!
+            }
+            val distance = if (centered) {
+                // 行中心对齐到视口指定比例处（0.5f = 垂直居中）
+                item.offset + item.size / 2 - targetPx
+            } else {
+                item.offset - targetPx
+            }
+            if (abs(distance) > 0.5f) {
+                listState.animateScrollBy(
+                    value = distance.toFloat(),
+                    animationSpec = spring(
+                        dampingRatio = 0.72f,
+                        stiffness = 360f,
+                        visibilityThreshold = 0.5f,
+                    ),
                 )
             }
         }
@@ -218,22 +235,45 @@ fun LyricsView(
                 label = "lyricTranslation",
             )
 
-            val restingAlpha = when (distance) {
-                0 -> 1f
-                1 -> 0.36f
-                2 -> 0.26f
-                else -> 0.14f
+            val restingAlpha = if (depthBlurEnabled) {
+                when (distance) {
+                    0 -> 1f
+                    1 -> 0.36f
+                    2 -> 0.26f
+                    else -> 0.14f
+                }
+            } else {
+                // Apple Music 横屏：邻句清晰但变淡，不过度压暗
+                when (distance) {
+                    0 -> 1f
+                    1 -> 0.55f
+                    2 -> 0.35f
+                    else -> 0.22f
+                }
             }
             val animatedAlpha by animateFloatAsState(
                 targetValue = restingAlpha,
-                animationSpec = tween(
-                    durationMillis = 170,
-                    easing = FastOutSlowInEasing,
-                ),
+                animationSpec = if (depthBlurEnabled) {
+                    tween(
+                        durationMillis = 170,
+                        easing = FastOutSlowInEasing,
+                    )
+                } else {
+                    // Apple Music 式切行：弹簧柔和过渡带轻微回弹
+                    spring(
+                        dampingRatio = 0.8f,
+                        stiffness = 300f,
+                        visibilityThreshold = 0.001f,
+                    )
+                },
                 label = "lyricAlpha",
             )
             val clampedFocus = focusProgress.coerceIn(0f, 1f)
-            val animatedScale = 0.86f + 0.14f * focusProgress
+            val animatedScale = if (depthBlurEnabled) {
+                0.86f + 0.14f * focusProgress
+            } else {
+                0.92f + 0.08f * focusProgress
+            }
 
             // 参考图高质景深模糊：非当前句根据距离呈现 7.5px..22px 磨砂玻璃 Blur。
             val blurBucket = when {
@@ -243,8 +283,8 @@ fun LyricsView(
                 distance == 2 -> 2
                 else -> 3
             }
-            val blurEffect = remember(blurBucket) {
-                if (blurBucket == 0) {
+            val blurEffect = remember(blurBucket, depthBlurEnabled) {
+                if (!depthBlurEnabled || blurBucket == 0) {
                     null
                 } else {
                     val radius = when (blurBucket) {
@@ -289,6 +329,17 @@ fun LyricsView(
                         currentPositionMs = currentPositionMs,
                     )
                 } else {
+                    // Apple Music 式聚焦：当前行字号随 focusProgress 从 28sp 放大到 32sp
+                    val animatedFontSize = if (depthBlurEnabled) {
+                        28.sp
+                    } else {
+                        lerp(28.sp, 32.sp, clampedFocus)
+                    }
+                    val animatedLineHeight = if (depthBlurEnabled) {
+                        34.sp
+                    } else {
+                        lerp(34.sp, 38.sp, clampedFocus)
+                    }
                     Text(
                         text = line.text,
                         modifier = Modifier.fillMaxWidth(),
@@ -299,8 +350,8 @@ fun LyricsView(
                             ),
                         ),
                         color = Color.White,
-                        fontSize = 28.sp,
-                        lineHeight = 34.sp,
+                        fontSize = animatedFontSize,
+                        lineHeight = animatedLineHeight,
                         fontWeight = FontWeight.Black,
                         textAlign = TextAlign.Start,
                     )

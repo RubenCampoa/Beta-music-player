@@ -26,38 +26,36 @@ import { AnimatePresence, motion } from 'framer-motion';
 type WindowTransition = 'idle' | 'opening' | 'restoring' | 'minimizing' | 'maximizing' | 'unmaximizing';
 
 const DesktopLyricSync: React.FC = () => {
-  const currentSong = usePlayerStore((state) => state.currentSong);
-  const lyrics = usePlayerStore((state) => state.lyrics);
-  const currentTime = usePlayerStore((state) => state.currentTime);
-  const isPlaying = usePlayerStore((state) => state.isPlaying);
-  const lastSyncRef = useRef<{ time: number; songId: string | number | null; isPlaying: boolean }>({
-    time: 0,
-    songId: null,
-    isPlaying: false,
-  });
-
   useEffect(() => {
-    if (!window.electronAPI?.sendDesktopLyricData) return;
+    const sendDesktopLyricData = window.electronAPI?.sendDesktopLyricData;
+    if (!sendDesktopLyricData) return;
 
-    const now = Date.now();
-    const songId = currentSong?.id || null;
-    const timeDelta = now - lastSyncRef.current.time;
-    const isStateChanged =
-      lastSyncRef.current.songId !== songId ||
-      lastSyncRef.current.isPlaying !== isPlaying;
+    let lastSyncTime = 0;
+    let lastSongId: string | number | null = null;
+    let lastIsPlaying = false;
 
-    // Keep the secondary desktop lyric window responsive without making the
-    // root App component re-render for every audio timeupdate.
-    if (timeDelta >= 120 || isStateChanged) {
-      lastSyncRef.current = { time: now, songId, isPlaying };
-      window.electronAPI.sendDesktopLyricData({
-        currentSong,
-        lyrics,
-        currentTime,
-        isPlaying,
+    const sync = (state: ReturnType<typeof usePlayerStore.getState>, force = false) => {
+      const now = Date.now();
+      const songId = state.currentSong?.id ?? null;
+      const stateChanged = lastSongId !== songId || lastIsPlaying !== state.isPlaying;
+
+      if (!force && now - lastSyncTime < 120 && !stateChanged) return;
+
+      lastSyncTime = now;
+      lastSongId = songId;
+      lastIsPlaying = state.isPlaying;
+      sendDesktopLyricData({
+        currentSong: state.currentSong,
+        lyrics: state.lyrics,
+        currentTime: state.currentTime,
+        isPlaying: state.isPlaying,
       });
-    }
-  }, [currentSong, lyrics, currentTime, isPlaying]);
+    };
+
+    // Subscribe without rendering this component on every audio timeupdate.
+    sync(usePlayerStore.getState(), true);
+    return usePlayerStore.subscribe((state) => sync(state));
+  }, []);
 
   return null;
 };
@@ -291,24 +289,31 @@ export const App: React.FC = () => {
       <motion.div
         animate={
           isLyricsSurfaceVisible
-            ? { opacity: 0, y: 10, scale: 0.985, filter: 'blur(5px)' }
-            : { opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }
+            ? { opacity: 0, y: 10, scale: 0.985 }
+            : { opacity: 1, y: 0, scale: 1 }
         }
         transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1] }}
-        style={{ pointerEvents: isLyricsSurfaceVisible ? 'none' : 'auto' }}
+        style={{
+          // Do not leave one composited frame of the paper UI visible while
+          // the fullscreen lyric surface is mounting. The opacity animation
+          // is still used on exit, but hidden content must stop painting
+          // immediately on entry to avoid the old page flashing through.
+          visibility: isLyricsSurfaceVisible ? 'hidden' : 'visible',
+          pointerEvents: isLyricsSurfaceVisible ? 'none' : 'auto',
+        }}
         className="flex-1 flex overflow-hidden relative z-10 min-h-0 transform-gpu"
       >
         {/* Glassmorphic Sidebar */}
         <Sidebar />
 
         {/* Dynamic Views Container */}
-        <main className="app-main flex-1 h-[calc(100vh-3rem-5rem)] overflow-y-auto px-8 py-6 backdrop-blur-xs">
+        <main className="app-main flex-1 h-[calc(100vh-3rem-5rem)] overflow-y-auto px-8 py-6">
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
               key={activeTab}
-              initial={{ opacity: 0, y: 12, scale: 0.988, filter: 'blur(4px)' }}
-              animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, y: -10, scale: 0.992, filter: 'blur(3px)' }}
+              initial={{ opacity: 0, y: 12, scale: 0.988 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -10, scale: 0.992 }}
               transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1] }}
               className="view-transition min-h-full"
             >

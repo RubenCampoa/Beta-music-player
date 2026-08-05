@@ -30,4 +30,24 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
   },
+  build: {
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('react') || id.includes('react-dom') || id.includes('zustand')) {
+              return 'vendor-react';
+            }
+            if (id.includes('framer-motion') || id.includes('lucide-react')) {
+              return 'vendor-ui';
+            }
+            if (id.includes('dexie') || id.includes('jsmediatags')) {
+              return 'vendor-utils';
+            }
+          }
+        },
+      },
+    },
+  },
 });

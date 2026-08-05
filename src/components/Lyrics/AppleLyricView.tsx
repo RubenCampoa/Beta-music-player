@@ -307,7 +307,11 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
 
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.965, y: 10 }}
+      // The fullscreen layer must own the first painted frame. Starting this
+      // root at opacity 0 briefly reveals the normal page underneath before
+      // the lyric layer becomes visible, which reads as a flash on Windows.
+      // The artwork and lyric lines still animate independently below.
+      initial={false}
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.975, y: 8 }}
       transition={{ duration: 0.52, ease: [0.22, 1, 0.36, 1] }}
