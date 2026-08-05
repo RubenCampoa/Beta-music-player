@@ -239,17 +239,15 @@ export const DesktopLyricView: React.FC = () => {
   return (
     <div
       onMouseDown={handleMouseDown}
-      className={`w-screen h-screen relative select-none overflow-hidden flex flex-col justify-between p-2 font-sans rounded-2xl transition-all duration-300 ${
-        isHovered
-          ? 'bg-black/65 backdrop-blur-lg'
-          : 'bg-transparent backdrop-blur-none'
-      } ${isLocked ? 'cursor-default' : 'cursor-move'}`}
+      className={`desktop-lyric-window w-screen h-screen relative select-none overflow-hidden flex flex-col justify-between p-0 font-sans ${
+        isLocked ? 'cursor-default' : 'cursor-move'
+      }`}
     >
       {/* Top Floating Hover Bar (NetEase Cloud Music Style Control Bar) */}
       <div
         onMouseEnter={handleTopBarMouseEnter}
         onMouseLeave={handleTopBarMouseLeave}
-        className={`flex items-center justify-between w-full px-3 py-1.5 rounded-xl bg-black/80 backdrop-blur-2xl border border-white/15 transition-all duration-300 z-50 ${
+        className={`desktop-lyric-toolbar flex items-center justify-between w-full px-3 py-1.5 transition-all duration-300 z-50 ${
           isHovered ? 'opacity-100' : 'opacity-0'
         }`}
       >
@@ -326,17 +324,27 @@ export const DesktopLyricView: React.FC = () => {
       </div>
 
       {/* Main Dual-Line Lyric Content View: Vertical Smooth Slide & Natural Auto-Wrap */}
-      <div className="flex-1 flex flex-col justify-center items-center text-center px-4 z-10 w-full overflow-hidden">
+      <div className="desktop-lyric-content flex-1 flex flex-col justify-center items-center text-center px-4 z-10 w-full overflow-hidden">
         <motion.div
           key={`desktop-lyric-${activeIndex}-${line1Text}`}
-          initial={{ opacity: 0, y: 14 }}
+          initial={{ opacity: 0, y: 22, scale: 0.96 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+          transition={{
+            y: { type: 'spring', stiffness: 220, damping: 23, mass: 0.68 },
+            scale: { type: 'spring', stiffness: 240, damping: 24, mass: 0.65 },
+            opacity: { duration: 0.24, ease: [0.22, 1, 0.36, 1] },
+          }}
           className="w-full flex flex-col justify-center items-center space-y-1.5 transform-gpu"
         >
           {/* Line 1: Active Main Line (Big, Bold, Natural Wrap, Precision Character Glow) */}
           <div
             className={`tracking-tight ${fontClasses.line1} font-black ${activeTheme.activeTextColor} ${activeTheme.activeTextShadow} max-w-full break-words whitespace-pre-wrap leading-tight text-center transition-all duration-300 px-2`}
+            style={{
+              WebkitTextStroke: '1px rgba(12, 18, 30, 0.72)',
+              paintOrder: 'stroke fill',
+              textShadow:
+                '0 1px 2px rgba(0, 0, 0, 0.98), 0 2px 8px rgba(0, 0, 0, 0.82), 0 0 18px rgba(0, 0, 0, 0.62)',
+            }}
           >
             {line1Text}
           </div>
@@ -344,6 +352,11 @@ export const DesktopLyricView: React.FC = () => {
           {/* Line 2: Upcoming Next Line Preview (Noticeably Smaller, 60% Opacity) */}
           <div
             className={`tracking-wide ${fontClasses.line2} font-semibold ${activeTheme.subTextColor} drop-shadow-[0_1px_4px_rgba(0,0,0,0.95)] max-w-full break-words whitespace-pre-wrap leading-tight text-center transition-all duration-300 px-2`}
+            style={{
+              WebkitTextStroke: '0.65px rgba(12, 18, 30, 0.68)',
+              paintOrder: 'stroke fill',
+              textShadow: '0 1px 2px rgba(0, 0, 0, 0.95), 0 0 9px rgba(0, 0, 0, 0.68)',
+            }}
           >
             {line2Text}
           </div>

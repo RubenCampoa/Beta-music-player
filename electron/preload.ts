@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   maximize: () => ipcRenderer.send('window-maximize'),
   close: () => ipcRenderer.send('window-close'),
   toggleFullScreen: () => ipcRenderer.send('window-fullscreen'),
+  setFullScreen: (enabled: boolean) => ipcRenderer.send('window-set-fullscreen', enabled),
   isFullScreen: () => ipcRenderer.invoke('is-window-fullscreen'),
   selectAudioFiles: () => ipcRenderer.invoke('select-audio-files'),
   selectAudioFolder: () => ipcRenderer.invoke('select-audio-folder'),
@@ -18,6 +19,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event: any, isFS: boolean) => callback(isFS);
     ipcRenderer.on('fullscreen-change', handler);
     return () => ipcRenderer.removeListener('fullscreen-change', handler);
+  },
+  onWindowTransition: (callback: (transition: string) => void) => {
+    const handler = (_event: any, transition: string) => callback(transition);
+    ipcRenderer.on('window-transition', handler);
+    return () => ipcRenderer.removeListener('window-transition', handler);
   },
   toggleDesktopLyric: () => ipcRenderer.send('toggle-desktop-lyric'),
   closeDesktopLyric: () => ipcRenderer.send('close-desktop-lyric'),

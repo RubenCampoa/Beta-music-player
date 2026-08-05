@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { usePlayerStore } from '../../store/playerStore';
+import { shallow } from 'zustand/shallow';
 
 export const AudioController: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -17,7 +18,20 @@ export const AudioController: React.FC = () => {
     setCurrentTime,
     setDuration,
     nextSong,
-  } = usePlayerStore();
+  } = usePlayerStore(
+    (state) => ({
+      currentSong: state.currentSong,
+      isPlaying: state.isPlaying,
+      volume: state.volume,
+      isMuted: state.isMuted,
+      repeatMode: state.repeatMode,
+      setIsPlaying: state.setIsPlaying,
+      setCurrentTime: state.setCurrentTime,
+      setDuration: state.setDuration,
+      nextSong: state.nextSong,
+    }),
+    shallow,
+  );
 
   const safeVolume = typeof volume === 'number' && !isNaN(volume) ? volume : 0.8;
   const targetVolume = isMuted ? 0 : Math.max(0, Math.min(1, safeVolume));

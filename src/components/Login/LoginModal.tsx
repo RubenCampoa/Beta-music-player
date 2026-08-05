@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { X, QrCode, CheckCircle2, RefreshCw, AlertCircle, Globe } from 'lucide-react';
 import { usePlayerStore } from '../../store/playerStore';
 import { neteaseApi } from '../../services/neteaseApi';
+import { AnimatePresence, motion } from 'framer-motion';
 
 export const LoginModal: React.FC = () => {
   const { isLoginModalOpen, setIsLoginModalOpen, setUser, setPlaylists, setNeteaseLikeIds, setToastMessage } = usePlayerStore();
@@ -104,11 +105,23 @@ export const LoginModal: React.FC = () => {
     };
   }, [isLoginModalOpen, refreshKey]);
 
-  if (!isLoginModalOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 backdrop-blur-md animate-fadeIn select-none">
-      <div className="relative w-88 glass-panel rounded-3xl p-6 flex flex-col items-center text-center space-y-4 border border-white/20 shadow-2xl">
+    <AnimatePresence initial={false}>
+      {isLoginModalOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/65 backdrop-blur-md select-none"
+        >
+          <motion.div
+            initial={{ opacity: 0, y: 18, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 12, scale: 0.97 }}
+            transition={{ type: 'spring', stiffness: 280, damping: 26, mass: 0.7 }}
+            className="relative w-88 glass-panel rounded-3xl p-6 flex flex-col items-center text-center space-y-4 border border-white/20 shadow-2xl"
+          >
         {/* Close Button */}
         <button
           onClick={() => setIsLoginModalOpen(false)}
@@ -168,7 +181,9 @@ export const LoginModal: React.FC = () => {
             </button>
           )}
         </div>
-      </div>
-    </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 };

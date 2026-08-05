@@ -2,10 +2,19 @@ import React, { useEffect, useState } from 'react';
 import { Play, Music, ListMusic } from 'lucide-react';
 import { Song } from '../types/music';
 import { usePlayerStore } from '../store/playerStore';
+import { shallow } from 'zustand/shallow';
 import { neteaseApi, getOptimizedCoverUrl } from '../services/neteaseApi';
 
 export const PlaylistView: React.FC = () => {
-  const { selectedPlaylist, playSong, currentSong, isPlaying } = usePlayerStore();
+  const { selectedPlaylist, playSong, currentSong, isPlaying } = usePlayerStore(
+    (state) => ({
+      selectedPlaylist: state.selectedPlaylist,
+      playSong: state.playSong,
+      currentSong: state.currentSong,
+      isPlaying: state.isPlaying,
+    }),
+    shallow,
+  );
   const [songs, setSongs] = useState<Song[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
@@ -14,9 +23,15 @@ export const PlaylistView: React.FC = () => {
 
     const fetchSongs = async () => {
       setIsLoading(true);
-      const trackList = await neteaseApi.getPlaylistSongs(selectedPlaylist.id);
-      setSongs(trackList);
-      setIsLoading(false);
+      try {
+        const trackList = await neteaseApi.getPlaylistSongs(selectedPlaylist.id, false);
+        setSongs(trackList);
+      } catch (error) {
+        console.warn('Failed to load playlist songs:', error);
+        setSongs([]);
+      } finally {
+        setIsLoading(false);
+      }
     };
 
     fetchSongs();

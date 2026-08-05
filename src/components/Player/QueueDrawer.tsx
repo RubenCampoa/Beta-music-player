@@ -2,6 +2,7 @@ import React from 'react';
 import { X, Play, Trash2, Music, ListMusic } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePlayerStore } from '../../store/playerStore';
+import { shallow } from 'zustand/shallow';
 import { neteaseApi, getOptimizedCoverUrl } from '../../services/neteaseApi';
 
 export const QueueDrawer: React.FC = () => {
@@ -14,9 +15,19 @@ export const QueueDrawer: React.FC = () => {
     playSong,
     removeFromQueue,
     clearQueue,
-  } = usePlayerStore();
-
-  if (!isQueueOpen) return null;
+  } = usePlayerStore(
+    (state) => ({
+      isQueueOpen: state.isQueueOpen,
+      setQueueOpen: state.setQueueOpen,
+      queue: state.queue,
+      currentSong: state.currentSong,
+      isPlaying: state.isPlaying,
+      playSong: state.playSong,
+      removeFromQueue: state.removeFromQueue,
+      clearQueue: state.clearQueue,
+    }),
+    shallow,
+  );
 
   const formatDuration = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -25,8 +36,9 @@ export const QueueDrawer: React.FC = () => {
   };
 
   return (
-    <AnimatePresence>
-      <div className="fixed inset-0 z-50 overflow-hidden select-none">
+    <AnimatePresence initial={false}>
+      {isQueueOpen && (
+        <div className="fixed inset-0 z-50 overflow-hidden select-none">
         {/* Backdrop */}
         <motion.div
           initial={{ opacity: 0 }}
@@ -146,7 +158,8 @@ export const QueueDrawer: React.FC = () => {
             )}
           </div>
         </motion.div>
-      </div>
+        </div>
+      )}
     </AnimatePresence>
   );
 };

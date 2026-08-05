@@ -3,8 +3,10 @@ export interface IElectronAPI {
   maximize: () => void;
   close: () => void;
   toggleFullScreen?: () => void;
+  setFullScreen?: (enabled: boolean) => void;
   isFullScreen?: () => Promise<boolean>;
   onFullScreenChange?: (callback: (isFS: boolean) => void) => () => void;
+  onWindowTransition?: (callback: (transition: string) => void) => () => void;
   toggleDesktopLyric?: () => void;
   closeDesktopLyric?: () => void;
   setDesktopLyricIgnoreMouse?: (ignore: boolean) => void;

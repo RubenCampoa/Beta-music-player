@@ -1,12 +1,23 @@
 import React from 'react';
 import { Search, Play, Music, Sparkles } from 'lucide-react';
 import { usePlayerStore } from '../store/playerStore';
+import { shallow } from 'zustand/shallow';
 import { neteaseApi, getOptimizedCoverUrl } from '../services/neteaseApi';
 import { Song } from '../types/music';
 
 export const SearchView: React.FC = () => {
   const { searchQuery, searchResults, isSearching, playSong, currentSong, isPlaying } =
-    usePlayerStore();
+    usePlayerStore(
+      (state) => ({
+        searchQuery: state.searchQuery,
+        searchResults: state.searchResults,
+        isSearching: state.isSearching,
+        playSong: state.playSong,
+        currentSong: state.currentSong,
+        isPlaying: state.isPlaying,
+      }),
+      shallow,
+    );
 
   const formatDuration = (secs: number) => {
     const m = Math.floor(secs / 60);

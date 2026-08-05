@@ -5,6 +5,15 @@ import fs from 'fs';
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
+let preFullscreenBounds: Electron.Rectangle | null = null;
+let preFullscreenWasMaximized = false;
+let lastWindowedBounds: Electron.Rectangle | null = null;
+let lastWindowedWasMaximized = false;
+let normalBoundsBeforeMaximize: Electron.Rectangle | null = null;
+let windowOpacityAnimation: NodeJS.Timeout | null = null;
+let windowBoundsAnimation: NodeJS.Timeout | null = null;
+let isAnimatingWindowBounds = false;
+let isProgrammaticMinimize = false;
 
 // Enable full GPU hardware acceleration & zero-copy GPU rasterization
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
@@ -14,6 +23,13 @@ app.commandLine.appendSwitch('disable-gpu-vsync');
 app.commandLine.appendSwitch('max-gum-fps', '120');
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512');
 app.commandLine.appendSwitch('enable-features', 'ParallelDownloading,CanvasOopRasterization');
+
+// Keep the native application identity aligned with the product branding.
+// This also prevents Windows from grouping the packaged app under "Electron".
+app.setName('Beta Music Player');
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.beta.musicplayer');
+}
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app-audio', privileges: { secure: true, standard: true, supportFetchAPI: true, stream: true } }
@@ -51,8 +67,7 @@ function createTray() {
       {
         label: '显示主界面',
         click: () => {
-          mainWindow?.show();
-          mainWindow?.focus();
+          showMainWindowAnimated();
         },
       },
       { type: 'separator' },
@@ -84,8 +99,7 @@ function createTray() {
       if (mainWindow?.isVisible()) {
         mainWindow.focus();
       } else {
-        mainWindow?.show();
-        mainWindow?.focus();
+        showMainWindowAnimated();
       }
     });
 
@@ -93,8 +107,7 @@ function createTray() {
       if (mainWindow?.isVisible()) {
         mainWindow.focus();
       } else {
-        mainWindow?.show();
-        mainWindow?.focus();
+        showMainWindowAnimated();
       }
     });
   } catch (err) {
@@ -134,15 +147,138 @@ function getAppIconPath() {
   return path.join(__dirname, '../public/icon.png');
 }
 
+type WindowTransition =
+  | 'opening'
+  | 'restoring'
+  | 'minimizing'
+  | 'maximizing'
+  | 'unmaximizing'
+  | 'idle';
+
+function sendWindowTransition(transition: WindowTransition) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('window-transition', transition);
+  }
+}
+
+function animateNativeOpacity(target: number, duration: number, onComplete?: () => void) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (windowOpacityAnimation) clearTimeout(windowOpacityAnimation);
+
+  const start = mainWindow.getOpacity();
+  const startedAt = Date.now();
+  const tick = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const progress = Math.min(1, (Date.now() - startedAt) / duration);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    mainWindow.setOpacity(start + (target - start) * eased);
+
+    if (progress < 1) {
+      windowOpacityAnimation = setTimeout(tick, 16);
+    } else {
+      windowOpacityAnimation = null;
+      onComplete?.();
+    }
+  };
+
+  tick();
+}
+
+function showMainWindowAnimated() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+    return;
+  }
+
+  mainWindow.setOpacity(0);
+  mainWindow.show();
+  mainWindow.focus();
+  sendWindowTransition('restoring');
+  animateNativeOpacity(1, 260);
+}
+
+function animateWindowBounds(target: Electron.Rectangle, duration: number, onComplete?: () => void) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (windowBoundsAnimation) clearTimeout(windowBoundsAnimation);
+
+  const start = mainWindow.getBounds();
+  const startedAt = Date.now();
+  isAnimatingWindowBounds = true;
+
+  const tick = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const progress = Math.min(1, (Date.now() - startedAt) / duration);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    mainWindow.setBounds({
+      x: Math.round(start.x + (target.x - start.x) * eased),
+      y: Math.round(start.y + (target.y - start.y) * eased),
+      width: Math.round(start.width + (target.width - start.width) * eased),
+      height: Math.round(start.height + (target.height - start.height) * eased),
+    }, false);
+
+    if (progress < 1) {
+      windowBoundsAnimation = setTimeout(tick, 16);
+    } else {
+      windowBoundsAnimation = null;
+      isAnimatingWindowBounds = false;
+      onComplete?.();
+    }
+  };
+
+  tick();
+}
+
+function animateToggleMaximize() {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isFullScreen() || mainWindow.isMinimized()) return;
+  if (windowBoundsAnimation) return;
+
+  if (!mainWindow.isMaximized()) {
+    const start = mainWindow.getBounds();
+    normalBoundsBeforeMaximize = lastWindowedBounds ?? start;
+    const target = screen.getDisplayMatching(start).workArea;
+    sendWindowTransition('maximizing');
+    animateWindowBounds(target, 360, () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      // Commit the native maximized state after the visual bounds animation.
+      isAnimatingWindowBounds = true;
+      mainWindow.maximize();
+      isAnimatingWindowBounds = false;
+      lastWindowedBounds = normalBoundsBeforeMaximize;
+      lastWindowedWasMaximized = false;
+    });
+    return;
+  }
+
+  const start = mainWindow.getBounds();
+  const target = normalBoundsBeforeMaximize ?? mainWindow.getNormalBounds();
+  sendWindowTransition('unmaximizing');
+
+  // Release the native maximized flag, immediately put the window back at the
+  // maximized bounds, then animate to the saved normal bounds.
+  isAnimatingWindowBounds = true;
+  mainWindow.unmaximize();
+  mainWindow.setBounds(start, false);
+  isAnimatingWindowBounds = false;
+  animateWindowBounds(target, 360, () => {
+    lastWindowedBounds = target;
+    lastWindowedWasMaximized = false;
+  });
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1240,
     height: 820,
     minWidth: 960,
     minHeight: 640,
+    title: 'Beta Music Player',
     frame: false,
     titleBarStyle: 'hidden',
-    backgroundColor: '#0f0f12',
+    // Keep the native surface transparent so fullscreen lyrics can expose
+    // the desktop when its fluid background is disabled.
+    transparent: true,
+    backgroundColor: '#00000000',
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -152,6 +288,54 @@ function createWindow() {
     },
     icon: getAppIconPath(),
   });
+  lastWindowedBounds = mainWindow.getBounds();
+  lastWindowedWasMaximized = mainWindow.isMaximized();
+  normalBoundsBeforeMaximize = lastWindowedBounds;
+
+  const rememberWindowedBounds = () => {
+    if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isFullScreen() || preFullscreenBounds || isAnimatingWindowBounds) return;
+    lastWindowedBounds = mainWindow.getBounds();
+    lastWindowedWasMaximized = mainWindow.isMaximized();
+    if (!lastWindowedWasMaximized) normalBoundsBeforeMaximize = lastWindowedBounds;
+  };
+  mainWindow.on('resize', rememberWindowedBounds);
+  mainWindow.on('move', rememberWindowedBounds);
+
+  mainWindow.on('minimize', (event: Electron.Event) => {
+    if (isProgrammaticMinimize) {
+      isProgrammaticMinimize = false;
+      return;
+    }
+
+    // On Windows this event can be cancelled, which lets a taskbar click use
+    // the same fade/shrink animation as the custom title-bar button. If the
+    // platform ignores preventDefault, the delayed minimize is harmless and
+    // the restore animation still remains active.
+    event.preventDefault();
+    sendWindowTransition('minimizing');
+    animateNativeOpacity(0, 220, () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      isProgrammaticMinimize = true;
+      mainWindow.minimize();
+      mainWindow.setOpacity(1);
+    });
+  });
+
+  mainWindow.on('restore', () => {
+    mainWindow?.setOpacity(0);
+    mainWindow?.show();
+    mainWindow?.focus();
+    sendWindowTransition('restoring');
+    animateNativeOpacity(1, 260);
+  });
+
+  mainWindow.on('maximize', () => {
+    sendWindowTransition('maximizing');
+  });
+
+  mainWindow.on('unmaximize', () => {
+    sendWindowTransition('unmaximizing');
+  });
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
@@ -159,11 +343,21 @@ function createWindow() {
   });
 
   mainWindow.on('enter-full-screen', () => {
+    // Some Windows builds can enter fullscreen through the native window
+    // manager. Capture the bounds here as a fallback if the IPC path did not
+    // get a chance to record them first.
+    if (!preFullscreenBounds) {
+      preFullscreenBounds = lastWindowedBounds ?? mainWindow?.getBounds() ?? null;
+      preFullscreenWasMaximized = lastWindowedWasMaximized;
+    }
     mainWindow?.webContents.send('fullscreen-change', true);
   });
 
   mainWindow.on('leave-full-screen', () => {
     mainWindow?.webContents.send('fullscreen-change', false);
+    // setFullScreen(false) is asynchronous on Windows. Restore after the
+    // native leave event so the old window size is not overwritten by the OS.
+    setTimeout(restorePreFullscreenBounds, 50);
   });
 
   // Windows Close to Tray Behavior
@@ -395,24 +589,77 @@ ipcMain.on('move-desktop-lyric-window', (_event, { deltaX, deltaY }) => {
   }
 });
 
-// Basic Window Controls
-ipcMain.on('window-minimize', () => mainWindow?.minimize());
-ipcMain.on('window-maximize', () => {
-  if (mainWindow?.isMaximized()) mainWindow.unmaximize();
-  else mainWindow?.maximize();
-});
-ipcMain.on('window-fullscreen', () => {
-  if (mainWindow) {
-    const isFS = mainWindow.isFullScreen();
-    mainWindow.setFullScreen(!isFS);
+function restorePreFullscreenBounds() {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isFullScreen() || !preFullscreenBounds) {
+    return;
   }
+
+  const bounds = preFullscreenBounds;
+  const wasMaximized = preFullscreenWasMaximized;
+  preFullscreenBounds = null;
+  preFullscreenWasMaximized = false;
+  lastWindowedBounds = bounds;
+  lastWindowedWasMaximized = wasMaximized;
+
+  if (wasMaximized) {
+    mainWindow.setBounds(bounds, true);
+    mainWindow.maximize();
+  } else {
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    mainWindow.setBounds(bounds, true);
+  }
+}
+
+function setMainWindowFullScreen(enabled: boolean) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  if (enabled) {
+    if (!mainWindow.isFullScreen()) {
+      preFullscreenBounds = mainWindow.getBounds();
+      preFullscreenWasMaximized = mainWindow.isMaximized();
+      mainWindow.setFullScreen(true);
+    }
+    return;
+  }
+
+  if (mainWindow.isFullScreen()) {
+    mainWindow.setFullScreen(false);
+  } else {
+    restorePreFullscreenBounds();
+  }
+}
+
+// Basic Window Controls
+ipcMain.on('window-minimize', () => {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isMinimized()) return;
+  sendWindowTransition('minimizing');
+  animateNativeOpacity(0, 220, () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    isProgrammaticMinimize = true;
+    mainWindow.minimize();
+    // Keep the window fully opaque for the next taskbar restore.
+    mainWindow.setOpacity(1);
+  });
+});
+ipcMain.on('window-maximize', () => animateToggleMaximize());
+ipcMain.on('window-fullscreen', () => {
+  setMainWindowFullScreen(!(mainWindow?.isFullScreen() ?? false));
+});
+ipcMain.on('window-set-fullscreen', (_event, enabled: boolean) => {
+  setMainWindowFullScreen(Boolean(enabled));
 });
 ipcMain.handle('is-window-fullscreen', () => {
   return mainWindow?.isFullScreen() ?? false;
 });
 ipcMain.on('window-close', () => {
   if (!isQuitting) {
-    mainWindow?.hide();
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    sendWindowTransition('minimizing');
+    animateNativeOpacity(0, 220, () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      mainWindow.hide();
+      mainWindow.setOpacity(1);
+    });
   } else {
     mainWindow?.close();
   }

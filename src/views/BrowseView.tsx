@@ -2,10 +2,18 @@ import React, { useEffect, useState } from 'react';
 import { Compass, Flame, Radio, Award, Disc, Play, Sparkles, Music2 } from 'lucide-react';
 import { Song, Playlist } from '../types/music';
 import { usePlayerStore } from '../store/playerStore';
+import { shallow } from 'zustand/shallow';
 import { neteaseApi, getOptimizedCoverUrl } from '../services/neteaseApi';
 
 export const BrowseView: React.FC = () => {
-  const { playSong, setSelectedPlaylist, performSearch } = usePlayerStore();
+  const { playSong, setSelectedPlaylist, performSearch } = usePlayerStore(
+    (state) => ({
+      playSong: state.playSong,
+      setSelectedPlaylist: state.setSelectedPlaylist,
+      performSearch: state.performSearch,
+    }),
+    shallow,
+  );
   const [chartPlaylists, setChartPlaylists] = useState<Playlist[]>([]);
   const [hotSongs, setHotSongs] = useState<Song[]>([]);
   const [activeCategory, setActiveCategory] = useState<string>('all');
@@ -90,21 +98,21 @@ export const BrowseView: React.FC = () => {
   return (
     <div className="space-y-8 pb-16 select-none animate-fadeIn">
       {/* Header Explore Banner */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-purple-900/80 via-blue-900/70 to-indigo-950/90 p-8 border border-white/15 shadow-2xl">
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#eef2f8] via-[#fdfdfd] to-[#f5edf2] p-8 border border-black/5 shadow-xl">
         <div className="relative z-10 max-w-xl space-y-3">
-          <div className="flex items-center space-x-2 text-cyan-400 text-xs font-bold uppercase tracking-wider">
+          <div className="flex items-center space-x-2 text-[#5e78a8] text-xs font-bold uppercase tracking-wider">
             <Compass className="w-4 h-4 animate-spin" style={{ animationDuration: '15s' }} />
             <span>探索流行趋势与权威榜单</span>
           </div>
           <h1 className="text-3xl font-extrabold text-white tracking-tight">
             浏览 · 发现全新音乐风向
           </h1>
-          <p className="text-sm text-white/70 font-medium leading-relaxed">
+          <p className="text-sm text-[#7f8999] font-medium leading-relaxed">
             实时同步网易云热歌榜、飙升榜、新歌榜及多样化曲风分类，探索音乐无限可能。
           </p>
         </div>
         <div className="absolute right-8 top-1/2 -translate-y-1/2 opacity-15 pointer-events-none">
-          <Disc className="w-64 h-64 text-white animate-spin" style={{ animationDuration: '25s' }} />
+          <Disc className="w-64 h-64 text-[#8ba5cf] animate-spin" style={{ animationDuration: '25s' }} />
         </div>
       </div>
 

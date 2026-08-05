@@ -44,7 +44,6 @@ export const PlayerBar: React.FC = () => {
     isFavorite,
   } = usePlayerStore();
 
-  const [isHoverProgress, setIsHoverProgress] = useState(false);
   const [isDesktopLyricActive, setIsDesktopLyricActive] = useState(false);
 
   React.useEffect(() => {
@@ -55,9 +54,6 @@ export const PlayerBar: React.FC = () => {
       return cleanup;
     }
   }, []);
-
-  // Hide bottom floating bar when in full lyrics mode to prevent duplicate controls
-  if (isFullLyricsMode) return null;
 
   const handleProgressSeek = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!duration) return;
@@ -73,7 +69,7 @@ export const PlayerBar: React.FC = () => {
   const progressPercent = duration ? Math.min(100, (currentTime / duration) * 100) : 0;
 
   return (
-    <footer className="h-20 w-full glass-player fixed bottom-0 left-0 right-0 z-[60] flex items-center justify-between px-6 select-none border-t border-white/10">
+    <footer className="player-dock h-20 w-full glass-player fixed bottom-0 left-0 right-0 z-[60] flex items-center justify-between px-6 select-none border-t border-black/8">
       {/* Current Playing Track Meta (Click to open full lyric mode) */}
       <div className="flex items-center space-x-3.5 w-1/4 min-w-[200px]">
         {currentSong ? (
@@ -83,7 +79,7 @@ export const PlayerBar: React.FC = () => {
               className="flex items-center space-x-3.5 cursor-pointer group truncate"
               title="点击展开 Apple Music 歌词动效"
             >
-              <div className="relative w-12 h-12 rounded-lg overflow-hidden border border-white/15 shadow-md shrink-0">
+              <div className="relative w-12 h-12 rounded-lg overflow-hidden border border-black/10 shadow-md shrink-0">
                 <img
                   src={getOptimizedCoverUrl(currentSong.coverUrl, 200)}
                   alt={currentSong.name}
@@ -96,31 +92,31 @@ export const PlayerBar: React.FC = () => {
                 </div>
               </div>
               <div className="flex flex-col truncate">
-                <span className="text-sm font-semibold text-white/95 truncate group-hover:text-apple-red transition-colors">
+                <span className="text-sm font-semibold text-[#263246] truncate group-hover:text-apple-red transition-colors">
                   {neteaseApi.cleanTitle(currentSong.name)}
                 </span>
-                <span className="text-xs text-white/60 truncate group-hover:text-white/80 transition-colors">
+                <span className="text-xs text-[#8a94a3] truncate group-hover:text-[#4b586d] transition-colors">
                   {neteaseApi.cleanTitle(currentSong.artist)}
                 </span>
               </div>
             </div>
             <button
               onClick={() => toggleFavorite(currentSong)}
-              className="p-1.5 rounded-full hover:bg-white/10 transition-all shrink-0 cursor-pointer"
+              className="p-1.5 rounded-full hover:bg-black/5 transition-all shrink-0 cursor-pointer"
               title={isFavorite(currentSong.id) ? '取消收藏' : '收藏歌曲'}
             >
               <Heart
                 className={`w-4 h-4 transition-all ${
                   isFavorite(currentSong.id)
                     ? 'fill-current text-apple-red'
-                    : 'text-white/40 hover:text-white'
+                    : 'text-[#9aa3af] hover:text-[#263246]'
                 }`}
               />
             </button>
           </div>
         ) : (
-          <div className="flex items-center space-x-3 text-white/40 text-xs">
-            <div className="w-12 h-12 bg-white/5 rounded-lg border border-white/10 flex items-center justify-center">
+          <div className="flex items-center space-x-3 text-[#9aa3af] text-xs">
+            <div className="w-12 h-12 bg-black/5 rounded-lg border border-black/8 flex items-center justify-center">
               <Music className="w-5 h-5 opacity-40" />
             </div>
             <span>未在播放</span>
@@ -135,7 +131,7 @@ export const PlayerBar: React.FC = () => {
           <button
             onClick={toggleShuffle}
             className={`p-1.5 rounded-full transition-colors ${
-              isShuffle ? 'text-apple-red bg-apple-red/10' : 'text-white/40 hover:text-white'
+              isShuffle ? 'text-apple-red bg-apple-red/10' : 'text-[#9aa3af] hover:text-[#263246]'
             }`}
             title="随机播放"
           >
@@ -144,7 +140,7 @@ export const PlayerBar: React.FC = () => {
 
           <button
             onClick={prevSong}
-            className="text-white/80 hover:text-white hover:scale-110 active:scale-95 transition-all p-1"
+            className="text-[#657083] hover:text-[#263246] hover:scale-110 active:scale-95 transition-all p-1"
             title="上一首"
           >
             <SkipBack className="w-5 h-5 fill-current" />
@@ -164,7 +160,7 @@ export const PlayerBar: React.FC = () => {
 
           <button
             onClick={nextSong}
-            className="text-white/80 hover:text-white hover:scale-110 active:scale-95 transition-all p-1"
+            className="text-[#657083] hover:text-[#263246] hover:scale-110 active:scale-95 transition-all p-1"
             title="下一首"
           >
             <SkipForward className="w-5 h-5 fill-current" />
@@ -173,7 +169,7 @@ export const PlayerBar: React.FC = () => {
           <button
             onClick={toggleRepeat}
             className={`p-1.5 rounded-full transition-colors ${
-              repeatMode !== 'off' ? 'text-apple-red bg-apple-red/10' : 'text-white/40 hover:text-white'
+              repeatMode !== 'off' ? 'text-apple-red bg-apple-red/10' : 'text-[#9aa3af] hover:text-[#263246]'
             }`}
             title="单曲/循环"
           >
@@ -182,21 +178,17 @@ export const PlayerBar: React.FC = () => {
         </div>
 
         {/* Progress Bar */}
-        <div className="w-full flex items-center space-x-2.5 text-[11px] font-mono text-white/50">
+        <div className="w-full flex items-center space-x-2.5 text-[11px] font-mono text-[#9aa3af]">
           <span>{formatTime(currentTime)}</span>
           <div
             onClick={handleProgressSeek}
-            onMouseEnter={() => setIsHoverProgress(true)}
-            onMouseLeave={() => setIsHoverProgress(false)}
-            className="relative flex-1 h-1.5 bg-white/15 hover:h-2 rounded-full cursor-pointer overflow-hidden transition-all"
+            className="progress-track relative flex-1 h-1.5 hover:h-2 rounded-full cursor-pointer overflow-visible transition-all"
           >
             <div
-              className="h-full bg-white rounded-full relative transition-all"
+              className="progress-fill h-full rounded-full relative transition-[width] duration-150 ease-out"
               style={{ width: `${progressPercent}%` }}
             >
-              {isHoverProgress && (
-                <div className="absolute right-0 top-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-white rounded-full shadow-md" />
-              )}
+              <div className="progress-thumb absolute right-0 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full shadow-md" />
             </div>
           </div>
           <span>{formatTime(duration)}</span>
@@ -211,7 +203,7 @@ export const PlayerBar: React.FC = () => {
           className={`p-2 rounded-lg transition-all ${
             isQueueOpen
               ? 'bg-apple-red text-white shadow-md shadow-apple-red/30 scale-105'
-              : 'text-white/60 hover:bg-white/10 hover:text-white'
+              : 'text-[#7c8796] hover:bg-black/5 hover:text-[#263246]'
           }`}
           title="播放队列"
         >
@@ -224,7 +216,7 @@ export const PlayerBar: React.FC = () => {
           className={`p-2 rounded-lg transition-all ${
             isDesktopLyricActive
               ? 'bg-apple-red text-white shadow-md shadow-apple-red/30 scale-105'
-              : 'text-white/60 hover:bg-white/10 hover:text-white'
+              : 'text-[#7c8796] hover:bg-black/5 hover:text-[#263246]'
           }`}
           title="桌面歌词 (网易云同款桌面浮动窗口)"
         >
@@ -237,7 +229,7 @@ export const PlayerBar: React.FC = () => {
           className={`p-2 rounded-lg transition-all ${
             isFullLyricsMode
               ? 'bg-apple-red text-white shadow-md shadow-apple-red/30 scale-105'
-              : 'text-white/60 hover:bg-white/10 hover:text-white'
+              : 'text-[#7c8796] hover:bg-black/5 hover:text-[#263246]'
           }`}
           title="全屏歌词动效"
         >
@@ -246,9 +238,9 @@ export const PlayerBar: React.FC = () => {
 
         {/* Volume Controls */}
         <div className="flex items-center space-x-2 group">
-          <button onClick={toggleMute} className="text-white/60 hover:text-white transition-colors">
+          <button onClick={toggleMute} className="text-[#7c8796] hover:text-[#263246] transition-colors">
             {isMuted || volume === 0 ? (
-              <VolumeX className="w-4 h-4 text-white/40" />
+              <VolumeX className="w-4 h-4 text-[#9aa3af]" />
             ) : (
               <Volume2 className="w-4 h-4" />
             )}
@@ -260,7 +252,7 @@ export const PlayerBar: React.FC = () => {
             step="0.01"
             value={isMuted ? 0 : volume}
             onChange={(e) => setVolume(parseFloat(e.target.value))}
-            className="w-20 accent-white h-1 bg-white/20 rounded-lg cursor-pointer"
+            className="w-20 accent-[#263246] h-1 bg-black/10 rounded-lg cursor-pointer"
           />
         </div>
       </div>

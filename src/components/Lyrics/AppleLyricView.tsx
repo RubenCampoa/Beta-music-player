@@ -20,23 +20,81 @@ import {
   Columns,
   AlignLeft,
 } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion, useMotionValue, useSpring } from 'framer-motion';
 import { usePlayerStore } from '../../store/playerStore';
 import { neteaseApi, getOptimizedCoverUrl } from '../../services/neteaseApi';
 import { formatTime, formatRemainingTime } from '../../utils/format';
+import { FluidBackground } from '../Background/FluidBackground';
+import { shallow } from 'zustand/shallow';
+import { LyricLine } from '../../types/music';
 
-export const AppleLyricView: React.FC = () => {
+interface AppleLyricViewProps {
+  // AnimatePresence keeps the last rendered instance alive during exit.
+  // This prop deliberately does not come from Zustand so the exit frame is not
+  // synchronously replaced by `null` when the store flag changes.
+  isVisible: boolean;
+}
+
+const getActiveLyricIndex = (currentTime: number, lyrics: LyricLine[]) => {
+  const syncTime = currentTime + 0.15;
+  let activeIndex = -1;
+  for (let i = 0; i < lyrics.length; i += 1) {
+    if (syncTime >= lyrics[i].time) {
+      activeIndex = i;
+    } else {
+      break;
+    }
+  }
+  return activeIndex;
+};
+
+const LyricProgressBar: React.FC = () => {
+  const currentTime = usePlayerStore((state) => state.currentTime);
+  const duration = usePlayerStore((state) => state.duration);
+  const progressPercent = duration ? Math.min(100, (currentTime / duration) * 100) : 0;
+
+  const handleProgressSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const percent = Math.max(0, Math.min(1, clickX / rect.width));
+    window.dispatchEvent(new CustomEvent('audio-seek', { detail: percent * duration }));
+  };
+
+  return (
+    <div className="w-full space-y-1.5 pt-1">
+      <div
+        onClick={handleProgressSeek}
+        className="progress-track relative w-full h-2 hover:h-2.5 rounded-full cursor-pointer overflow-visible transition-all"
+      >
+        <div
+          className="progress-fill h-full rounded-full relative transition-[width] duration-150 ease-out"
+          style={{ width: `${progressPercent}%` }}
+        >
+          <div className="progress-thumb absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full shadow-md" />
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between text-xs font-mono text-white/50 px-0.5">
+        <span>{formatTime(currentTime)}</span>
+        <div className="flex items-center space-x-1 bg-white/10 text-white/70 px-2 py-0.5 rounded-full text-[10px] font-semibold border border-white/10">
+          <Sparkles className="w-3 h-3 text-cyan-400" />
+          <span>高解析无损</span>
+        </div>
+        <span>{formatRemainingTime(currentTime, duration)}</span>
+      </div>
+    </div>
+  );
+};
+
+export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => {
   const {
     currentSong,
-    currentTime,
-    duration,
     isPlaying,
     volume,
     isMuted,
     repeatMode,
     isShuffle,
-    lyrics,
-    isFullLyricsMode,
     setFullLyricsMode,
     togglePlayPause,
     nextSong,
@@ -53,9 +111,38 @@ export const AppleLyricView: React.FC = () => {
     enableLyricBlur,
     enableArtworkAnimation,
     lyricFontSize,
-  } = usePlayerStore();
+    isFluidBgEnabled,
+  } = usePlayerStore(
+    (state) => ({
+      currentSong: state.currentSong,
+      isPlaying: state.isPlaying,
+      volume: state.volume,
+      isMuted: state.isMuted,
+      repeatMode: state.repeatMode,
+      isShuffle: state.isShuffle,
+      setFullLyricsMode: state.setFullLyricsMode,
+      togglePlayPause: state.togglePlayPause,
+      nextSong: state.nextSong,
+      prevSong: state.prevSong,
+      toggleRepeat: state.toggleRepeat,
+      toggleShuffle: state.toggleShuffle,
+      setVolume: state.setVolume,
+      toggleMute: state.toggleMute,
+      setToastMessage: state.setToastMessage,
+      toggleFavorite: state.toggleFavorite,
+      isFavorite: state.isFavorite,
+      enableLyricAnimation: state.enableLyricAnimation,
+      enableLyricGlow: state.enableLyricGlow,
+      enableLyricBlur: state.enableLyricBlur,
+      enableArtworkAnimation: state.enableArtworkAnimation,
+      lyricFontSize: state.lyricFontSize,
+      isFluidBgEnabled: state.isFluidBgEnabled,
+    }),
+    shallow,
+  );
+  const lyrics = usePlayerStore((state) => state.lyrics);
+  const activeIndex = usePlayerStore((state) => getActiveLyricIndex(state.currentTime, state.lyrics));
 
-  const [isHoverProgress, setIsHoverProgress] = useState(false);
   const [isWindowFullScreen, setIsWindowFullScreen] = useState(false);
   const [isUserScrolling, setIsUserScrolling] = useState(false);
   const [lyricLayoutMode, setLyricLayoutMode] = useState<'split' | 'full'>('split');
@@ -63,23 +150,47 @@ export const AppleLyricView: React.FC = () => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
   const userScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Synchronous active index calculation (150ms natural vocal alignment offset)
-  const syncTime = currentTime + 0.15;
-  let activeIndex = -1;
-  for (let i = 0; i < lyrics.length; i++) {
-    if (syncTime >= lyrics[i].time) {
-      activeIndex = i;
-    } else {
-      break;
-    }
-  }
+  const lyricScrollTarget = useMotionValue(0);
+  const lyricScrollY = useSpring(lyricScrollTarget, {
+    stiffness: 240,
+    damping: 30,
+    mass: 0.82,
+  });
+  const isUserScrollingRef = useRef(false);
 
   // Focal index for scrolling & blur gradient (defaults to line 0 during prelude)
   const focalIndex = activeIndex >= 0 ? activeIndex : 0;
 
+  // Apple Music-like lyric emphasis: the scale/y keyframes deliberately
+  // overshoot and settle. This is a non-linear jelly transition rather than a
+  // linear class swap, while opacity and blur use a softer luminance curve.
+  const jellyTransition = enableLyricAnimation
+    ? {
+        scale: { duration: 0.64, ease: [0.34, 1.35, 0.64, 1] as const },
+        y: { duration: 0.64, ease: [0.22, 1, 0.36, 1] as const },
+        opacity: { duration: 0.48, ease: [0.22, 1, 0.36, 1] as const },
+        filter: { duration: 0.56, ease: [0.22, 1, 0.36, 1] as const },
+      }
+    : { duration: 0.025, ease: 'linear' as const };
+
   useEffect(() => {
-    if (!isFullLyricsMode) return;
+    isUserScrollingRef.current = isUserScrolling;
+  }, [isUserScrolling]);
+
+  // Drive scrollTop from a spring so quick lyric changes preserve momentum
+  // instead of cancelling one fixed-duration RAF animation and starting a
+  // second one from a stop.
+  useEffect(() => {
+    return lyricScrollY.on('change', (latest) => {
+      const container = containerRef.current;
+      if (container && !isUserScrollingRef.current) {
+        container.scrollTop = latest;
+      }
+    });
+  }, [lyricScrollY]);
+
+  useEffect(() => {
+    if (!isVisible) return;
 
     if (window.electronAPI?.onFullScreenChange) {
       window.electronAPI.isFullScreen?.().then((fs) => setIsWindowFullScreen(fs));
@@ -92,7 +203,7 @@ export const AppleLyricView: React.FC = () => {
       document.addEventListener('fullscreenchange', handleFsChange);
       return () => document.removeEventListener('fullscreenchange', handleFsChange);
     }
-  }, [isFullLyricsMode]);
+  }, [isVisible]);
 
   // Handle user manual scroll interaction (pause auto-scroll for 4s)
   const handleUserScroll = () => {
@@ -103,16 +214,15 @@ export const AppleLyricView: React.FC = () => {
     }, 4000);
   };
 
-  // Let Chromium perform the scroll on its compositor thread. Driving
-  // scrollTop with requestAnimationFrame here competed with Framer Motion's
-  // lyric transitions and caused a visible pause before each line changed.
+  // Spring-based scrolling gives the lyric list the same non-linear feel as
+  // the line emphasis and remains smooth when the next timestamp arrives.
   const animateContainerScroll = (container: HTMLElement, targetTop: number, smooth: boolean = true) => {
     if (!smooth) {
       container.scrollTop = targetTop;
+      lyricScrollTarget.set(targetTop);
       return;
     }
-    if (Math.abs(targetTop - container.scrollTop) < 1) return;
-    container.scrollTo({ top: targetTop, behavior: 'smooth' });
+    lyricScrollTarget.set(targetTop);
   };
 
   // Center active lyric line in container smoothly
@@ -132,14 +242,14 @@ export const AppleLyricView: React.FC = () => {
 
   // Auto scroll to active lyric line on index/lyrics change
   useEffect(() => {
-    if (!isFullLyricsMode) return;
+    if (!isVisible) return;
     if (lyrics.length > 0 && !isUserScrolling) {
       const timer = requestAnimationFrame(() => {
         scrollToActiveLine(focalIndex, enableLyricAnimation);
       });
       return () => cancelAnimationFrame(timer);
     }
-  }, [focalIndex, lyrics, lyricFontSize, lyricLayoutMode, isUserScrolling, isFullLyricsMode, enableLyricAnimation]);
+  }, [focalIndex, lyrics, lyricFontSize, lyricLayoutMode, isUserScrolling, isVisible, enableLyricAnimation]);
 
   // Reset user scroll lock when changing song or opening full lyrics
   useEffect(() => {
@@ -147,39 +257,44 @@ export const AppleLyricView: React.FC = () => {
     if (lyrics.length > 0) {
       scrollToActiveLine(focalIndex, false);
     }
-  }, [currentSong?.id, isFullLyricsMode, lyricLayoutMode]);
+  }, [currentSong?.id, isVisible, lyricLayoutMode]);
+
+  const closeLyrics = () => {
+    if (isWindowFullScreen) {
+      setIsWindowFullScreen(false);
+      if (window.electronAPI?.setFullScreen) {
+        window.electronAPI.setFullScreen(false);
+      } else if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+    }
+    setFullLyricsMode(false);
+  };
 
   // ESC Key listener to exit full lyrics mode
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isFullLyricsMode) {
-        setFullLyricsMode(false);
+      if (e.key === 'Escape' && isVisible) {
+        closeLyrics();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isFullLyricsMode, setFullLyricsMode]);
+  }, [isVisible, isWindowFullScreen, setFullLyricsMode]);
 
-  if (!isFullLyricsMode) return null;
+  if (!isVisible) return null;
 
   const handleLyricClick = (time: number) => {
     setIsUserScrolling(false);
     window.dispatchEvent(new CustomEvent('audio-seek', { detail: time }));
   };
 
-  const handleProgressSeek = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!duration) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const percent = Math.max(0, Math.min(1, clickX / rect.width));
-    const seekTime = percent * duration;
-    window.dispatchEvent(new CustomEvent('audio-seek', { detail: seekTime }));
-  };
-
-  const progressPercent = duration ? Math.min(100, (currentTime / duration) * 100) : 0;
-
   const handleToggleWindowFullScreen = () => {
-    if (window.electronAPI?.toggleFullScreen) {
+    const nextFullScreen = !isWindowFullScreen;
+    setIsWindowFullScreen(nextFullScreen);
+    if (window.electronAPI?.setFullScreen) {
+      window.electronAPI.setFullScreen(nextFullScreen);
+    } else if (window.electronAPI?.toggleFullScreen) {
       window.electronAPI.toggleFullScreen();
     } else {
       if (!document.fullscreenElement) {
@@ -192,17 +307,21 @@ export const AppleLyricView: React.FC = () => {
 
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.98 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.98 }}
-      transition={{ duration: 0.35, ease: [0.25, 1, 0.5, 1] }}
-      className="fixed inset-0 z-50 flex flex-col justify-between p-6 pt-5 pb-6 select-none bg-[#0a0c14]/85 backdrop-blur-3xl overflow-hidden transform-gpu"
+      initial={{ opacity: 0, scale: 0.965, y: 10 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.975, y: 8 }}
+      transition={{ duration: 0.52, ease: [0.22, 1, 0.36, 1] }}
+      className={`full-lyrics-shell drag-region fixed z-50 flex flex-col justify-between p-6 pt-5 pb-6 select-none overflow-hidden transform-gpu ${
+        !isFluidBgEnabled ? 'full-lyrics-transparent' : ''
+      } ${isWindowFullScreen ? 'window-fullscreen-active' : 'window-fullscreen-windowed'}`}
     >
+      <FluidBackground coverUrl={currentSong?.coverUrl} isFullLyricsMode />
+
       {/* Top Bar: Controls & Layout Switcher */}
-      <div className="relative z-50 flex items-center justify-between w-full px-2 no-drag pointer-events-auto shrink-0">
+      <div className="lyrics-toolbar relative z-50 flex items-center justify-between w-full px-2 pointer-events-auto shrink-0">
         <div className="flex items-center space-x-3 no-drag">
           <button
-            onClick={() => setFullLyricsMode(false)}
+            onClick={closeLyrics}
             className="w-11 h-11 rounded-full bg-white/10 hover:bg-white/25 text-white/80 hover:text-white flex items-center justify-center transition-all duration-200 backdrop-blur-md border border-white/15 hover:scale-105 active:scale-95 cursor-pointer shadow-md shrink-0 no-drag"
             title="退出歌词模式 (或按 ESC 键)"
           >
@@ -211,7 +330,7 @@ export const AppleLyricView: React.FC = () => {
         </div>
 
         <div
-          onClick={() => setFullLyricsMode(false)}
+          onClick={closeLyrics}
           className="w-20 h-2 bg-white/30 hover:bg-white/60 rounded-full cursor-pointer absolute left-1/2 -translate-x-1/2 top-5 transition-all hover:scale-105 no-drag shadow-sm"
           title="点击缩小歌词模式"
         />
@@ -238,7 +357,10 @@ export const AppleLyricView: React.FC = () => {
 
           {/* Software Window Fullscreen Toggle Button */}
           <button
-            onClick={handleToggleWindowFullScreen}
+            onClick={(event) => {
+              event.stopPropagation();
+              handleToggleWindowFullScreen();
+            }}
             className={`flex items-center space-x-1.5 px-3.5 py-1.5 rounded-full border text-xs font-bold backdrop-blur-md transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-md no-drag relative z-[100] pointer-events-auto ${
               isWindowFullScreen
                 ? 'bg-apple-red text-white border-apple-red shadow-apple-red/30'
@@ -260,7 +382,7 @@ export const AppleLyricView: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setFullLyricsMode(false)}
+            onClick={closeLyrics}
             className="flex items-center space-x-1.5 text-white/80 hover:text-white bg-black/30 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-white/10 shadow-sm transition-colors no-drag"
             title="关闭全屏歌词界面"
           >
@@ -271,7 +393,7 @@ export const AppleLyricView: React.FC = () => {
       </div>
 
       {/* Main Content Layout Container: Stretches to full available window height */}
-      <div className="flex-1 w-full max-w-7xl mx-auto z-10 flex flex-col min-h-0 pt-3 pb-2">
+      <div className="no-drag flex-1 w-full max-w-7xl mx-auto z-10 flex flex-col min-h-0 pt-3 pb-2">
         {lyricLayoutMode === 'split' ? (
           /* Split View: Left Player Column + Right Full Height Lyrics */
           <div className="flex-1 w-full grid grid-cols-1 md:grid-cols-2 gap-10 items-center min-h-0">
@@ -330,35 +452,7 @@ export const AppleLyricView: React.FC = () => {
               )}
 
               {/* Interactive Progress Bar & Hi-Res Lossless Badge */}
-              <div className="w-full space-y-1.5 pt-1">
-                <div
-                  onClick={handleProgressSeek}
-                  onMouseEnter={() => setIsHoverProgress(true)}
-                  onMouseLeave={() => setIsHoverProgress(false)}
-                  className="relative w-full h-2 bg-white/20 hover:h-2.5 rounded-full cursor-pointer overflow-hidden transition-all"
-                >
-                  <div
-                    className="h-full bg-white rounded-full relative transition-all"
-                    style={{ width: `${progressPercent}%` }}
-                  >
-                    {isHoverProgress && (
-                      <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-md" />
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between text-xs font-mono text-white/50 px-0.5">
-                  <span>{formatTime(currentTime)}</span>
-
-                  {/* Center Audio Quality Badge */}
-                  <div className="flex items-center space-x-1 bg-white/10 text-white/70 px-2 py-0.5 rounded-full text-[10px] font-semibold border border-white/10">
-                    <Sparkles className="w-3 h-3 text-cyan-400" />
-                    <span>高解析无损</span>
-                  </div>
-
-                  <span>{formatRemainingTime(currentTime, duration)}</span>
-                </div>
-              </div>
+              <LyricProgressBar />
 
               {/* Playback Control Buttons Row */}
               <div className="w-full flex items-center justify-center space-x-6 pt-1">
@@ -476,15 +570,21 @@ export const AppleLyricView: React.FC = () => {
                           ref={(el) => (lineRefs.current[idx] = el)}
                           onClick={() => handleLyricClick(line.time)}
                           animate={{
-                            scale: isActive ? 1.03 : 0.97,
+                            scale: isActive
+                              ? [0.988, 1.038, 1.012, 1.018]
+                              : distance === 1
+                              ? [1.018, 0.995, 0.989, 0.99]
+                              : 0.982,
+                            y: isActive
+                              ? [7, -4, 1, -1]
+                              : distance === 1
+                              ? [-1, 2, 0, 0]
+                              : 1,
                             opacity: targetOpacity,
                             filter: `blur(${targetBlur}px)`,
                           }}
-                          transition={{
-                            duration: enableLyricAnimation ? 0.32 : 0.05,
-                            ease: [0.22, 1, 0.36, 1],
-                          }}
-                        className="cursor-pointer text-left origin-left space-y-1 py-1 px-2 -mx-2 hover:opacity-100 max-w-full break-words"
+                          transition={jellyTransition}
+                          className="full-lyrics-line cursor-pointer text-left origin-left space-y-1 py-1 px-2 -mx-2 hover:opacity-100 max-w-full break-words"
                         >
                           {/* Main Lyric Line */}
                           <div
@@ -574,15 +674,21 @@ export const AppleLyricView: React.FC = () => {
                         ref={(el) => (lineRefs.current[idx] = el)}
                         onClick={() => handleLyricClick(line.time)}
                         animate={{
-                          scale: isActive ? 1.04 : 0.96,
+                          scale: isActive
+                            ? [0.988, 1.045, 1.014, 1.025]
+                            : distance === 1
+                            ? [1.025, 0.996, 0.991, 0.992]
+                            : 0.978,
+                          y: isActive
+                            ? [9, -5, 1, -1.5]
+                            : distance === 1
+                            ? [-1.5, 2, 0, 0]
+                            : 1.5,
                           opacity: targetOpacity,
                           filter: `blur(${targetBlur}px)`,
                         }}
-                        transition={{
-                          duration: enableLyricAnimation ? 0.32 : 0.05,
-                          ease: [0.22, 1, 0.36, 1],
-                        }}
-                        className="cursor-pointer text-center origin-center space-y-2 py-1 px-2 -mx-2 hover:opacity-100 max-w-3xl break-words"
+                        transition={jellyTransition}
+                        className="full-lyrics-line cursor-pointer text-center origin-center space-y-2 py-1 px-2 -mx-2 hover:opacity-100 max-w-3xl break-words"
                       >
                         {/* Giant Centered Main Line */}
                         <div

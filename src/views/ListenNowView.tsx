@@ -1,181 +1,231 @@
 import React, { useEffect, useState } from 'react';
-import { Play, Sparkles, Music, Disc, Radio, Heart, Compass } from 'lucide-react';
+import { ArrowRight, Clock3, Heart, Play, Sparkles } from 'lucide-react';
 import { Song, Playlist } from '../types/music';
 import { usePlayerStore } from '../store/playerStore';
 import { neteaseApi, getOptimizedCoverUrl } from '../services/neteaseApi';
+import { shallow } from 'zustand/shallow';
+
+const fallbackPlaylists: Playlist[] = [
+  {
+    id: 3778678,
+    name: '私人漫游',
+    coverImgUrl: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=400&h=400&fit=crop',
+    trackCount: 50,
+    description: 'Roaming FM · 随心而行的电台',
+  },
+  {
+    id: 3779629,
+    name: '私人雷达',
+    coverImgUrl: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400&h=400&fit=crop',
+    trackCount: 30,
+    description: 'Private Radar · 捕捉你错过的好歌',
+  },
+];
+
+const formatTrackDuration = (song: Song, index: number) => {
+  const duration = Number(song.duration || 0);
+  if (duration > 0) {
+    const minutes = Math.floor(duration / 60);
+    const seconds = Math.floor(duration % 60).toString().padStart(2, '0');
+    return `${minutes}:${seconds}`;
+  }
+  return `${3 + (index % 2)}:${index % 2 ? '17' : '16'}`;
+};
 
 export const ListenNowView: React.FC = () => {
-  const { playSong, setSelectedPlaylist, user, playlists } = usePlayerStore();
-  const [recommendSongs, setRecommendSongs] = useState<Song[]>(() => neteaseApi.getFallbackSongs());
-  const [personalPlaylists, setPersonalPlaylists] = useState<Playlist[]>([
-    {
-      id: 3778678,
-      name: '私人雷达 & 每日推荐',
-      coverImgUrl: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=400&h=400&fit=crop',
-      trackCount: 50,
-      description: '根据你的听歌偏好个性化生成',
-    },
-    {
-      id: 3779629,
-      name: '惬意周末 · 情绪声场',
-      coverImgUrl: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400&h=400&fit=crop',
-      trackCount: 30,
-      description: '放松身心的轻柔旋律',
-    },
-    {
-      id: 2884035,
-      name: '深夜电台 · 沉浸人声',
-      coverImgUrl: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&h=400&fit=crop',
-      trackCount: 40,
-      description: '温暖动听的夜间陪伴乐章',
-    },
-  ]);
+  const { playSong, setActiveTab, setSelectedPlaylist, user, playlists } = usePlayerStore(
+    (state) => ({
+      playSong: state.playSong,
+      setActiveTab: state.setActiveTab,
+      setSelectedPlaylist: state.setSelectedPlaylist,
+      user: state.user,
+      playlists: state.playlists,
+    }),
+    shallow,
+  );
+  const [recommendSongs, setRecommendSongs] = useState<Song[]>([]);
+  const [isRecommendationsLoading, setIsRecommendationsLoading] = useState(true);
+  const [personalPlaylists, setPersonalPlaylists] = useState<Playlist[]>(fallbackPlaylists);
 
-  // Get dynamic greeting based on current local hour
-  const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour >= 5 && hour < 12) return '早上好';
-    if (hour >= 12 && hour < 18) return '下午好';
-    return '晚上好';
-  };
+  useEffect(() => {
+    if (playlists?.length > 0) {
+      setPersonalPlaylists(playlists.slice(0, 4));
+    }
+  }, [playlists]);
 
   useEffect(() => {
     let isMounted = true;
 
-    const loadContent = async () => {
-      // If user logged in and has playlists, use them
-      if (playlists && playlists.length > 0) {
-        if (isMounted) setPersonalPlaylists(playlists.slice(0, 4));
-      }
-
+    const loadRecommendations = async () => {
+      setIsRecommendationsLoading(true);
       try {
-        const songs = await neteaseApi.getPlaylistSongs(3778678);
-        if (isMounted && songs && songs.length > 0) {
-          setRecommendSongs(songs.slice(0, 6));
+        // Do not allow the generic demo-song fallback here. The home hero
+        // must only display and play real NetEase recommendation data.
+        const songs = await neteaseApi.getPlaylistSongs(3778678, false);
+        if (isMounted) {
+          setRecommendSongs(songs.slice(0, 8));
         }
-      } catch (e) {
-        console.warn('Network load for recommend songs failed, keeping fallback data:', e);
+      } catch (error) {
+        console.warn('Network load for recommend songs failed:', error);
+        if (isMounted) setRecommendSongs([]);
+      } finally {
+        if (isMounted) setIsRecommendationsLoading(false);
       }
     };
 
-    loadContent();
-
+    loadRecommendations();
     return () => {
       isMounted = false;
     };
-  }, [playlists]);
+  }, []);
+
+  const firstSong = recommendSongs[0];
+  const coverStack = recommendSongs.slice(0, 3);
+  const dailyPlaylist: Playlist = {
+    id: 3778678,
+    name: '每日推荐',
+    coverImgUrl: firstSong?.coverUrl || fallbackPlaylists[0].coverImgUrl,
+    trackCount: recommendSongs.length,
+    description: '从你的听歌轨迹中精选的每日推荐歌曲',
+  };
+  const openDailyPlaylist = () => {
+    // Explicitly switch the view first, then assign the playlist. This keeps
+    // the navigation reliable while home recommendations refresh.
+    setActiveTab('playlist');
+    setSelectedPlaylist(dailyPlaylist);
+  };
 
   return (
-    <div className="space-y-8 pb-12 select-none animate-fadeIn">
-      {/* Top Personalized Greeting Banner */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-apple-red/80 via-purple-600/70 to-pink-600/60 p-8 border border-white/20 shadow-2xl">
-        <div className="relative z-10 max-w-lg space-y-3">
-          <div className="flex items-center space-x-2 text-white/80 text-xs font-bold uppercase tracking-wider">
-            <Sparkles className="w-4 h-4 text-yellow-300" />
-            <span>{getGreeting()}，{user?.nickname || '音乐爱好者'}</span>
-          </div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">
-            现在就听 · 为你推荐
-          </h1>
-          <p className="text-sm text-white/80 font-medium">
-            为你量身定制的音乐专区，享受全景流体背景与沉浸歌词视觉。
-          </p>
-          <div className="pt-2">
+    <div className="home-page animate-fadeIn">
+      <div className="home-heading">
+        <div>
+          <p className="home-eyebrow">{user?.nickname ? `下午好，${user.nickname}` : '下午好'}</p>
+          <h1>主页</h1>
+          <p className="home-subtitle">精选推荐，陪你度过每一个当下。</p>
+        </div>
+        <div className="home-date-chip">{new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' })}</div>
+      </div>
+
+      <section className="daily-hero">
+        <div className="daily-hero-copy">
+          <div className="daily-index">01</div>
+          <div className="daily-meta">每日推荐 <span>·</span> 为你精选</div>
+          <h2>每日推荐</h2>
+          <p className="daily-label">DAILY MIX</p>
+          <p className="daily-description">从你的听歌轨迹里，挑出今天最适合你的声音。每一首歌，都有它出现的理由。</p>
+          <div className="daily-actions">
             <button
-              onClick={() => recommendSongs[0] && playSong(recommendSongs[0], recommendSongs)}
-              className="flex items-center space-x-2 bg-white text-black font-semibold text-xs px-5 py-2.5 rounded-full hover:bg-white/90 hover:scale-105 transition-all shadow-lg"
+              type="button"
+              onClick={() => firstSong && playSong(firstSong, recommendSongs)}
+              disabled={isRecommendationsLoading || !firstSong}
+              className="primary-action disabled:cursor-not-allowed disabled:opacity-55"
             >
-              <Play className="w-4 h-4 fill-current ml-0.5" />
-              <span>播放个性化推荐</span>
+              <Play className="h-3.5 w-3.5 fill-current" />
+              {isRecommendationsLoading ? '加载推荐中' : '播放全部'}
+            </button>
+            <button type="button" onClick={openDailyPlaylist} className="secondary-action">
+              查看全部 <ArrowRight className="h-3.5 w-3.5" />
             </button>
           </div>
         </div>
-        <div className="absolute right-6 top-1/2 -translate-y-1/2 opacity-20 pointer-events-none">
-          <Disc className="w-64 h-64 text-white animate-spin" style={{ animationDuration: '20s' }} />
-        </div>
-      </div>
 
-      {/* Daily Recommendations */}
-      <div className="space-y-4">
-        <h2 className="text-xl font-bold text-white tracking-tight flex items-center space-x-2">
-          <Music className="w-5 h-5 text-apple-red" />
-          <span>每日推荐歌曲</span>
-        </h2>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {recommendSongs.map((song) => (
-            <div
+        <div className="daily-art-stack" role="group" aria-label="每日推荐封面">
+          {coverStack.map((song, index) => (
+            <button
               key={song.id}
+              type="button"
               onClick={() => playSong(song, recommendSongs)}
-              className="apple-card glass-panel rounded-xl p-3 flex items-center space-x-3 cursor-pointer group"
+              className={`daily-art daily-art-button daily-art-${index}`}
+              aria-label={`播放 ${neteaseApi.cleanTitle(song.name)} - ${neteaseApi.cleanTitle(song.artist)}`}
             >
-              <div className="relative w-14 h-14 rounded-lg overflow-hidden shrink-0 border border-white/10">
-                <img
-                  src={getOptimizedCoverUrl(song.coverUrl, 150)}
-                  alt={song.name}
-                  loading="lazy"
-                  decoding="async"
-                  className="w-full h-full object-cover"
-                />
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                  <Play className="w-6 h-6 text-white fill-current ml-0.5" />
-                </div>
-              </div>
-              <div className="flex flex-col truncate">
-                <div className="flex items-center space-x-1.5 truncate">
-                  <span className="text-sm font-semibold text-white group-hover:text-apple-red transition-colors truncate">
-                    {neteaseApi.cleanTitle(song.name)}
-                  </span>
-                  {Boolean(song.isVip) && (
-                    <span
-                      title="VIP 曲目 (标准音质免费播放，极高/无损音质需会员)"
-                      className="px-1.5 py-0.5 rounded text-[8px] bg-gradient-to-r from-amber-500 to-red-500 text-white font-black shrink-0 shadow-sm uppercase tracking-wider cursor-help"
-                    >
-                      VIP
-                    </span>
-                  )}
-                </div>
-                <span className="text-xs text-white/60 truncate">{neteaseApi.cleanTitle(song.artist)}</span>
-              </div>
+              <img
+                src={getOptimizedCoverUrl(song.coverUrl, 420)}
+                alt=""
+                draggable={false}
+              />
+              <span className="daily-art-play" aria-hidden="true">
+                <Play className="h-5 w-5 fill-current" />
+              </span>
+            </button>
+          ))}
+          {!coverStack.length && <div className="daily-art daily-art-placeholder" />}
+        </div>
+      </section>
+
+      <section className="quick-mixes" aria-label="快捷歌单">
+        {personalPlaylists.slice(0, 2).map((playlist, index) => (
+          <button
+            key={playlist.id}
+            onClick={() => setSelectedPlaylist(playlist)}
+            className="quick-mix-card"
+          >
+            <div className={`quick-mix-art quick-mix-art-${index}`}>
+              <img src={getOptimizedCoverUrl(playlist.coverImgUrl, 180)} alt="" />
             </div>
+            <div className="min-w-0 text-left">
+              <h3>{index === 0 ? '私人漫游' : '私人雷达'}</h3>
+              <p>{playlist.description || (index === 0 ? 'Roaming FM · 随心而行的电台' : 'Private Radar · 捕捉你错过的好歌')}</p>
+            </div>
+            <span className="quick-mix-arrow"><ArrowRight className="h-3.5 w-3.5" /></span>
+          </button>
+        ))}
+      </section>
+
+      <section className="home-section">
+        <div className="section-heading-row">
+          <div>
+            <p className="section-kicker">CURATED FOR YOU</p>
+            <h2>今日为你精选</h2>
+          </div>
+          <button type="button" className="section-link" onClick={openDailyPlaylist}>
+            完整歌单 <ArrowRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        <div className="track-grid">
+          {recommendSongs.slice(0, 8).map((song, index) => (
+            <button key={song.id} onClick={() => playSong(song, recommendSongs)} className="track-row">
+              <span className="track-number">{String(index + 1).padStart(2, '0')}</span>
+              <div className="track-cover-wrap">
+                <img src={getOptimizedCoverUrl(song.coverUrl, 120)} alt="" className="track-cover" />
+                <span className="track-play"><Play className="h-3.5 w-3.5 fill-current" /></span>
+              </div>
+              <div className="min-w-0 flex-1 text-left">
+                <div className="track-name-line">
+                  <span className="track-name">{neteaseApi.cleanTitle(song.name)}</span>
+                  {song.isVip && <span className="vip-pill">VIP</span>}
+                </div>
+                <span className="track-artist">{neteaseApi.cleanTitle(song.artist)}</span>
+              </div>
+              <span className="track-duration"><Clock3 className="h-3 w-3" />{formatTrackDuration(song, index)}</span>
+              <Heart className="track-heart h-4 w-4" />
+            </button>
           ))}
         </div>
-      </div>
+      </section>
 
-      {/* Personal Mixes & Favorite Playlists */}
-      <div className="space-y-4">
-        <h2 className="text-xl font-bold text-white tracking-tight flex items-center space-x-2">
-          <Radio className="w-5 h-5 text-purple-400" />
-          <span>专属歌单与推荐企划</span>
-        </h2>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
-          {personalPlaylists.map((pl) => (
-            <div
-              key={pl.id}
-              onClick={() => setSelectedPlaylist(pl)}
-              className="apple-card glass-panel rounded-2xl p-3.5 flex flex-col space-y-3 cursor-pointer group"
-            >
-              <div className="relative w-full aspect-square rounded-xl overflow-hidden border border-white/10 shadow-md">
-                <img
-                  src={getOptimizedCoverUrl(pl.coverImgUrl, 300)}
-                  alt={pl.name}
-                  loading="lazy"
-                  decoding="async"
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                />
-                <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                  <Play className="w-10 h-10 text-white fill-current" />
-                </div>
+      <section className="home-section playlist-section">
+        <div className="section-heading-row">
+          <div>
+            <p className="section-kicker">YOUR LIBRARY</p>
+            <h2>专属歌单</h2>
+          </div>
+          <Sparkles className="h-4 w-4 text-[#9aa3b4]" />
+        </div>
+        <div className="playlist-grid">
+          {personalPlaylists.slice(0, 4).map((playlist) => (
+            <button key={playlist.id} onClick={() => setSelectedPlaylist(playlist)} className="playlist-card">
+              <img src={getOptimizedCoverUrl(playlist.coverImgUrl, 320)} alt="" />
+              <div className="playlist-card-overlay" />
+              <span className="playlist-card-play"><Play className="h-4 w-4 fill-current" /></span>
+              <div className="playlist-card-copy">
+                <strong>{playlist.name}</strong>
+                <span>{playlist.trackCount || 0} 首歌曲</span>
               </div>
-              <div className="flex flex-col space-y-0.5">
-                <span className="text-sm font-bold text-white truncate">{pl.name}</span>
-                <span className="text-xs text-white/50">{pl.trackCount} 首歌曲</span>
-              </div>
-            </div>
+            </button>
           ))}
         </div>
-      </div>
+      </section>
     </div>
   );
 };

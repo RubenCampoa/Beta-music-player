@@ -17,9 +17,33 @@ export const ChangelogView: React.FC = () => {
         </div>
         <div className="px-3 py-1 bg-apple-red/20 rounded-full border border-apple-red/30 text-xs text-apple-red font-semibold flex items-center space-x-1.5">
           <Disc className="w-3.5 h-3.5 animate-spin" />
-          <span>当前版本 v1.0.5</span>
+          <span>当前版本 v1.0.6</span>
         </div>
       </div>
+
+      {/* Release v1.0.6 */}
+      <section className="glass-panel p-6 rounded-2xl space-y-5 border border-apple-red/30 shadow-2xl relative overflow-hidden">
+        <div className="flex items-center justify-between border-b border-white/10 pb-4">
+          <div className="flex items-center space-x-3">
+            <span className="text-2xl font-extrabold text-white tracking-tight">v1.0.6</span>
+            <span className="px-2.5 py-0.5 rounded-full bg-apple-red text-white text-[10px] font-bold uppercase tracking-wider shadow-sm">
+              最新版本
+            </span>
+          </div>
+          <span className="text-xs font-mono text-white/40">2026-08-06</span>
+        </div>
+        <div className="space-y-2 text-xs text-white/70 leading-relaxed">
+          <p>• 修复浅色主题下播放器进度条与拖动圆点对比度不足、几乎不可见的问题。</p>
+          <p>• 重做全屏歌词液态背景，加入实时流动的液体光团与高光带，不再只是封面放大模糊。</p>
+          <p>• 升级歌词切换为非线性果冻缓动，并优化歌词滚动弹簧效果，减少切换顿挫。</p>
+          <p>• 增加主窗口、最大化/还原、最小化及全屏进出过渡动画，恢复全屏前的窗口尺寸。</p>
+          <p>• 优化窗口圆角、半透明毛玻璃和全屏歌词交互状态，提升整体视觉一致性。</p>
+          <p>• 修复首页推荐偶尔播放预制歌曲的问题，“查看全部”现在会正确进入每日推荐歌单。</p>
+          <p>• 首页推荐封面新增悬停交互和点击播放，搜索历史下拉层恢复不透明并支持完整点击操作。</p>
+          <p>• 登录弹窗隐藏底部播放栏，统一 Beta Music Player 应用名称、图标和 Windows 打包身份。</p>
+          <p>• 移除 Google 相关文案与外部字体引用，更新为 AI 辅助开发说明。</p>
+        </div>
+      </section>
 
       {/* Release v1.0.5 */}
       <section className="glass-panel p-6 rounded-2xl space-y-5 border border-apple-red/30 shadow-2xl relative overflow-hidden">
@@ -27,7 +51,7 @@ export const ChangelogView: React.FC = () => {
           <div className="flex items-center space-x-3">
             <span className="text-2xl font-extrabold text-white tracking-tight">v1.0.5</span>
             <span className="px-2.5 py-0.5 rounded-full bg-apple-red text-white text-[10px] font-bold uppercase tracking-wider shadow-sm">
-              最新版本
+              正式版本
             </span>
           </div>
           <span className="text-xs font-mono text-white/40">2026-08-02</span>
@@ -46,7 +70,7 @@ export const ChangelogView: React.FC = () => {
           <div className="flex items-center space-x-3">
             <span className="text-2xl font-extrabold text-white tracking-tight">v1.0.4</span>
             <span className="px-2.5 py-0.5 rounded-full bg-apple-red text-white text-[10px] font-bold uppercase tracking-wider shadow-sm">
-              最新版本
+              正式版本
             </span>
           </div>
           <span className="text-xs font-mono text-white/40">2026-07-24</span>
@@ -68,7 +92,7 @@ export const ChangelogView: React.FC = () => {
             <div className="space-y-1">
               <h4 className="text-sm font-bold text-white">全屏歌词软件窗口全屏覆盖 (Fullscreen Coverage)</h4>
               <p className="text-xs text-white/60 leading-relaxed">
-                在全屏歌词模式顶部操控区新增【全屏覆盖 / 取消全屏覆盖】系统窗口掌控按钮，结合 Electron 主进程 enter/leave 原生事件监听，实现界面按钮与 OS 实际窗口状态的 100% 实时双向同步。
+                在全屏歌词模式顶部操控区新增【全屏覆盖 / 取消全屏覆盖】系统窗口掌控按钮，结合 Beta Music Player 桌面主进程的 enter/leave 原生事件监听，实现界面按钮与 OS 实际窗口状态的 100% 实时双向同步。
               </p>
             </div>
           </div>
@@ -110,7 +134,7 @@ export const ChangelogView: React.FC = () => {
         <div className="flex items-center justify-between border-b border-white/10 pb-4">
           <div className="flex items-center space-x-3">
             <span className="text-xl font-bold text-white tracking-tight">v1.0.3</span>
-            <span className="px-2 py-0.5 rounded bg-white/10 text-white/70 text-[10px] font-semibold">
+            <span className="px-2.5 py-0.5 rounded-full bg-apple-red text-white text-[10px] font-bold uppercase tracking-wider shadow-sm">
               正式版
             </span>
           </div>
@@ -145,7 +169,7 @@ export const ChangelogView: React.FC = () => {
         <div className="flex items-center justify-between border-b border-white/10 pb-4">
           <div className="flex items-center space-x-3">
             <span className="text-xl font-bold text-white tracking-tight">v1.0.1</span>
-            <span className="px-2 py-0.5 rounded bg-white/10 text-white/70 text-[10px] font-semibold">
+            <span className="px-2.5 py-0.5 rounded-full bg-apple-red text-white text-[10px] font-bold uppercase tracking-wider shadow-sm">
               正式版
             </span>
           </div>
@@ -270,7 +294,7 @@ export const ChangelogView: React.FC = () => {
         <div className="flex items-center justify-between border-b border-white/10 pb-4">
           <div className="flex items-center space-x-3">
             <span className="text-xl font-bold text-white tracking-tight">v1.0.0</span>
-            <span className="px-2 py-0.5 rounded bg-white/10 text-white/70 text-[10px] font-semibold">
+            <span className="px-2.5 py-0.5 rounded-full bg-apple-red text-white text-[10px] font-bold uppercase tracking-wider shadow-sm">
               初始正式版
             </span>
           </div>

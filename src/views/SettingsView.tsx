@@ -82,7 +82,7 @@ export const SettingsView: React.FC = () => {
       );
 
       if (res.status === 403) {
-        const currentVersion = 'v1.0.5';
+        const currentVersion = 'v1.0.6';
         const normalize = (v: string) => v.replace(/^v/i, '').trim();
         try {
           const rawRes = await fetch(
@@ -112,7 +112,7 @@ export const SettingsView: React.FC = () => {
 
       const data = await res.json();
       const latestTag = (data.tag_name || '').trim();
-      const currentVersion = 'v1.0.5';
+      const currentVersion = 'v1.0.6';
 
       const normalize = (v: string) => v.replace(/^v/i, '').trim();
 
@@ -147,7 +147,7 @@ export const SettingsView: React.FC = () => {
         </div>
         <div className="flex items-center space-x-3">
           <div className="px-3 py-1 bg-white/5 rounded-full border border-white/10 text-xs text-white/60 font-medium">
-            Beta Music Player v1.0.5
+            Beta Music Player v1.0.6
           </div>
           <button
             onClick={handleCheckUpdate}
@@ -460,7 +460,7 @@ export const SettingsView: React.FC = () => {
           <span className="text-white">关于播放器</span>
         </div>
         <p className="text-xs text-white/60 leading-relaxed">
-          本播放器基于 Electron + Vite + React + TypeScript 打造，完美复刻 Apple Music 视觉美学。集成 NeteaseCloudMusicApiEnhanced 增强版后端与 HTML5 Web Audio 音频引擎。
+          本播放器采用 Beta Music Player 桌面应用架构，并由 Vite、React 与 TypeScript 驱动，完美复刻 Apple Music 视觉美学。集成 NeteaseCloudMusicApiEnhanced 增强版后端与 HTML5 Web Audio 音频引擎。
         </p>
       </section>
     </div>

@@ -192,7 +192,7 @@ class NeteaseApiService {
   }
 
   // --- Playlist Songs (Supports Unlimited Multi-Page Auto-Fetching) ---
-  public async getPlaylistSongs(playlistId: string | number): Promise<Song[]> {
+  public async getPlaylistSongs(playlistId: string | number, allowFallback = true): Promise<Song[]> {
     try {
       let allTracks: any[] = [];
       let offset = 0;
@@ -219,12 +219,12 @@ class NeteaseApiService {
       }
 
       if (allTracks.length === 0) {
-        return this.getFallbackSongs();
+        return allowFallback ? this.getFallbackSongs() : [];
       }
 
       return allTracks.map((track) => this.formatTrackToSong(track));
     } catch {
-      return this.getFallbackSongs();
+      return allowFallback ? this.getFallbackSongs() : [];
     }
   }
 

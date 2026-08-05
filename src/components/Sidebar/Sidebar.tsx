@@ -1,24 +1,34 @@
 import React from 'react';
 import { PlayCircle, Compass, HardDrive, ListMusic, Heart, Settings, Info, AlertTriangle, History } from 'lucide-react';
 import { usePlayerStore } from '../../store/playerStore';
+import { shallow } from 'zustand/shallow';
 
 export const Sidebar: React.FC = () => {
-  const { activeTab, setActiveTab, playlists, setSelectedPlaylist, selectedPlaylist } = usePlayerStore();
+  const { activeTab, setActiveTab, playlists, setSelectedPlaylist, selectedPlaylist } = usePlayerStore(
+    (state) => ({
+      activeTab: state.activeTab,
+      setActiveTab: state.setActiveTab,
+      playlists: state.playlists,
+      setSelectedPlaylist: state.setSelectedPlaylist,
+      selectedPlaylist: state.selectedPlaylist,
+    }),
+    shallow,
+  );
 
   return (
-    <aside className="w-56 h-[calc(100vh-3rem-5rem)] glass-sidebar flex flex-col justify-between p-3 select-none text-sm z-20">
+    <aside className="app-sidebar h-[calc(100vh-3rem-5rem)] glass-sidebar flex flex-col justify-between p-3 select-none text-sm z-20">
       <div className="space-y-6">
         {/* Apple Music Main Navigation */}
         <div className="space-y-1">
-          <div className="px-3 text-xs font-semibold text-white/40 uppercase tracking-wider mb-2">
+          <div className="nav-section-label px-3 text-xs font-semibold uppercase tracking-wider mb-2">
             推荐
           </div>
           <button
             onClick={() => setActiveTab('listen-now')}
-            className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
+            className={`nav-item w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
               activeTab === 'listen-now'
-                ? 'bg-apple-red text-white shadow-lg shadow-apple-red/20'
-                : 'text-white/70 hover:bg-white/5 hover:text-white'
+                ? 'nav-item-active'
+                : ''
             }`}
           >
             <PlayCircle className="w-4 h-4" />
@@ -26,10 +36,10 @@ export const Sidebar: React.FC = () => {
           </button>
           <button
             onClick={() => setActiveTab('browse')}
-            className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
+            className={`nav-item w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
               activeTab === 'browse'
-                ? 'bg-apple-red text-white shadow-lg shadow-apple-red/20'
-                : 'text-white/70 hover:bg-white/5 hover:text-white'
+                ? 'nav-item-active'
+                : ''
             }`}
           >
             <Compass className="w-4 h-4" />
@@ -39,15 +49,15 @@ export const Sidebar: React.FC = () => {
 
         {/* Music Library */}
         <div className="space-y-1">
-          <div className="px-3 text-xs font-semibold text-white/40 uppercase tracking-wider mb-2">
+          <div className="nav-section-label px-3 text-xs font-semibold uppercase tracking-wider mb-2">
             资料库
           </div>
           <button
             onClick={() => setActiveTab('local')}
-            className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
+            className={`nav-item w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
               activeTab === 'local'
-                ? 'bg-apple-red text-white shadow-lg shadow-apple-red/20'
-                : 'text-white/70 hover:bg-white/5 hover:text-white'
+                ? 'nav-item-active'
+                : ''
             }`}
           >
             <HardDrive className="w-4 h-4" />
@@ -57,14 +67,14 @@ export const Sidebar: React.FC = () => {
 
         {/* NetEase Cloud Playlists */}
         <div className="space-y-1">
-          <div className="px-3 text-xs font-semibold text-white/40 uppercase tracking-wider mb-2 flex items-center justify-between">
+          <div className="nav-section-label px-3 text-xs font-semibold uppercase tracking-wider mb-2 flex items-center justify-between">
             <span>网易云歌单</span>
             <ListMusic className="w-3.5 h-3.5 opacity-60" />
           </div>
 
-          <div className="space-y-0.5 max-h-56 overflow-y-auto pr-1">
+          <div className="playlist-list space-y-0.5 max-h-56 overflow-y-auto pr-1">
             {playlists.length === 0 ? (
-              <div className="px-3 py-2 text-xs text-white/30 italic">
+              <div className="px-3 py-2 text-xs text-[#a3aab5] italic">
                 登录网易云同步歌单
               </div>
             ) : (
@@ -74,8 +84,8 @@ export const Sidebar: React.FC = () => {
                   onClick={() => setSelectedPlaylist(pl)}
                   className={`w-full flex items-center space-x-2.5 px-3 py-1.5 rounded-lg text-xs transition-all text-left truncate ${
                     selectedPlaylist?.id === pl.id
-                      ? 'bg-white/15 text-white font-medium'
-                      : 'text-white/60 hover:bg-white/5 hover:text-white'
+                      ? 'bg-white/85 text-[#1f2937] font-medium shadow-sm'
+                      : 'text-[#7b8493] hover:bg-white/60 hover:text-[#1f2937]'
                   }`}
                 >
                   {pl.name.includes('我喜欢') ? (
@@ -91,13 +101,13 @@ export const Sidebar: React.FC = () => {
         </div>
 
         {/* Settings, Notice, Changelog & About */}
-        <div className="space-y-1 pt-2 border-t border-white/10">
+        <div className="space-y-1 pt-2 border-t border-black/10">
           <button
             onClick={() => setActiveTab('settings')}
-            className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
+            className={`nav-item w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
               activeTab === 'settings'
-                ? 'bg-apple-red text-white shadow-lg shadow-apple-red/20'
-                : 'text-white/70 hover:bg-white/5 hover:text-white'
+                ? 'nav-item-active'
+                : ''
             }`}
           >
             <Settings className="w-4 h-4" />
@@ -105,10 +115,10 @@ export const Sidebar: React.FC = () => {
           </button>
           <button
             onClick={() => setActiveTab('notice')}
-            className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
+            className={`nav-item w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
               activeTab === 'notice'
-                ? 'bg-apple-red text-white shadow-lg shadow-apple-red/20'
-                : 'text-white/70 hover:bg-white/5 hover:text-white'
+                ? 'nav-item-active'
+                : ''
             }`}
           >
             <AlertTriangle className="w-4 h-4" />
@@ -116,10 +126,10 @@ export const Sidebar: React.FC = () => {
           </button>
           <button
             onClick={() => setActiveTab('changelog')}
-            className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
+            className={`nav-item w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
               activeTab === 'changelog'
-                ? 'bg-apple-red text-white shadow-lg shadow-apple-red/20'
-                : 'text-white/70 hover:bg-white/5 hover:text-white'
+                ? 'nav-item-active'
+                : ''
             }`}
           >
             <History className="w-4 h-4" />
@@ -127,10 +137,10 @@ export const Sidebar: React.FC = () => {
           </button>
           <button
             onClick={() => setActiveTab('about')}
-            className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
+            className={`nav-item w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
               activeTab === 'about'
-                ? 'bg-apple-red text-white shadow-lg shadow-apple-red/20'
-                : 'text-white/70 hover:bg-white/5 hover:text-white'
+                ? 'nav-item-active'
+                : ''
             }`}
           >
             <Info className="w-4 h-4" />
@@ -140,9 +150,9 @@ export const Sidebar: React.FC = () => {
       </div>
 
       {/* Footer Info */}
-      <div className="px-3 py-2 border-t border-white/10 text-[11px] text-white/40 flex items-center justify-between">
-        <span>Beta music player</span>
-        <span className="bg-white/10 text-white/60 px-1.5 py-0.5 rounded text-[9px]">v1.0.5</span>
+      <div className="sidebar-footer-label px-3 py-2 border-t border-black/10 text-[11px] text-[#929aa7] flex items-center justify-between">
+          <span>Beta Music Player</span>
+        <span className="bg-white/75 text-[#7d8795] px-1.5 py-0.5 rounded text-[9px]">v1.0.6</span>
       </div>
     </aside>
   );

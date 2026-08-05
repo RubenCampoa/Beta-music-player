@@ -59,10 +59,10 @@ export const NoticeView: React.FC = () => {
         <div className="p-5 bg-white/5 rounded-xl border border-white/10 space-y-2">
           <div className="flex items-center space-x-2">
             <Cpu className="w-4 h-4 text-purple-400" />
-            <h4 className="text-sm font-bold text-white">Google Gemini 辅助构建</h4>
+            <h4 className="text-sm font-bold text-white">AI 辅助开发</h4>
           </div>
           <p className="text-xs text-white/60 leading-relaxed">
-            本项目在开发过程中使用了 <strong>Google Gemini (DeepMind)</strong> AI 辅助设计与全栈代码编写，涵盖前端架构、流体色彩算法与歌词渲染等功能。
+            本项目在开发过程中使用了 <strong>AI 辅助开发</strong>，协助完成前端架构、流体色彩算法、歌词渲染与性能优化等功能。
           </p>
         </div>
       </section>

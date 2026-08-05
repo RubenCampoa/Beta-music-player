@@ -1,6 +1,6 @@
 {
   "name": "beta-music-player",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "private": true,
   "main": "dist-electron/main.js",
   "scripts": {
@@ -12,6 +12,7 @@
   "build": {
     "appId": "com.beta.musicplayer",
     "productName": "Beta Music Player",
+    "executableName": "BetaMusicPlayer",
     "directories": {
       "output": "release"
     },
@@ -34,7 +35,7 @@
       "**/node_modules/@neteasecloudmusicapienhanced/**"
     ],
     "win": {
-      "icon": "build/icon.png",
+      "icon": "public/icon.png",
       "target": [
         "nsis",
         "portable"
