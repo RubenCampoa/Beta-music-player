@@ -152,24 +152,22 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
   const userScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lyricScrollTarget = useMotionValue(0);
   const lyricScrollY = useSpring(lyricScrollTarget, {
-    stiffness: 240,
-    damping: 30,
-    mass: 0.82,
+    stiffness: 220,
+    damping: 32,
+    mass: 0.8,
   });
   const isUserScrollingRef = useRef(false);
 
   // Focal index for scrolling & blur gradient (defaults to line 0 during prelude)
   const focalIndex = activeIndex >= 0 ? activeIndex : 0;
 
-  // Apple Music-like lyric emphasis: the scale/y keyframes deliberately
-  // overshoot and settle. This is a non-linear jelly transition rather than a
-  // linear class swap, while opacity and blur use a softer luminance curve.
+  // Apple Music-like smooth lyric emphasis: natural cubic bezier easing without overshoot dip.
   const jellyTransition = enableLyricAnimation
     ? {
-        scale: { duration: 0.64, ease: [0.34, 1.35, 0.64, 1] as const },
-        y: { duration: 0.64, ease: [0.22, 1, 0.36, 1] as const },
-        opacity: { duration: 0.48, ease: [0.22, 1, 0.36, 1] as const },
-        filter: { duration: 0.56, ease: [0.22, 1, 0.36, 1] as const },
+        scale: { duration: 0.48, ease: [0.22, 1, 0.36, 1] as const },
+        y: { duration: 0.48, ease: [0.22, 1, 0.36, 1] as const },
+        opacity: { duration: 0.42, ease: [0.22, 1, 0.36, 1] as const },
+        filter: { duration: 0.45, ease: [0.22, 1, 0.36, 1] as const },
       }
     : { duration: 0.025, ease: 'linear' as const };
 
@@ -574,16 +572,8 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                           ref={(el) => (lineRefs.current[idx] = el)}
                           onClick={() => handleLyricClick(line.time)}
                           animate={{
-                            scale: isActive
-                              ? [0.988, 1.038, 1.012, 1.018]
-                              : distance === 1
-                              ? [1.018, 0.995, 0.989, 0.99]
-                              : 0.982,
-                            y: isActive
-                              ? [7, -4, 1, -1]
-                              : distance === 1
-                              ? [-1, 2, 0, 0]
-                              : 1,
+                            scale: isActive ? 1.018 : distance === 1 ? 0.99 : 0.982,
+                            y: isActive ? 0 : distance === 1 ? 0 : 1,
                             opacity: targetOpacity,
                             filter: `blur(${targetBlur}px)`,
                           }}
@@ -678,16 +668,8 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                         ref={(el) => (lineRefs.current[idx] = el)}
                         onClick={() => handleLyricClick(line.time)}
                         animate={{
-                          scale: isActive
-                            ? [0.988, 1.045, 1.014, 1.025]
-                            : distance === 1
-                            ? [1.025, 0.996, 0.991, 0.992]
-                            : 0.978,
-                          y: isActive
-                            ? [9, -5, 1, -1.5]
-                            : distance === 1
-                            ? [-1.5, 2, 0, 0]
-                            : 1.5,
+                          scale: isActive ? 1.025 : distance === 1 ? 0.992 : 0.978,
+                          y: isActive ? 0 : distance === 1 ? 0 : 1.5,
                           opacity: targetOpacity,
                           filter: `blur(${targetBlur}px)`,
                         }}
