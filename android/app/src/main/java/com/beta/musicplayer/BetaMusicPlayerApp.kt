@@ -27,7 +27,7 @@ class AppContainer(app: Context) {
     val player = MusicPlayer(app.applicationContext, netEaseApi)
     private val initMutex = Mutex()
     @Volatile private var initialized = false
-    /** 原生库是否可用（Android 16 的 16KB 页对齐不兼容时为 false） */
+    /** 原生库是否可用（加载失败时为 false，自动降级外部 API） */
     @Volatile private var nativeRuntimeAvailable = true
 
     /** 启动时恢复登录态与播放模式 */
@@ -69,9 +69,9 @@ class AppContainer(app: Context) {
         try {
             EmbeddedNodeRuntime.start(appContext)
         } catch (e: Throwable) {
-            // Android 16 的 16KB 页对齐不兼容会导致 UnsatisfiedLinkError / ExceptionInInitializerError
+            // 原生库加载失败时降级到外部 API
             nativeRuntimeAvailable = false
-            android.util.Log.e("AppContainer", "EmbeddedNodeRuntime unavailable (likely 16KB page incompatibility), falling back to external API", e)
+            android.util.Log.e("AppContainer", "EmbeddedNodeRuntime unavailable, falling back to external API", e)
         }
     }
 

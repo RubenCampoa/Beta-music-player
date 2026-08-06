@@ -1,7 +1,15 @@
-const { server } = require('@neteasecloudmusicapienhanced/api')
 const fs = require('fs')
+const os = require('os')
+const path = require('path')
 
 const readyFile = process.argv[2]
+
+// Android 上 /tmp 不可写：api-enhanced 初始化时需要往 os.tmpdir() 写
+// anonymous_token，这里将 tmpdir 改指向应用私有目录（必须在 require 前覆盖）
+const writableTmp = readyFile ? path.dirname(readyFile) : __dirname
+os.tmpdir = () => writableTmp
+
+const { server } = require('@neteasecloudmusicapienhanced/api')
 
 // The Android app talks to this process through loopback only.
 server.serveNcmApi({
