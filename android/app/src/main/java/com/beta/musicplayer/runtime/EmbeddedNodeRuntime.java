@@ -17,15 +17,34 @@ import com.beta.musicplayer.BuildConfig;
 public final class EmbeddedNodeRuntime {
     private static final String ASSET_ROOT = "nodejs-project";
     private static volatile boolean started = false;
+    /**
+     * 16KB 页设备上 nodejs-mobile 18.20.4 预构建的 libnode.so / libc++_shared.so
+     * 段布局不兼容（不同权限的 LOAD 段共享 16KB 页，RELRO mprotect 会剥夺代码页
+     * 执行权限），加载后在构造函数阶段触发不可捕获的 SIGSEGV，故直接跳过加载，
+     * 由上层捕获 UnsupportedOperationException 并降级到外部 API。
+     */
+    private static final boolean nativeSupported;
 
     static {
-        System.loadLibrary("node");
-        System.loadLibrary("embeddednode");
+        long pageSize = 4096;
+        try {
+            pageSize = android.system.Os.sysconf(android.system.OsConstants._SC_PAGESIZE);
+        } catch (Throwable ignored) {
+        }
+        nativeSupported = pageSize <= 4096;
+        if (nativeSupported) {
+            System.loadLibrary("node");
+            System.loadLibrary("embeddednode");
+        }
     }
 
     private EmbeddedNodeRuntime() { }
 
     public static synchronized void start(Context context) {
+        if (!nativeSupported) {
+            throw new UnsupportedOperationException(
+                    "Embedded Node runtime is not supported on 16KB page devices");
+        }
         if (started) return;
         started = true;
         Context appContext = context.getApplicationContext();
@@ -62,6 +81,10 @@ public final class EmbeddedNodeRuntime {
 
     /** Force a restart after a health check detects a stale/dead Node service. */
     public static synchronized void restart(Context context) {
+        if (!nativeSupported) {
+            throw new UnsupportedOperationException(
+                    "Embedded Node runtime is not supported on 16KB page devices");
+        }
         started = false;
         File readyFile = new File(
                 context.getApplicationContext().getFilesDir(),

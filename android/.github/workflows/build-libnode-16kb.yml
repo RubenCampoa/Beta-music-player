@@ -1,0 +1,52 @@
+name: Build libnode 16KB
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-libnode:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm, arm64, x86_64]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Install build utils
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib g++-multilib patch
+
+      - name: Clone nodejs-mobile v18.20.4
+        run: |
+          git clone --depth 1 --branch v18.20.4 https://github.com/nodejs-mobile/nodejs-mobile.git src
+
+      - name: Setup Android NDK r24
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r24
+          add-to-path: false
+
+      - name: Build libnode.so (16KB page aligned)
+        working-directory: src
+        run: |
+          ./tools/android_build.sh "${{ steps.setup-ndk.outputs.ndk-path }}" 26 ${{ matrix.arch }}
+        env:
+          # 关键：让链接器以 16KB 页粒度隔离 LOAD 段，兼容 Android 16 的 16KB 页设备
+          LDFLAGS: "-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"
+
+      - name: Verify 16KB alignment
+        run: |
+          READELF="${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          for abi in armeabi-v7a arm64-v8a x86_64; do
+            so="src/out_android/$abi/libnode.so"
+            if [ -f "$so" ]; then
+              echo "=== $abi ==="
+              "$READELF" -lW "$so" | grep -E "LOAD|GNU_RELRO"
+            fi
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libnode-16kb-${{ matrix.arch }}
+          path: src/out_android/*/libnode.so
