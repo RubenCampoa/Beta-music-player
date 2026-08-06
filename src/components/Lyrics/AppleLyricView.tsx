@@ -104,7 +104,7 @@ const KaraokeLine: React.FC<KaraokeLineProps> = ({
       >
         {cleanText}
       </div>
-      {line.translation && (
+      {line.translation && cleanTitle(line.translation) !== cleanText && (
         <div
           className={`block break-words tracking-wide ${transFontClass} ${
             isActive ? 'text-white/90 font-medium' : 'text-white/40'
@@ -669,7 +669,7 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                           transition={jellyTransition}
                           className="full-lyrics-line cursor-pointer text-left origin-left space-y-1 py-1 px-2 -mx-2 hover:opacity-100 max-w-full break-words"
                         >
-                          {/* Main Lyric Line — karaoke word-by-word when active */}
+                          {/* Main Lyric Line */}
                           <KaraokeLine
                             line={line}
                             isActive={isActive}
@@ -679,17 +679,6 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                             enableGlow={enableLyricGlow}
                             enableAnimation={enableLyricAnimation}
                           />
-
-                          {/* Translated Lyric Sub-line (if available) */}
-                          {line.translation && (
-                            <div
-                              className={`font-semibold tracking-wide block break-words ${
-                                isActive ? 'text-white/85' : 'text-white/35'
-                              } ${lyricFontSize === 'large' ? 'text-base md:text-xl' : 'text-xs md:text-base'}`}
-                            >
-                              {neteaseApi.cleanTitle(line.translation)}
-                            </div>
-                          )}
                         </motion.div>
                       );
                     })}
@@ -770,7 +759,7 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                         transition={jellyTransition}
                         className="full-lyrics-line cursor-pointer text-center origin-center space-y-2 py-1 px-2 -mx-2 hover:opacity-100 max-w-3xl break-words"
                       >
-                        {/* Giant Centered Main Line — karaoke word-by-word when active */}
+                        {/* Giant Centered Main Line */}
                         <KaraokeLine
                           line={line}
                           isActive={isActive}
@@ -780,17 +769,6 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                           enableGlow={enableLyricGlow}
                           enableAnimation={enableLyricAnimation}
                         />
-
-                        {/* Centered Translation */}
-                        {line.translation && (
-                          <div
-                            className={`font-semibold tracking-wide block break-words ${
-                              isActive ? 'text-white/85' : 'text-white/35'
-                            } text-lg md:text-2xl`}
-                          >
-                            {neteaseApi.cleanTitle(line.translation)}
-                          </div>
-                        )}
                       </motion.div>
                     );
                   })}

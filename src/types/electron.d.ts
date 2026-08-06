@@ -18,6 +18,7 @@ export interface IElectronAPI {
   moveDesktopLyricWindow?: (delta: { deltaX: number; deltaY: number }) => void;
   selectAudioFiles: () => Promise<string[]>;
   selectAudioFolder: () => Promise<string | null>;
+  readAudioFile?: (filePath: string) => Promise<ArrayBuffer>;
   loginViaWindow: (platform?: 'netease' | 'qq') => Promise<string | null>;
   setQqCookie?: (cookie: string) => void;
   onMediaControl?: (callback: (action: string) => void) => () => void;

@@ -108,7 +108,7 @@ export const SearchView: React.FC = () => {
       </div>
 
       {/* Results Table */}
-      <div className="glass-panel rounded-2xl overflow-hidden border border-white/10">
+      <div className="glass-panel rounded-2xl border border-white/10 overflow-x-auto">
         {isSearching ? (
           <div className="py-20 text-center text-white/40 space-y-3">
             <Sparkles
@@ -126,9 +126,9 @@ export const SearchView: React.FC = () => {
             <p className="text-sm font-medium">未找到相关的歌曲，请重试其他关键字或切换平台</p>
           </div>
         ) : (
-          <table className="w-full text-left text-xs border-collapse">
+          <table className="w-full text-left text-xs border-collapse min-w-[600px]">
             <thead>
-              <tr className="border-b border-white/10 text-white/40 uppercase tracking-wider font-semibold">
+              <tr className="border-b border-white/10 text-white/40 uppercase tracking-wider font-semibold whitespace-nowrap">
                 <th className="py-3 px-4 w-12 text-center">#</th>
                 <th className="py-3 px-4">标题</th>
                 <th className="py-3 px-4">歌手</th>
@@ -148,20 +148,20 @@ export const SearchView: React.FC = () => {
                       isCurrent ? 'bg-white/15 text-apple-red font-semibold' : 'text-white/80'
                     }`}
                   >
-                    <td className="py-3 px-4 text-center text-white/40 group-hover:text-white">
+                    <td className="py-3 px-4 text-center text-white/40 group-hover:text-white whitespace-nowrap">
                       {isCurrent && isPlaying ? (
                         <Play className="w-3.5 h-3.5 text-apple-red fill-current mx-auto animate-pulse" />
                       ) : (
                         idx + 1
                       )}
                     </td>
-                    <td className="py-3 px-4 flex items-center space-x-3">
+                    <td className="py-3 px-4 flex items-center space-x-3 whitespace-nowrap">
                       <img
                         src={getOptimizedCoverUrl(song.coverUrl, 100)}
                         alt={song.name}
                         loading="lazy"
                         decoding="async"
-                        className="w-9 h-9 rounded-md object-cover border border-white/10"
+                        className="w-9 h-9 rounded-md object-cover border border-white/10 shrink-0"
                         onError={(e) => {
                           const img = e.currentTarget;
                           if (img.src !== DEFAULT_COVER_PLACEHOLDER) {
@@ -174,22 +174,22 @@ export const SearchView: React.FC = () => {
                         {Boolean(song.isVip) && (
                           <span
                             title="VIP 曲目"
-                            className="px-1.5 py-0.5 rounded text-[8px] bg-gradient-to-r from-amber-500 to-red-500 text-white font-black shrink-0 shadow-sm uppercase tracking-wider cursor-help"
+                            className="px-1.5 py-0.5 rounded text-[8px] bg-gradient-to-r from-amber-500 to-red-500 text-white font-black shrink-0 shadow-sm uppercase tracking-wider cursor-help whitespace-nowrap"
                           >
                             VIP
                           </span>
                         )}
                       </span>
                     </td>
-                    <td className="py-3 px-4 text-white/70 truncate max-w-[150px]">
+                    <td className="py-3 px-4 text-white/70 truncate max-w-[150px] whitespace-nowrap">
                       {cleanTitle(song.artist)}
                     </td>
-                    <td className="py-3 px-4 text-white/50 truncate max-w-[150px]">
+                    <td className="py-3 px-4 text-white/50 truncate max-w-[150px] whitespace-nowrap">
                       {cleanTitle(song.album)}
                     </td>
-                    <td className="py-3 px-4 text-center">
+                    <td className="py-3 px-4 text-center whitespace-nowrap">
                       <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap inline-block shrink-0 ${
                           song.source === 'qq'
                             ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                             : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
@@ -198,7 +198,7 @@ export const SearchView: React.FC = () => {
                         {song.source === 'qq' ? 'QQ 音乐' : '网易云'}
                       </span>
                     </td>
-                    <td className="py-3 px-4 text-right text-white/50 font-mono">
+                    <td className="py-3 px-4 text-right text-white/50 font-mono whitespace-nowrap">
                       {formatDuration(song.duration)}
                     </td>
                   </tr>

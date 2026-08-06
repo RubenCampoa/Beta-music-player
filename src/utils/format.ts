@@ -79,3 +79,89 @@ export function handleImageError(e: React.SyntheticEvent<HTMLImageElement, Event
     e.currentTarget.src = DEFAULT_COVER_PLACEHOLDER;
   }
 }
+
+/**
+ * Combines main lyrics and translation lyrics into a single deduplicated array.
+ * Intelligently merges inline bilingual pairs (e.g. English line + Chinese line at same timestamp)
+ * and eliminates duplicate standalone translation lines.
+ */
+export function combineMainAndTransLyrics(mainLyrics: LyricLine[], transLyrics: LyricLine[] = []): LyricLine[] {
+  if (!mainLyrics || mainLyrics.length === 0) return [];
+
+  // Step 1: Detect and merge inline bilingual pairs in mainLyrics (e.g. English line + Chinese line with identical timestamps)
+  const mergedMain: LyricLine[] = [];
+  const skipIndices = new Set<number>();
+
+  for (let i = 0; i < mainLyrics.length; i++) {
+    if (skipIndices.has(i)) continue;
+    const current = mainLyrics[i];
+    const next = mainLyrics[i + 1];
+
+    const currentClean = cleanTitle(current.text);
+    if (!currentClean) continue;
+
+    if (
+      next &&
+      Math.abs(current.time - next.time) < 1.2 &&
+      cleanTitle(next.text) !== currentClean
+    ) {
+      const currentHasCn = /[\u4e00-\u9fa5]/.test(currentClean);
+      const nextHasCn = /[\u4e00-\u9fa5]/.test(next.text);
+
+      if (!currentHasCn && nextHasCn) {
+        mergedMain.push({
+          time: current.time,
+          text: currentClean,
+          translation: cleanTitle(next.text),
+        });
+        skipIndices.add(i + 1);
+        continue;
+      }
+    }
+
+    mergedMain.push({
+      ...current,
+      text: currentClean,
+      translation: current.translation ? cleanTitle(current.translation) : undefined,
+    });
+  }
+
+  // Step 2: Attach external transLyrics if provided
+  const result: LyricLine[] = [];
+  for (const line of mergedMain) {
+    let trans = line.translation;
+
+    if (!trans && transLyrics.length > 0) {
+      const matched = transLyrics.find((t) => Math.abs(t.time - line.time) < 1.5);
+      if (matched && matched.text) {
+        const cleanTrans = cleanTitle(matched.text);
+        if (cleanTrans && cleanTrans !== line.text) {
+          trans = cleanTrans;
+        }
+      }
+    }
+
+    result.push({
+      ...line,
+      translation: trans && trans !== line.text ? trans : undefined,
+    });
+  }
+
+  // Step 3: Remove any standalone lines whose text is already attached as translation to a preceding line with the same timestamp
+  const finalLyrics: LyricLine[] = [];
+  for (let i = 0; i < result.length; i++) {
+    const item = result[i];
+    const prev = result[i - 1];
+    if (
+      prev &&
+      prev.translation &&
+      Math.abs(item.time - prev.time) < 1.5 &&
+      cleanTitle(item.text) === prev.translation
+    ) {
+      continue;
+    }
+    finalLyrics.push(item);
+  }
+
+  return finalLyrics;
+}

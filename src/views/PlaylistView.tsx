@@ -120,7 +120,7 @@ export const PlaylistView: React.FC = () => {
       </div>
 
       {/* Playlist Tracks Table */}
-      <div className="glass-panel rounded-2xl overflow-hidden border border-white/10">
+      <div className="glass-panel rounded-2xl border border-white/10 overflow-x-auto">
         {isLoading ? (
           <div className="py-16 text-center text-white/40 space-y-2">
             <Music
@@ -134,9 +134,9 @@ export const PlaylistView: React.FC = () => {
             <p className="text-sm font-medium">歌单暂无歌曲</p>
           </div>
         ) : (
-          <table className="w-full text-left text-xs border-collapse">
+          <table className="w-full text-left text-xs border-collapse min-w-[550px]">
             <thead>
-              <tr className="border-b border-white/10 text-white/40 uppercase tracking-wider font-semibold">
+              <tr className="border-b border-white/10 text-white/40 uppercase tracking-wider font-semibold whitespace-nowrap">
                 <th className="py-3 px-4 w-12 text-center">#</th>
                 <th className="py-3 px-4">标题</th>
                 <th className="py-3 px-4">歌手</th>
@@ -155,33 +155,33 @@ export const PlaylistView: React.FC = () => {
                       isCurrent ? 'bg-white/15 text-apple-red font-semibold' : 'text-white/80'
                     }`}
                   >
-                    <td className="py-3 px-4 text-center text-white/40 group-hover:text-white">
+                    <td className="py-3 px-4 text-center text-white/40 group-hover:text-white whitespace-nowrap">
                       {isCurrent && isPlaying ? (
                         <Play className="w-3.5 h-3.5 text-apple-red fill-current mx-auto animate-pulse" />
                       ) : (
                         idx + 1
                       )}
                     </td>
-                    <td className="py-3 px-4 flex items-center space-x-3">
+                    <td className="py-3 px-4 flex items-center space-x-3 whitespace-nowrap">
                       <img
                         src={getOptimizedCoverUrl(song.coverUrl, 100)}
                         alt={song.name}
                         loading="lazy"
                         decoding="async"
-                        className="w-9 h-9 rounded-md object-cover border border-white/10"
+                        className="w-9 h-9 rounded-md object-cover border border-white/10 shrink-0"
                       />
                       <span className="truncate max-w-[220px] text-white font-medium flex items-center space-x-1.5">
                         <span className="truncate">{cleanTitle(song.name)}</span>
                         {Boolean(song.isVip) && (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] bg-gradient-to-r from-amber-500 to-red-500 text-white font-black shrink-0 shadow-sm uppercase tracking-wider">
+                          <span className="px-1.5 py-0.5 rounded text-[9px] bg-gradient-to-r from-amber-500 to-red-500 text-white font-black shrink-0 shadow-sm uppercase tracking-wider whitespace-nowrap">
                             VIP
                           </span>
                         )}
                       </span>
                     </td>
-                    <td className="py-3 px-4 text-white/70 truncate max-w-[150px]">{cleanTitle(song.artist)}</td>
-                    <td className="py-3 px-4 text-white/50 truncate max-w-[150px]">{cleanTitle(song.album)}</td>
-                    <td className="py-3 px-4 text-right text-white/50 font-mono">
+                    <td className="py-3 px-4 text-white/70 truncate max-w-[150px] whitespace-nowrap">{cleanTitle(song.artist)}</td>
+                    <td className="py-3 px-4 text-white/50 truncate max-w-[150px] whitespace-nowrap">{cleanTitle(song.album)}</td>
+                    <td className="py-3 px-4 text-right text-white/50 font-mono whitespace-nowrap">
                       {formatDuration(song.duration)}
                     </td>
                   </tr>

@@ -50,15 +50,31 @@
 
 ## 🛠️ 技术栈
 
-- **桌面端核心框架**：[Electron](https://github.com/electron/electron) 31.x
-- **前端框架**：[React 18](https://github.com/facebook/react) & [TypeScript](https://github.com/microsoft/TypeScript)
-- **构建工具**：[Vite](https://github.com/vitejs/vite) 5.x & [vite-plugin-electron](https://github.com/electron-vite/vite-plugin-electron)
-- **状态管理**：[Zustand](https://github.com/pmndrs/zustand)
-- **动画引擎**：[Framer Motion](https://github.com/framer/motion)
-- **样式方案**：Tailwind CSS (Vanilla CSS 增强)
-- **本地存储**：IndexedDB ([Dexie.js](https://github.com/dexie/Dexie.js))
-- **ID3 解析**：[jsmediatags](https://github.com/aadsm/jsmediatags)
-- **后端 Api 框架**：[@neteasecloudmusicapienhanced/api](https://github.com/Binaryify/NeteaseCloudMusicApi)
+### 🖥️ 桌面端与核心基础架构 (Desktop & Core Framework)
+- **[React](https://github.com/facebook/react) 18.3.1** 与 **[react-dom](https://www.npmjs.com/package/react-dom)** — 声明式 UI 核心框架，负责现代化单页 Web 界面渲染。
+- **[TypeScript](https://github.com/microsoft/TypeScript) 5.5.4** — 强类型语言，保障前端及双平台 API 的类型安全与编译校验。
+- **[Electron](https://github.com/electron/electron) 31.3.1** — 跨平台桌面端原生容器，支持系统托盘常驻、无边框毛玻璃窗口与全局硬件按键播控。
+- **[Vite](https://github.com/vitejs/vite) 5.4.1** — 极速构建与热重载工具，配合 [vite-plugin-electron](https://github.com/electron-vite/vite-plugin-electron) (0.28) 与 [vite-plugin-electron-renderer](https://www.npmjs.com/package/vite-plugin-electron-renderer) 实现主/渲染进程无缝开发与编译。
+- **[electron-builder](https://github.com/electron-userland/electron-builder) 24.13.3** — 桌面应用打包分发工具，支持生成 Portable 免安装绿色版与 NSIS 标准 Windows 安装包。
+
+### 🎶 双平台音乐 API 引擎与后端中间件 (Music APIs & Backend)
+- [@neteasecloudmusicapienhanced/api](https://github.com/Binaryify/NeteaseCloudMusicApi) — 增强版网易云音乐接口引擎，提供搜索、权威榜单、VIP 音源解析及二维码扫码登录。
+- [@sansenjian/qq-music-api](https://www.npmjs.com/package/@sansenjian/qq-music-api) (v2.4.0) — QQ 音乐核心服务引擎，提供 QQ 音乐榜单、搜索、凭证绑定及音频流地址解析。
+- [Express](https://expressjs.com/) (v4.19.2) 与 [CORS](https://github.com/expressjs/cors) (v2.8.5) — 内置轻量 Node.js 服务器（[server.js](server.js)），无感知拉起双平台 API 本地跨域代理（监听 3000 / 3200 端口）。
+
+### 🎨 UI 美学系统与流畅动效 (UI, Design & Animations)
+- [Lucide React](https://lucide.dev/) (v0.428.0) — Apple 风格矢量 Icon 图标库，提供播控、红心收藏、歌单及系统设置图标。
+- [Framer Motion](https://github.com/framer/motion) (v11.3.24) — 高性能声明式动画库，驱动全屏歌词果冻缓动、窗口平滑展开与流体高斯模糊背景。
+- [TailwindCSS](https://tailwindcss.com/) (v3.4.10) 与 PostCSS / Autoprefixer — 原子化 CSS 框架，打造现代高斯毛玻璃（Glassmorphism）与流体光斑视觉效果。
+
+### 🗄️ 状态管理与本地持久化 (State Management & Storage)
+- [Zustand](https://github.com/pmndrs/zustand) (v4.5.4) — 轻量级状态管理库（配合 `shallow` 浅比较器），全量同步全平台播放状态、音源、歌词及 `qqLikeMids` / `neteaseLikeIds` 实时收藏状态。
+- [Dexie.js](https://github.com/dexie/Dexie.js) (v4.0.8) — 基于 IndexedDB 的本地数据库封装库，管理本地音频导入、离线资料库与历史播放记录。
+- [jsmediatags](https://github.com/aadsm/jsmediatags) (v3.9.7) — 本地音频 MP3 / FLAC 文件 ID3 标签与嵌入专辑封面（Cover Artwork）的前端二进制解析库。
+
+### 🛠️ 开发与构建并发工具 (Tooling & Concurrently)
+- [Concurrently](https://github.com/open-cli-tools/concurrently) (v8.2.2) — 命令行并发运行工具，通过单条 `npm run dev` 同时拉起 API 服务代理与 Vite 前端热更新。
+- [@vitejs/plugin-react](https://www.npmjs.com/package/@vitejs/plugin-react) (v4.3.1) — React 快速刷新（Fast Refresh）官方插件。
 
 ---
 

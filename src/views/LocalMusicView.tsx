@@ -24,7 +24,7 @@ export const LocalMusicView: React.FC = () => {
     setIsUploading(true);
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      if (file.type.startsWith('audio/') || /\.(mp3|flac|wav|m4a|aac|ogg)$/i.test(file.name)) {
+      if (file.type.startsWith('audio/') || /\.(mp3|flac|wav|m4a|aac|ogg|opus)$/i.test(file.name)) {
         await localMusicService.addLocalAudioFile(file);
       }
     }
@@ -39,10 +39,12 @@ export const LocalMusicView: React.FC = () => {
         setIsUploading(true);
         for (const filePath of paths) {
           const fileName = filePath.split(/[\\/]/).pop() || 'Unknown';
-          // Convert local path into File/Blob representation
+          // Convert local path into File/Blob representation. file:// fetch
+          // is blocked by Chromium when webSecurity is on, so read via IPC.
           try {
-            const resp = await fetch(`file:///${filePath}`);
-            const blob = await resp.blob();
+            const buffer = await window.electronAPI?.readAudioFile?.(filePath);
+            if (!buffer) throw new Error('readAudioFile unavailable');
+            const blob = new Blob([buffer], { type: 'audio/mpeg' });
             const file = new File([blob], fileName, { type: 'audio/mpeg' });
             (file as any).path = filePath;
             await localMusicService.addLocalAudioFile(file);
@@ -96,7 +98,7 @@ export const LocalMusicView: React.FC = () => {
             <input
               type="file"
               multiple
-              accept="audio/*,.mp3,.flac,.wav,.m4a,.aac,.ogg"
+              accept="audio/*,.mp3,.flac,.wav,.m4a,.aac,.ogg,.opus"
               className="hidden"
               onChange={(e) => handleFileUpload(e.target.files)}
             />

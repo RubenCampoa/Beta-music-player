@@ -1,5 +1,5 @@
 import { Song, Playlist, UserProfile, LyricLine } from '../types/music';
-import { cleanTitle, getOptimizedCoverUrl } from '../utils/format';
+import { cleanTitle, getOptimizedCoverUrl, combineMainAndTransLyrics } from '../utils/format';
 
 export { cleanTitle, getOptimizedCoverUrl };
 
@@ -406,20 +406,7 @@ class NeteaseApiService {
       const transLyrics = res.tlyric?.lyric ? this.parseLrc(res.tlyric.lyric) : [];
 
       if (mainLyrics.length > 0) {
-        if (transLyrics.length > 0) {
-          return mainLyrics.map((line) => {
-            const matched = transLyrics.find((t) => Math.abs(t.time - line.time) < 1.2);
-            return {
-              ...line,
-              text: this.cleanTitle(line.text),
-              translation: matched?.text ? this.cleanTitle(matched.text) : undefined,
-            };
-          });
-        }
-        return mainLyrics.map((line) => ({
-          ...line,
-          text: this.cleanTitle(line.text),
-        }));
+        return combineMainAndTransLyrics(mainLyrics, transLyrics);
       }
     } catch {
       // Ignore
@@ -492,7 +479,7 @@ class NeteaseApiService {
     }
 
     const fee = track.fee ?? track.privilege?.fee;
-    const isVip = fee === 1;
+    const isVip = fee === 1 || fee === 4;
 
     return {
       id: `netease-${track.id}`,

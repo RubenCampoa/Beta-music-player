@@ -146,7 +146,10 @@ class LocalMusicService {
       album: rec.album,
       duration: rec.duration,
       coverUrl: rec.coverUrl,
-      audioUrl: rec.filePath && window.electronAPI ? `app-audio://${encodeURIComponent(rec.filePath)}` : audioUrl,
+      audioUrl:
+        rec.filePath && window.electronAPI
+          ? `app-audio://local/${encodeURIComponent(rec.filePath.replace(/\\/g, '/'))}`
+          : audioUrl,
       source: 'local',
       filePath: rec.filePath,
     };

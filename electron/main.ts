@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, protocol, net, Tray, Menu, globalShortcut, nativeImage, screen, session } from 'electron';
 import path from 'path';
+import { pathToFileURL } from 'url';
 import fs from 'fs';
 
 let mainWindow: BrowserWindow | null = null;
@@ -30,6 +31,23 @@ if (process.platform === 'win32') {
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app-audio', privileges: { secure: true, standard: true, supportFetchAPI: true, stream: true } }
 ]);
+
+// --- Local audio protocol allowlist ---
+// app-audio:// lets the renderer stream locally imported songs. The URL
+// embeds an arbitrary user path, so gate it behind an extension + path
+// allowlist to prevent it from being abused as a file-read primitive.
+const ALLOWED_AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.wav', '.m4a', '.aac', '.ogg', '.opus']);
+
+function isAuthorizedAudioPath(filePath: string): boolean {
+  try {
+    if (!filePath || !path.isAbsolute(filePath)) return false;
+    if (filePath.split(/[\\/]+/).includes('..')) return false;
+    if (!ALLOWED_AUDIO_EXTENSIONS.has(path.extname(filePath).toLowerCase())) return false;
+    return fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
 
 function createTray() {
   if (tray) return;
@@ -280,7 +298,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false,
+      sandbox: true,
+      webSecurity: true,
     },
     icon: getAppIconPath(),
   });
@@ -422,6 +441,23 @@ ipcMain.on('set-qq-cookie', (_event, cookie: string) => {
   qqMusicCookie = typeof cookie === 'string' ? cookie : '';
 });
 
+// QQ cover CDNs (y.gtimg.cn / qpic.y.qq.com) do not send an
+// Access-Control-Allow-Origin header, so the renderer's crossOrigin='Anonymous'
+// <img> sampling (fluid background palette extraction) fails and falls back to
+// the default colors. These are public image CDNs, so injecting the header at
+// the network layer is safe and requires no renderer changes. <img> requests
+// are simple GETs (no preflight), so the response header alone is sufficient.
+function setupQqCoverCors() {
+  session.defaultSession.webRequest.onHeadersReceived(
+    { urls: ['*://y.gtimg.cn/*', '*://*.gtimg.cn/*', '*://qpic.y.qq.com/*'] },
+    (details, callback) => {
+      const responseHeaders = details.responseHeaders ?? {};
+      responseHeaders['Access-Control-Allow-Origin'] = ['*'];
+      callback({ responseHeaders });
+    }
+  );
+}
+
 // The bundled NetEase API (>= 4.38) resolves VIP playback through
 // /song/url/v1, which uses the "xeapi" encryption. That crypto needs a
 // public key exchange plus an anonymous token stored in the OS temp dir.
@@ -470,7 +506,7 @@ function startNeteaseServer() {
     server
       .serveNcmApi({
         port: 3000,
-        host: '0.0.0.0',
+        host: '127.0.0.1', // Local-only; never expose the API to the LAN.
       })
       .then(() => {
         console.log('[NetEase Cloud Music API Server] Running on http://127.0.0.1:3000');
@@ -491,8 +527,17 @@ function startNeteaseServer() {
 function startQqMusicServer() {
   try {
     const qqApp = require('@sansenjian/qq-music-api');
-    qqApp.listen(3200, '127.0.0.1', () => {
+    const qqServer = qqApp.listen(3200, '127.0.0.1', () => {
       console.log('[QQ Music API Server] Running on http://127.0.0.1:3200');
+    });
+    // EADDRINUSE (or any other listen error) is emitted asynchronously and
+    // would otherwise crash the main process as an unhandled 'error' event.
+    qqServer.on('error', (err: any) => {
+      if (err?.code === 'EADDRINUSE') {
+        console.warn('[QQ Music API Server] Port 3200 already in use — QQ features may be unavailable.');
+      } else {
+        console.warn('[QQ Music API Server Error]', err);
+      }
     });
   } catch (err) {
     console.warn('[QQ Music API Server Launch Error]', err);
@@ -503,10 +548,32 @@ app.whenReady().then(() => {
   startNeteaseServer();
   startQqMusicServer();
   setupQqApiHeaderInjection();
+  setupQqCoverCors();
 
   protocol.handle('app-audio', (request) => {
-    const filePath = decodeURIComponent(request.url.slice('app-audio://'.length));
-    return net.fetch('file:///' + filePath);
+    let filePath: string;
+    try {
+      // URL shape: app-audio://local/<encodeURIComponent(path with '/')>
+      // The path lives in the pathname segment (not the host), so Windows
+      // paths with CJK characters / '#' / '%' survive URL parsing intact.
+      const url = new URL(request.url);
+      let decoded = decodeURIComponent(url.pathname);
+      // url.pathname always starts with '/'. A Windows drive path arrives as
+      // /C:/... (drop the leading slash); a Unix absolute path encoded as
+      // %2F... arrives as //home/... (drop one of the two slashes).
+      if (/^\/\/?[A-Za-z]:/.test(decoded)) {
+        decoded = decoded.slice(1);
+      } else if (decoded.startsWith('//')) {
+        decoded = decoded.slice(1);
+      }
+      filePath = decoded;
+    } catch {
+      return new Response('Bad Request', { status: 400 });
+    }
+    if (!isAuthorizedAudioPath(filePath)) {
+      return new Response('Forbidden', { status: 403 });
+    }
+    return net.fetch(pathToFileURL(filePath).href);
   });
 
   createWindow();
@@ -598,7 +665,7 @@ function createDesktopLyricWindow() {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false,
+      sandbox: true,
     },
     icon: getAppIconPath(),
   });
@@ -770,6 +837,7 @@ ipcMain.handle('login-via-window', async (_event, platform: 'netease' | 'qq' = '
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
+        sandbox: true,
       },
     });
 
@@ -864,7 +932,18 @@ ipcMain.handle('select-audio-files', async () => {
   if (!mainWindow) return [];
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile', 'multiSelections'],
-    filters: [{ name: 'Audio Files', extensions: ['mp3', 'flac', 'wav', 'm4a', 'aac', 'ogg'] }]
+    filters: [{ name: 'Audio Files', extensions: ['mp3', 'flac', 'wav', 'm4a', 'aac', 'ogg', 'opus'] }]
   });
   return result.canceled ? [] : result.filePaths;
+});
+
+// Read a locally selected audio file in the main process. The renderer must
+// not fetch file:// directly (Chromium blocks it when webSecurity is on), so
+// the file is read here and gated by the same allowlist as app-audio://.
+ipcMain.handle('read-audio-file', async (_event, filePath: unknown) => {
+  if (typeof filePath !== 'string' || !isAuthorizedAudioPath(filePath)) {
+    throw new Error('Unauthorized audio file path');
+  }
+  const data = await fs.promises.readFile(filePath);
+  return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
 });

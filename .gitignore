@@ -52,3 +52,7 @@ android/*.xml
 .reasonix/
 reasonix.toml
 npm
+
+# Debug / temp scripts & tool state
+temp-*.js
+.workbuddy/
