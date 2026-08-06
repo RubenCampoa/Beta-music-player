@@ -2,22 +2,35 @@ import React from 'react';
 import { Search, Play, Music, Sparkles } from 'lucide-react';
 import { usePlayerStore } from '../store/playerStore';
 import { shallow } from 'zustand/shallow';
-import { neteaseApi, getOptimizedCoverUrl } from '../services/neteaseApi';
-import { Song } from '../types/music';
+import { getOptimizedCoverUrl } from '../services/neteaseApi';
+import { Song, Platform } from '../types/music';
+import { cleanTitle, DEFAULT_COVER_PLACEHOLDER } from '../utils/format';
 
 export const SearchView: React.FC = () => {
-  const { searchQuery, searchResults, isSearching, playSong, currentSong, isPlaying } =
-    usePlayerStore(
-      (state) => ({
-        searchQuery: state.searchQuery,
-        searchResults: state.searchResults,
-        isSearching: state.isSearching,
-        playSong: state.playSong,
-        currentSong: state.currentSong,
-        isPlaying: state.isPlaying,
-      }),
-      shallow,
-    );
+  const {
+    searchQuery,
+    searchResults,
+    searchPlatform,
+    setSearchPlatform,
+    performSearch,
+    isSearching,
+    playSong,
+    currentSong,
+    isPlaying,
+  } = usePlayerStore(
+    (state) => ({
+      searchQuery: state.searchQuery,
+      searchResults: state.searchResults,
+      searchPlatform: state.searchPlatform,
+      setSearchPlatform: state.setSearchPlatform,
+      performSearch: state.performSearch,
+      isSearching: state.isSearching,
+      playSong: state.playSong,
+      currentSong: state.currentSong,
+      isPlaying: state.isPlaying,
+    }),
+    shallow,
+  );
 
   const formatDuration = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -25,46 +38,92 @@ export const SearchView: React.FC = () => {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
+  const handlePlatformChange = (platform: Platform) => {
+    setSearchPlatform(platform);
+    if (searchQuery) {
+      performSearch(searchQuery, platform);
+    }
+  };
+
   return (
     <div className="space-y-6 pb-12 select-none animate-fadeIn">
       {/* Search View Header */}
-      <div className="flex items-center justify-between glass-panel rounded-2xl p-6 border border-white/10">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between glass-panel rounded-2xl p-6 border border-white/10 gap-4">
         <div className="space-y-1">
           <div className="flex items-center space-x-2 text-apple-red text-xs font-bold uppercase tracking-wider">
             <Search className="w-4 h-4" />
-            <span>网易云音乐搜索</span>
+            <span>{searchPlatform === 'qq' ? 'QQ 音乐全网搜索' : '网易云音乐搜索'}</span>
           </div>
           <h1 className="text-2xl font-extrabold text-white tracking-tight flex items-center space-x-2">
             <span>搜索结果：</span>
-            <span className="text-apple-red font-mono">“{searchQuery}”</span>
+            <span className={searchPlatform === 'qq' ? 'text-emerald-400 font-mono' : 'text-apple-red font-mono'}>
+              “{searchQuery}”
+            </span>
           </h1>
-          <p className="text-xs text-white/50">
-            共找到 {searchResults.length} 首相关单曲
-          </p>
+          <p className="text-xs text-white/50">共找到 {searchResults.length} 首相关单曲</p>
         </div>
 
-        {searchResults.length > 0 && (
-          <button
-            onClick={() => searchResults[0] && playSong(searchResults[0], searchResults)}
-            className="flex items-center space-x-2 bg-apple-red hover:bg-apple-red/90 text-white font-semibold text-xs px-5 py-2.5 rounded-full transition-all shadow-lg shadow-apple-red/20"
-          >
-            <Play className="w-4 h-4 fill-current ml-0.5" />
-            <span>播放全部搜索结果</span>
-          </button>
-        )}
+        {/* Platform Switching Tabs */}
+        <div className="flex items-center space-x-3 self-stretch md:self-auto justify-between md:justify-end">
+          <div className="flex items-center p-1 bg-white/10 rounded-full border border-white/15 backdrop-blur-md">
+            <button
+              onClick={() => handlePlatformChange('netease')}
+              className={`flex items-center space-x-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                searchPlatform === 'netease'
+                  ? 'bg-rose-500 text-white shadow-md'
+                  : 'text-white/60 hover:text-white'
+              }`}
+            >
+              <div className="w-2 h-2 rounded-full bg-rose-300" />
+              <span>网易云音乐</span>
+            </button>
+
+            <button
+              onClick={() => handlePlatformChange('qq')}
+              className={`flex items-center space-x-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                searchPlatform === 'qq'
+                  ? 'bg-emerald-500 text-white shadow-md'
+                  : 'text-white/60 hover:text-white'
+              }`}
+            >
+              <div className="w-2 h-2 rounded-full bg-emerald-300" />
+              <span>QQ 音乐</span>
+            </button>
+          </div>
+
+          {searchResults.length > 0 && (
+            <button
+              onClick={() => searchResults[0] && playSong(searchResults[0], searchResults)}
+              className={`flex items-center space-x-2 font-semibold text-xs px-5 py-2.5 rounded-full transition-all shadow-lg text-white cursor-pointer ${
+                searchPlatform === 'qq'
+                  ? 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/20'
+                  : 'bg-apple-red hover:bg-apple-red/90 shadow-apple-red/20'
+              }`}
+            >
+              <Play className="w-4 h-4 fill-current ml-0.5" />
+              <span>播放全部搜索结果</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Results Table */}
       <div className="glass-panel rounded-2xl overflow-hidden border border-white/10">
         {isSearching ? (
           <div className="py-20 text-center text-white/40 space-y-3">
-            <Sparkles className="w-8 h-8 mx-auto animate-spin text-apple-red" />
-            <p className="text-sm font-medium">正在全网搜索音乐...</p>
+            <Sparkles
+              className={`w-8 h-8 mx-auto animate-spin ${
+                searchPlatform === 'qq' ? 'text-emerald-400' : 'text-apple-red'
+              }`}
+            />
+            <p className="text-sm font-medium">
+              正在 {searchPlatform === 'qq' ? 'QQ 音乐' : '网易云音乐'} 全网搜索...
+            </p>
           </div>
         ) : searchResults.length === 0 ? (
           <div className="py-20 text-center text-white/40 space-y-2">
             <Music className="w-10 h-10 mx-auto opacity-30" />
-            <p className="text-sm font-medium">未找到相关的歌曲，请重试其他关键字</p>
+            <p className="text-sm font-medium">未找到相关的歌曲，请重试其他关键字或切换平台</p>
           </div>
         ) : (
           <table className="w-full text-left text-xs border-collapse">
@@ -74,6 +133,7 @@ export const SearchView: React.FC = () => {
                 <th className="py-3 px-4">标题</th>
                 <th className="py-3 px-4">歌手</th>
                 <th className="py-3 px-4">专辑</th>
+                <th className="py-3 px-4 text-center">平台</th>
                 <th className="py-3 px-4 text-right">时长</th>
               </tr>
             </thead>
@@ -102,12 +162,18 @@ export const SearchView: React.FC = () => {
                         loading="lazy"
                         decoding="async"
                         className="w-9 h-9 rounded-md object-cover border border-white/10"
+                        onError={(e) => {
+                          const img = e.currentTarget;
+                          if (img.src !== DEFAULT_COVER_PLACEHOLDER) {
+                            img.src = DEFAULT_COVER_PLACEHOLDER;
+                          }
+                        }}
                       />
                       <span className="truncate max-w-[220px] text-white font-medium flex items-center space-x-1.5">
-                        <span className="truncate">{neteaseApi.cleanTitle(song.name)}</span>
+                        <span className="truncate">{cleanTitle(song.name)}</span>
                         {Boolean(song.isVip) && (
                           <span
-                            title="VIP 曲目 (标准音质免费播放，极高/无损音质需会员)"
+                            title="VIP 曲目"
                             className="px-1.5 py-0.5 rounded text-[8px] bg-gradient-to-r from-amber-500 to-red-500 text-white font-black shrink-0 shadow-sm uppercase tracking-wider cursor-help"
                           >
                             VIP
@@ -116,10 +182,21 @@ export const SearchView: React.FC = () => {
                       </span>
                     </td>
                     <td className="py-3 px-4 text-white/70 truncate max-w-[150px]">
-                      {neteaseApi.cleanTitle(song.artist)}
+                      {cleanTitle(song.artist)}
                     </td>
                     <td className="py-3 px-4 text-white/50 truncate max-w-[150px]">
-                      {neteaseApi.cleanTitle(song.album)}
+                      {cleanTitle(song.album)}
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          song.source === 'qq'
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                        }`}
+                      >
+                        {song.source === 'qq' ? 'QQ 音乐' : '网易云'}
+                      </span>
                     </td>
                     <td className="py-3 px-4 text-right text-white/50 font-mono">
                       {formatDuration(song.duration)}

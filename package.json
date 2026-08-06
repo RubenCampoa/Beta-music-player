@@ -1,6 +1,6 @@
 {
   "name": "beta-music-player",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "private": true,
   "main": "dist-electron/main.js",
   "scripts": {
@@ -32,7 +32,8 @@
       "public/icon.png"
     ],
     "asarUnpack": [
-      "**/node_modules/@neteasecloudmusicapienhanced/**"
+      "**/node_modules/@neteasecloudmusicapienhanced/**",
+      "**/node_modules/@sansenjian/qq-music-api/**"
     ],
     "win": {
       "icon": "public/icon.png",
@@ -49,6 +50,7 @@
   },
   "dependencies": {
     "@neteasecloudmusicapienhanced/api": "latest",
+    "@sansenjian/qq-music-api": "^2.4.0",
     "@types/jsmediatags": "^3.9.6",
     "concurrently": "^8.2.2",
     "cors": "^2.8.5",

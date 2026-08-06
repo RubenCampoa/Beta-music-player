@@ -1,12 +1,17 @@
 import React, { useEffect, useRef } from 'react';
 import { usePlayerStore } from '../../store/playerStore';
 import { shallow } from 'zustand/shallow';
+import { musicApiAdapter } from '../../services/musicApiAdapter';
 
 export const AudioController: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fadeAnimRef = useRef<number | null>(null);
   const currentSongIdRef = useRef<string | number | null>(null);
   const currentAudioUrlRef = useRef<string | null>(null);
+  // Tracks how many times the source of the current song was re-resolved
+  // after a media error, so a permanently broken track fails fast instead
+  // of retrying forever.
+  const sourceRetryRef = useRef(0);
 
   const {
     currentSong,
@@ -35,6 +40,19 @@ export const AudioController: React.FC = () => {
 
   const safeVolume = typeof volume === 'number' && !isNaN(volume) ? volume : 0.8;
   const targetVolume = isMuted ? 0 : Math.max(0, Math.min(1, safeVolume));
+
+  // play() rejections come in two flavors:
+  //  - NotAllowedError: real autoplay-policy block -> surface a paused state.
+  //  - NotSupportedError/AbortError etc.: media load/decode failure, already
+  //    handled by the onError retry path. Flipping isPlaying to false here
+  //    would prevent the freshly re-resolved URL from autoplaying (the user
+  //    would have to press play manually), so keep the playing state intact.
+  const onPlayRejected = (err: unknown) => {
+    const name = (err as { name?: string })?.name;
+    if (name === 'NotAllowedError') {
+      setIsPlaying(false);
+    }
+  };
 
   const stopFade = () => {
     if (fadeAnimRef.current !== null) {
@@ -97,8 +115,31 @@ export const AudioController: React.FC = () => {
     const isSongChanged = currentSongIdRef.current !== currentSong.id;
     const isUrlUpdated = currentAudioUrlRef.current !== currentSong.audioUrl;
 
+    if (isSongChanged) {
+      sourceRetryRef.current = 0;
+    }
+
+    if (!currentSong.audioUrl) {
+      // Audio source is still resolving (or unavailable). Never load an empty
+      // src: play() on it rejects and flips isPlaying back to false, which
+      // kills autoplay once the real URL arrives. Fade out any previous song
+      // so the transition still feels intentional while we wait.
+      if (isSongChanged) {
+        currentSongIdRef.current = currentSong.id;
+        currentAudioUrlRef.current = currentSong.audioUrl;
+        if (!audio.paused) {
+          fadeTo(0, 180, () => {
+            if (audioRef.current) audioRef.current.pause();
+          });
+        }
+      }
+      return;
+    }
+
     if (isSongChanged || isUrlUpdated) {
-      const prevTime = isUrlUpdated && !isSongChanged ? audio.currentTime : 0;
+      // Only preserve position for mid-song URL refreshes; when the URL just
+      // arrived for a freshly selected song (previous ref was empty), start at 0.
+      const prevTime = isUrlUpdated && !isSongChanged && currentAudioUrlRef.current ? audio.currentTime : 0;
       currentSongIdRef.current = currentSong.id;
       currentAudioUrlRef.current = currentSong.audioUrl;
 
@@ -112,7 +153,8 @@ export const AudioController: React.FC = () => {
             audioRef.current.volume = 0;
             audioRef.current.play().then(() => {
               fadeTo(targetVolume, 260);
-            }).catch(() => setIsPlaying(false));
+              usePlayerStore.getState().setToastMessage(null);
+            }).catch(onPlayRejected);
           }
         });
       } else {
@@ -120,7 +162,9 @@ export const AudioController: React.FC = () => {
         if (prevTime > 0) audio.currentTime = prevTime;
         if (isPlaying) {
           audio.volume = targetVolume;
-          audio.play().catch(() => setIsPlaying(false));
+          audio.play().then(() => {
+            usePlayerStore.getState().setToastMessage(null);
+          }).catch(onPlayRejected);
         }
       }
     } else {
@@ -130,7 +174,8 @@ export const AudioController: React.FC = () => {
           audio.volume = 0;
           audio.play().then(() => {
             fadeTo(targetVolume, 220);
-          }).catch(() => setIsPlaying(false));
+            usePlayerStore.getState().setToastMessage(null);
+          }).catch(onPlayRejected);
         } else {
           fadeTo(targetVolume, 220);
         }
@@ -181,6 +226,10 @@ export const AudioController: React.FC = () => {
           setDuration(audioRef.current.duration || currentSong?.duration || 0);
         }
       }}
+      onPlay={() => {
+        // Clear any transient error toast messages when playback starts
+        usePlayerStore.getState().setToastMessage(null);
+      }}
       onEnded={() => {
         if (repeatMode === 'one' && audioRef.current) {
           audioRef.current.currentTime = 0;
@@ -189,10 +238,62 @@ export const AudioController: React.FC = () => {
           nextSong();
         }
       }}
+      onWaiting={() => {
+        if (isPlaying && audioRef.current && audioRef.current.paused) {
+          audioRef.current.play().catch(() => {});
+        }
+      }}
+      onStalled={() => {
+        if (isPlaying && audioRef.current && audioRef.current.currentTime < 1.0) {
+          setTimeout(() => {
+            if (audioRef.current && isPlaying && audioRef.current.paused) {
+              audioRef.current.play().catch(() => {});
+            }
+          }, 200);
+        }
+      }}
       onError={() => {
+        const currentSrc = audioRef.current?.src || '';
+        // Suppress false alarm error events during initial URL resolution or empty src
+        if (!currentSong?.audioUrl || !currentSrc || currentSrc === window.location.href) {
+          return;
+        }
+        const failedSong = currentSong;
+        const failedUrl = currentSong.audioUrl;
+
+        // Signed CDN URLs expire and network hiccups happen: re-resolve the
+        // source once (bypassing the URL cache) before surfacing an error.
+        if (sourceRetryRef.current < 1) {
+          sourceRetryRef.current += 1;
+          musicApiAdapter
+            .getSongAudioUrl(failedSong, true)
+            .then((freshUrl) => {
+              const state = usePlayerStore.getState();
+              if (state.currentSong?.id !== failedSong.id) return;
+              if (freshUrl && freshUrl !== failedUrl) {
+                state.updateCurrentSongAudioUrl(freshUrl);
+              } else {
+                state.setIsPlaying(false);
+                const platformName = failedSong.source === 'qq' ? 'QQ 音乐' : '网易云音乐';
+                state.setToastMessage(`音源播放失败，请检查网络连接或重新登录 ${platformName} 账号后重试`);
+              }
+            })
+            .catch(() => {
+              const state = usePlayerStore.getState();
+              if (state.currentSong?.id !== failedSong.id) return;
+              state.setIsPlaying(false);
+              const platformName = failedSong.source === 'qq' ? 'QQ 音乐' : '网易云音乐';
+              state.setToastMessage(`音源播放失败，请检查网络连接或重新登录 ${platformName} 账号后重试`);
+            });
+          return;
+        }
+
         if (currentSong && isPlaying) {
           setIsPlaying(false);
-          usePlayerStore.getState().setToastMessage('VIP 音源解析失败，请重新登录网易云账号后重试');
+          const platformName = currentSong.source === 'qq' ? 'QQ 音乐' : '网易云音乐';
+          usePlayerStore
+            .getState()
+            .setToastMessage(`音源播放失败，请检查网络连接或重新登录 ${platformName} 账号后重试`);
         }
       }}
     />

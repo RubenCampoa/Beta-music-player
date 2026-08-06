@@ -1,4 +1,6 @@
-export type SongSource = 'netease' | 'local';
+export type SongSource = 'netease' | 'qq' | 'local';
+
+export type Platform = 'netease' | 'qq';
 
 export interface LyricLine {
   time: number; // in seconds
@@ -18,17 +20,20 @@ export interface Song {
   lyric?: LyricLine[];
   filePath?: string; // For local files
   neteaseId?: number;
+  songmid?: string;
+  mediaMid?: string;
   isVip?: boolean;
   fee?: number;
 }
 
 export interface UserProfile {
-  userId: number;
+  userId: number | string;
   nickname: string;
   avatarUrl: string;
   signature?: string;
   vipType?: number;
   isLoggedIn: boolean;
+  platform?: Platform;
 }
 
 export interface Playlist {
@@ -39,4 +44,5 @@ export interface Playlist {
   creatorName?: string;
   description?: string;
   isUserPlaylist?: boolean;
+  platform?: Platform;
 }

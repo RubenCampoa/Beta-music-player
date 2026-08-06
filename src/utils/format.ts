@@ -1,3 +1,7 @@
+import { LyricLine } from '../types/music';
+
+export const DEFAULT_COVER_PLACEHOLDER = 'https://y.gtimg.cn/mediaplayer/player/img/cover_default.png';
+
 /**
  * Common Formatting Utilities for Music Player
  * Single source of truth for Title Sanitization, Time Formatting, and Image CDN scaling.
@@ -39,14 +43,39 @@ export function formatRemainingTime(secs: number, total: number): string {
 }
 
 /**
- * Optimizes NetEase Image CDN URLs by adding dynamic width/height thumbnail parameters.
- * E.g. param=100y100 for small list thumbnails, param=300y300 for cards, param=600y600 for full artwork.
+ * Optimizes NetEase & QQ Music Image CDN URLs by adding dynamic width/height thumbnail parameters.
+ * Filters out broken 00000000000000 albummid URLs gracefully.
  */
 export function getOptimizedCoverUrl(url?: string, size: number = 200): string {
-  if (!url) return '';
-  if (url.includes('music.126.net') || url.includes('p1.music.126.net') || url.includes('p2.music.126.net')) {
-    const cleanUrl = url.split('?')[0];
+  if (!url || url.includes('00000000000000') || /M0000+\.jpg/i.test(url)) {
+    return DEFAULT_COVER_PLACEHOLDER;
+  }
+
+  let processed = url
+    .replace(/^http:/, 'https:')
+    .replace('y.qq.com/music/photo_new/', 'y.gtimg.cn/music/photo_new/');
+
+  if (processed.includes('music.126.net') || processed.includes('p1.music.126.net') || processed.includes('p2.music.126.net')) {
+    const cleanUrl = processed.split('?')[0];
     return `${cleanUrl}?param=${size}y${size}`;
   }
-  return url;
+
+  if (processed.includes('y.gtimg.cn/music/photo_new/')) {
+    if (/M0000+[\._]/i.test(processed) || /M0000+\.jpg/i.test(processed)) {
+      return DEFAULT_COVER_PLACEHOLDER;
+    }
+    const sizeStr = size >= 300 ? '300x300' : '150x150';
+    return processed.replace(/R\d+x\d+M/, `R${sizeStr}M`);
+  }
+
+  return processed;
+}
+
+/**
+ * Image onError event handler fallback to prevent broken UI icons.
+ */
+export function handleImageError(e: React.SyntheticEvent<HTMLImageElement, Event>) {
+  if (e.currentTarget.src !== DEFAULT_COVER_PLACEHOLDER) {
+    e.currentTarget.src = DEFAULT_COVER_PLACEHOLDER;
+  }
 }

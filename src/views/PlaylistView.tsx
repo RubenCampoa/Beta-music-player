@@ -3,15 +3,17 @@ import { Play, Music, ListMusic } from 'lucide-react';
 import { Song } from '../types/music';
 import { usePlayerStore } from '../store/playerStore';
 import { shallow } from 'zustand/shallow';
-import { neteaseApi, getOptimizedCoverUrl } from '../services/neteaseApi';
+import { getOptimizedCoverUrl, cleanTitle } from '../services/neteaseApi';
+import { musicApiAdapter } from '../services/musicApiAdapter';
 
 export const PlaylistView: React.FC = () => {
-  const { selectedPlaylist, playSong, currentSong, isPlaying } = usePlayerStore(
+  const { selectedPlaylist, playSong, currentSong, isPlaying, activePlatform } = usePlayerStore(
     (state) => ({
       selectedPlaylist: state.selectedPlaylist,
       playSong: state.playSong,
       currentSong: state.currentSong,
       isPlaying: state.isPlaying,
+      activePlatform: state.activePlatform,
     }),
     shallow,
   );
@@ -24,8 +26,33 @@ export const PlaylistView: React.FC = () => {
     const fetchSongs = async () => {
       setIsLoading(true);
       try {
-        const trackList = await neteaseApi.getPlaylistSongs(selectedPlaylist.id, false);
+        // Always use the playlist's own platform, not activePlatform.
+        // A playlist created on QQ Music must be fetched from QQ Music even
+        // if the user has since switched the active platform to NetEase.
+        const platform = selectedPlaylist.platform || activePlatform;
+        const trackList = await musicApiAdapter.getPlaylistSongs(
+          platform,
+          selectedPlaylist.id
+        );
         setSongs(trackList);
+
+        // If this is a user favorite playlist or user playlist on QQ Music,
+        // sync song mids to store so heart icons light up in red instantly
+        if (platform === 'qq' || String(selectedPlaylist.id).startsWith('qq_')) {
+          const isFav =
+            selectedPlaylist.isUserPlaylist ||
+            selectedPlaylist.name.includes('我喜欢') ||
+            selectedPlaylist.name.includes('喜欢');
+          if (isFav && trackList.length > 0) {
+            const mids: string[] = [];
+            trackList.forEach((s) => {
+              if (s.songmid) mids.push(s.songmid);
+              const clean = String(s.id).replace(/^qq_/, '');
+              if (clean) mids.push(clean);
+            });
+            usePlayerStore.getState().setQqLikeMids(mids);
+          }
+        }
       } catch (error) {
         console.warn('Failed to load playlist songs:', error);
         setSongs([]);
@@ -35,9 +62,11 @@ export const PlaylistView: React.FC = () => {
     };
 
     fetchSongs();
-  }, [selectedPlaylist?.id]);
+  }, [selectedPlaylist]);
 
   if (!selectedPlaylist) return null;
+
+  const isQqPlaylist = selectedPlaylist.platform === 'qq' || String(selectedPlaylist.id).startsWith('qq_');
 
   const formatDuration = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -58,25 +87,30 @@ export const PlaylistView: React.FC = () => {
         </div>
 
         <div className="flex flex-col space-y-3">
-          <div className="flex items-center space-x-2 text-apple-red text-xs font-bold uppercase tracking-wider">
+          <div
+            className={`flex items-center space-x-2 text-xs font-bold uppercase tracking-wider ${
+              isQqPlaylist ? 'text-emerald-400' : 'text-apple-red'
+            }`}
+          >
             <ListMusic className="w-4 h-4" />
-            <span>网易云歌单</span>
+            <span>{isQqPlaylist ? 'QQ 音乐歌单' : '网易云歌单'}</span>
           </div>
 
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">
-            {selectedPlaylist.name}
-          </h1>
+          <h1 className="text-3xl font-extrabold text-white tracking-tight">{selectedPlaylist.name}</h1>
 
           {selectedPlaylist.description && (
-            <p className="text-xs text-white/60 line-clamp-2 max-w-xl">
-              {selectedPlaylist.description}
-            </p>
+            <p className="text-xs text-white/60 line-clamp-2 max-w-xl">{selectedPlaylist.description}</p>
           )}
 
           <div className="pt-1 flex items-center space-x-4">
             <button
               onClick={() => songs[0] && playSong(songs[0], songs)}
-              className="flex items-center space-x-2 bg-apple-red hover:bg-apple-red/90 text-white font-semibold text-xs px-5 py-2.5 rounded-full transition-all shadow-lg shadow-apple-red/30"
+              disabled={isLoading || songs.length === 0}
+              className={`flex items-center space-x-2 text-white font-semibold text-xs px-5 py-2.5 rounded-full transition-all shadow-lg cursor-pointer ${
+                isQqPlaylist
+                  ? 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/30'
+                  : 'bg-apple-red hover:bg-apple-red/90 shadow-apple-red/30'
+              }`}
             >
               <Play className="w-4 h-4 fill-current ml-0.5" />
               <span>播放全部 ({songs.length})</span>
@@ -89,8 +123,10 @@ export const PlaylistView: React.FC = () => {
       <div className="glass-panel rounded-2xl overflow-hidden border border-white/10">
         {isLoading ? (
           <div className="py-16 text-center text-white/40 space-y-2">
-            <Music className="w-8 h-8 mx-auto animate-spin text-apple-red" />
-            <p className="text-sm">获取歌曲列表中...</p>
+            <Music
+              className={`w-8 h-8 mx-auto animate-spin ${isQqPlaylist ? 'text-emerald-400' : 'text-apple-red'}`}
+            />
+            <p className="text-sm">获取 {isQqPlaylist ? 'QQ 音乐' : '网易云'} 歌曲列表中...</p>
           </div>
         ) : songs.length === 0 ? (
           <div className="py-16 text-center text-white/40 space-y-2">
@@ -135,7 +171,7 @@ export const PlaylistView: React.FC = () => {
                         className="w-9 h-9 rounded-md object-cover border border-white/10"
                       />
                       <span className="truncate max-w-[220px] text-white font-medium flex items-center space-x-1.5">
-                        <span className="truncate">{neteaseApi.cleanTitle(song.name)}</span>
+                        <span className="truncate">{cleanTitle(song.name)}</span>
                         {Boolean(song.isVip) && (
                           <span className="px-1.5 py-0.5 rounded text-[9px] bg-gradient-to-r from-amber-500 to-red-500 text-white font-black shrink-0 shadow-sm uppercase tracking-wider">
                             VIP
@@ -143,12 +179,8 @@ export const PlaylistView: React.FC = () => {
                         )}
                       </span>
                     </td>
-                    <td className="py-3 px-4 text-white/70 truncate max-w-[150px]">
-                      {neteaseApi.cleanTitle(song.artist)}
-                    </td>
-                    <td className="py-3 px-4 text-white/50 truncate max-w-[150px]">
-                      {neteaseApi.cleanTitle(song.album)}
-                    </td>
+                    <td className="py-3 px-4 text-white/70 truncate max-w-[150px]">{cleanTitle(song.artist)}</td>
+                    <td className="py-3 px-4 text-white/50 truncate max-w-[150px]">{cleanTitle(song.album)}</td>
                     <td className="py-3 px-4 text-right text-white/50 font-mono">
                       {formatDuration(song.duration)}
                     </td>

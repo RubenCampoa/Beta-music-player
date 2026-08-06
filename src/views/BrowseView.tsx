@@ -1,22 +1,24 @@
 import React, { useEffect, useState } from 'react';
-import { Compass, Flame, Radio, Award, Disc, Play, Sparkles, Music2 } from 'lucide-react';
+import { Compass, Flame, Award, Disc, Play } from 'lucide-react';
 import { Song, Playlist } from '../types/music';
 import { usePlayerStore } from '../store/playerStore';
 import { shallow } from 'zustand/shallow';
-import { neteaseApi, getOptimizedCoverUrl } from '../services/neteaseApi';
+import { getOptimizedCoverUrl, neteaseApi } from '../services/neteaseApi';
+import { musicApiAdapter } from '../services/musicApiAdapter';
 
 export const BrowseView: React.FC = () => {
-  const { playSong, setSelectedPlaylist, performSearch } = usePlayerStore(
+  const { playSong, setSelectedPlaylist, activePlatform } = usePlayerStore(
     (state) => ({
       playSong: state.playSong,
       setSelectedPlaylist: state.setSelectedPlaylist,
-      performSearch: state.performSearch,
+      activePlatform: state.activePlatform,
     }),
     shallow,
   );
   const [chartPlaylists, setChartPlaylists] = useState<Playlist[]>([]);
   const [hotSongs, setHotSongs] = useState<Song[]>([]);
   const [activeCategory, setActiveCategory] = useState<string>('all');
+  const [isCategoryLoading, setIsCategoryLoading] = useState<boolean>(false);
 
   const categories = [
     { id: 'all', name: '全部探索' },
@@ -29,118 +31,96 @@ export const BrowseView: React.FC = () => {
   ];
 
   useEffect(() => {
-    // Official NetEase Top Charts
-    const charts: Playlist[] = [
-      {
-        id: 3778678,
-        name: '网易云热歌榜',
-        coverImgUrl: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&h=500&fit=crop',
-        trackCount: 100,
-        description: '全网播放量最高热门单曲集合',
-      },
-      {
-        id: 3779629,
-        name: '云音乐新歌榜',
-        coverImgUrl: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=500&h=500&fit=crop',
-        trackCount: 100,
-        description: '最新发行高赞潮流流行歌曲',
-      },
-      {
-        id: 19723756,
-        name: '云音乐飙升榜',
-        coverImgUrl: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&h=500&fit=crop',
-        trackCount: 100,
-        description: '近期热度飙升最快优质单曲',
-      },
-      {
-        id: 2884035,
-        name: '网易原创歌曲榜',
-        coverImgUrl: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=500&h=500&fit=crop',
-        trackCount: 100,
-        description: '独立音乐人原创金曲排行榜',
-      },
-      {
-        id: 71385702,
-        name: 'ACG 音乐榜',
-        coverImgUrl: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=500&h=500&fit=crop',
-        trackCount: 100,
-        description: '热门动漫、游戏原声与二次元名曲',
-      },
-      {
-        id: 71384707,
-        name: '欧美金曲榜',
-        coverImgUrl: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=500&h=500&fit=crop',
-        trackCount: 100,
-        description: 'Billboard & 欧美流行排行榜',
-      },
-    ];
-
-    setChartPlaylists(charts);
-
-    // Fetch top songs for browse preview
-    const loadHotSongs = async () => {
-      const songs = await neteaseApi.getPlaylistSongs(3778678);
-      if (songs && songs.length > 0) {
-        setHotSongs(songs.slice(0, 10));
-      } else {
-        setHotSongs(neteaseApi.getFallbackSongs());
+    let isMounted = true;
+    const loadBrowseData = async () => {
+      try {
+        const playlists = await musicApiAdapter.getRecommendPlaylists(activePlatform);
+        if (isMounted) {
+          setChartPlaylists(playlists);
+        }
+        const songs = await musicApiAdapter.getRecommendSongs(activePlatform);
+        if (isMounted) {
+          setHotSongs(songs);
+        }
+      } catch {
+        // Fallback
       }
     };
 
-    loadHotSongs();
-  }, []);
+    loadBrowseData();
+    return () => {
+      isMounted = false;
+    };
+  }, [activePlatform]);
 
-  const handleCategoryClick = (catName: string) => {
-    if (catName === '全部探索') return;
-    performSearch(catName);
+  const handleCategoryClick = async (catId: string, catName: string) => {
+    setActiveCategory(catId);
+    if (catId === 'all') {
+      const songs = await musicApiAdapter.getRecommendSongs(activePlatform);
+      setHotSongs(songs);
+      return;
+    }
+
+    setIsCategoryLoading(true);
+    try {
+      const categorySongs = await musicApiAdapter.search(activePlatform, catName);
+      if (categorySongs.length > 0) {
+        setHotSongs(categorySongs.slice(0, 10));
+      }
+    } catch {
+      // Keep current
+    } finally {
+      setIsCategoryLoading(false);
+    }
   };
 
   return (
     <div className="space-y-8 pb-16 select-none animate-fadeIn">
-      {/* Header Explore Banner */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#eef2f8] via-[#fdfdfd] to-[#f5edf2] p-8 border border-black/5 shadow-xl">
+      {/* Header Explore Banner (High Contrast Liquid Glass Design) */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-rose-950/70 via-purple-950/50 to-slate-900/80 p-8 border border-white/15 shadow-2xl backdrop-blur-xl">
         <div className="relative z-10 max-w-xl space-y-3">
-          <div className="flex items-center space-x-2 text-[#5e78a8] text-xs font-bold uppercase tracking-wider">
+          <div className="flex items-center space-x-2 text-rose-400 text-xs font-extrabold uppercase tracking-wider">
             <Compass className="w-4 h-4 animate-spin" style={{ animationDuration: '15s' }} />
-            <span>探索流行趋势与权威榜单</span>
+            <span>探索流行趋势与权威榜单 ({activePlatform === 'qq' ? 'QQ 音乐' : '网易云音乐'})</span>
           </div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight">
+          <h1 className="text-3xl font-black text-white tracking-tight drop-shadow-md">
             浏览 · 发现全新音乐风向
           </h1>
-          <p className="text-sm text-[#7f8999] font-medium leading-relaxed">
-            实时同步网易云热歌榜、飙升榜、新歌榜及多样化曲风分类，探索音乐无限可能。
+          <p className="text-sm text-white/80 font-medium leading-relaxed">
+            实时同步{activePlatform === 'qq' ? 'QQ 音乐巅峰榜、飙升榜' : '网易云热歌榜、新歌榜'}及多样化曲风分类，探索音乐无限可能。
           </p>
         </div>
-        <div className="absolute right-8 top-1/2 -translate-y-1/2 opacity-15 pointer-events-none">
-          <Disc className="w-64 h-64 text-[#8ba5cf] animate-spin" style={{ animationDuration: '25s' }} />
+        <div className="absolute right-8 top-1/2 -translate-y-1/2 opacity-20 pointer-events-none">
+          <Disc className="w-64 h-64 text-rose-300 animate-spin" style={{ animationDuration: '25s' }} />
         </div>
       </div>
 
-      {/* Category Filter Chips */}
-      <div className="flex items-center space-x-2 overflow-x-auto pb-1 no-scrollbar">
-        {categories.map((cat) => (
-          <button
-            key={cat.id}
-            onClick={() => {
-              setActiveCategory(cat.id);
-              handleCategoryClick(cat.name);
-            }}
-            className={`px-4 py-2 rounded-full text-xs font-semibold whitespace-nowrap transition-all border ${
-              activeCategory === cat.id
-                ? 'bg-apple-red text-white border-apple-red shadow-lg shadow-apple-red/30 scale-105'
-                : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white'
-            }`}
-          >
-            {cat.name}
-          </button>
-        ))}
+      {/* Category Filter Chips (Clean capsule style with no rectangular bleeding shadows) */}
+      <div className="flex items-center space-x-2.5 overflow-x-auto py-2 no-scrollbar">
+        {categories.map((cat) => {
+          const isActive = activeCategory === cat.id;
+          return (
+            <button
+              key={cat.id}
+              type="button"
+              onClick={() => handleCategoryClick(cat.id, cat.name)}
+              className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all cursor-pointer border ${
+                isActive
+                  ? 'bg-rose-500 text-white border-rose-500 shadow-md shadow-rose-500/20'
+                  : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white'
+              }`}
+            >
+              {cat.name}
+            </button>
+          );
+        })}
       </div>
 
       {/* Official Top Charts Section */}
       <div className="space-y-4">
         <h2 className="text-xl font-bold text-white tracking-tight flex items-center space-x-2">
           <Award className="w-5 h-5 text-amber-400" />
-          <span>权威音乐排行榜</span>
+          <span>{activePlatform === 'qq' ? 'QQ 音乐热门榜单' : '网易云权威榜单'}</span>
         </h2>
 
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -176,55 +156,63 @@ export const BrowseView: React.FC = () => {
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-bold text-white tracking-tight flex items-center space-x-2">
             <Flame className="w-5 h-5 text-apple-red" />
-            <span>全网热歌速递</span>
+            <span>
+              {activeCategory === 'all'
+                ? '全网热歌速递'
+                : `${categories.find((c) => c.id === activeCategory)?.name || ''} 精选曲目`}
+            </span>
           </h2>
           <span className="text-xs text-white/40">点击直接播放</span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {hotSongs.map((song, idx) => (
-            <div
-              key={`${song.id}-${idx}`}
-              onClick={() => playSong(song, hotSongs)}
-              className="apple-card glass-panel rounded-xl p-2.5 flex items-center justify-between cursor-pointer group border border-white/5 hover:border-white/20"
-            >
-              <div className="flex items-center space-x-3 truncate">
-                <span className="w-6 text-center text-xs font-bold font-mono text-white/40 group-hover:text-apple-red">
-                  {idx + 1}
-                </span>
+        {isCategoryLoading ? (
+          <div className="py-12 text-center text-xs text-white/40">正在分类获取音乐中...</div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {hotSongs.map((song, idx) => (
+              <div
+                key={`${song.id}-${idx}`}
+                onClick={() => playSong(song, hotSongs)}
+                className="apple-card glass-panel rounded-xl p-2.5 flex items-center justify-between cursor-pointer group border border-white/5 hover:border-white/20"
+              >
+                <div className="flex items-center space-x-3 truncate">
+                  <span className="w-6 text-center text-xs font-bold font-mono text-white/40 group-hover:text-apple-red">
+                    {idx + 1}
+                  </span>
 
-                <div className="relative w-11 h-11 rounded-lg overflow-hidden shrink-0 border border-white/10">
-                  <img
-                    src={getOptimizedCoverUrl(song.coverUrl, 120)}
-                    alt={song.name}
-                    loading="lazy"
-                    decoding="async"
-                    className="w-full h-full object-cover"
-                  />
-                  <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <Play className="w-4 h-4 text-white fill-current" />
+                  <div className="relative w-11 h-11 rounded-lg overflow-hidden shrink-0 border border-white/10">
+                    <img
+                      src={getOptimizedCoverUrl(song.coverUrl, 120)}
+                      alt={song.name}
+                      loading="lazy"
+                      decoding="async"
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <Play className="w-4 h-4 text-white fill-current" />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col truncate">
+                    <span className="text-xs font-bold text-white group-hover:text-apple-red transition-colors truncate">
+                      {neteaseApi.cleanTitle(song.name)}
+                    </span>
+                    <span className="text-[11px] text-white/60 truncate">{neteaseApi.cleanTitle(song.artist)}</span>
                   </div>
                 </div>
 
-                <div className="flex flex-col truncate">
-                  <span className="text-xs font-bold text-white group-hover:text-apple-red transition-colors truncate">
-                    {neteaseApi.cleanTitle(song.name)}
+                {Boolean(song.isVip) && (
+                  <span
+                    title="VIP 曲目"
+                    className="px-1.5 py-0.5 rounded text-[8px] bg-gradient-to-r from-amber-500 to-red-500 text-white font-black shrink-0 shadow-sm uppercase tracking-wider cursor-help"
+                  >
+                    VIP
                   </span>
-                  <span className="text-[11px] text-white/60 truncate">{neteaseApi.cleanTitle(song.artist)}</span>
-                </div>
+                )}
               </div>
-
-              {Boolean(song.isVip) && (
-                <span
-                  title="VIP 曲目 (标准音质免费播放，极高/无损音质需会员)"
-                  className="px-1.5 py-0.5 rounded text-[8px] bg-gradient-to-r from-amber-500 to-red-500 text-white font-black shrink-0 shadow-sm uppercase tracking-wider cursor-help"
-                >
-                  VIP
-                </span>
-              )}
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -20,6 +20,7 @@ import { NoticeView } from './views/NoticeView';
 
 import { usePlayerStore } from './store/playerStore';
 import { neteaseApi } from './services/neteaseApi';
+import { qqMusicApi } from './services/qqMusicApi';
 import { AlertCircle, Crown, Heart, CheckCircle2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -68,6 +69,8 @@ export const App: React.FC = () => {
   const activeTab = usePlayerStore((state) => state.activeTab);
   const setUser = usePlayerStore((state) => state.setUser);
   const setPlaylists = usePlayerStore((state) => state.setPlaylists);
+  const setAccount = usePlayerStore((state) => state.setAccount);
+  const refreshPlaylistsForPlatform = usePlayerStore((state) => state.refreshPlaylistsForPlatform);
   const setNeteaseLikeIds = usePlayerStore((state) => state.setNeteaseLikeIds);
   const toastMessage = usePlayerStore((state) => state.toastMessage);
   const setToastMessage = usePlayerStore((state) => state.setToastMessage);
@@ -171,22 +174,32 @@ export const App: React.FC = () => {
     }
   };
 
-  if (isDesktopLyricWindow) {
-    return <DesktopLyricView />;
-  }
-
-  // Restore NetEase user session on startup if cookie exists
+  // Restore user sessions on startup for both platforms (NetEase & QQ Music)
   useEffect(() => {
     const initSession = async () => {
-      const account = await neteaseApi.getUserAccount();
-      if (account) {
-        setUser(account);
-        const userPlaylists = await neteaseApi.getUserPlaylists(account.userId);
-        setPlaylists(userPlaylists);
-
-        const likeIds = await neteaseApi.getLikelist(account.userId);
+      // NetEase account, playlists & likelist
+      const neteaseAccount = await neteaseApi.getUserAccount();
+      if (neteaseAccount) {
+        setAccount('netease', neteaseAccount);
+        const numericUserId = Number(neteaseAccount.userId) || 0;
+        const likeIds = await neteaseApi.getLikelist(numericUserId);
         setNeteaseLikeIds(likeIds);
       }
+
+      // QQ Music account (real nickname / avatar / VIP via profile CGI)
+      const qqAccount = await qqMusicApi.getUserAccount();
+      if (qqAccount) {
+        setAccount('qq', qqAccount);
+      }
+
+      // Load user playlists for whichever platform is currently active
+      const platform = usePlayerStore.getState().activePlatform;
+      if (!neteaseAccount && !qqAccount) {
+        setUser(null);
+        setPlaylists([]);
+        return;
+      }
+      await refreshPlaylistsForPlatform(platform);
     };
     initSession();
   }, []);
@@ -205,7 +218,7 @@ export const App: React.FC = () => {
         if (res.ok) {
           const data = await res.json();
           const latestTag = (data.tag_name || '').trim();
-          const currentVersion = 'v1.0.6';
+          const currentVersion = 'v1.0.7';
           const normalize = (v: string) => v.replace(/^v/i, '').trim();
           if (latestTag && normalize(latestTag) !== normalize(currentVersion)) {
             setToastMessage(`发现新版本 ${latestTag}！可在设置中点击检查更新进行查看与升级`);
@@ -235,7 +248,6 @@ export const App: React.FC = () => {
   // Global Keyboard Shortcut: Spacebar for Play / Pause Toggle
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Do not trigger play/pause if user is typing in a search bar or text input
       const target = e.target as HTMLElement;
       if (
         target &&
@@ -255,6 +267,10 @@ export const App: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [togglePlayPause]);
+
+  if (isDesktopLyricWindow) {
+    return <DesktopLyricView />;
+  }
 
   return (
     <motion.div
@@ -289,10 +305,10 @@ export const App: React.FC = () => {
       <motion.div
         animate={
           isLyricsSurfaceVisible
-            ? { opacity: 0, y: 10, scale: 0.985 }
-            : { opacity: 1, y: 0, scale: 1 }
+            ? { opacity: 0, scale: 0.985 }
+            : { opacity: 1, scale: 1 }
         }
-        transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: 0.48, ease: [0.22, 1, 0.36, 1] }}
         style={{
           // Do not leave one composited frame of the paper UI visible while
           // the fullscreen lyric surface is mounting. The opacity animation

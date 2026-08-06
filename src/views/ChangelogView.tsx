@@ -17,17 +17,38 @@ export const ChangelogView: React.FC = () => {
         </div>
         <div className="px-3 py-1 bg-apple-red/20 rounded-full border border-apple-red/30 text-xs text-apple-red font-semibold flex items-center space-x-1.5">
           <Disc className="w-3.5 h-3.5 animate-spin" />
-          <span>当前版本 v1.0.6</span>
+          <span>当前版本 v1.0.7</span>
         </div>
       </div>
 
+      {/* Release v1.0.7 */}
+      <section className="glass-panel p-6 rounded-2xl space-y-5 border border-apple-red/40 shadow-2xl relative overflow-hidden">
+        <div className="flex items-center justify-between border-b border-white/10 pb-4">
+          <div className="flex items-center space-x-3">
+            <span className="text-2xl font-extrabold text-white tracking-tight">v1.0.7</span>
+            <span className="px-2.5 py-0.5 rounded-full bg-apple-red text-white text-[10px] font-bold uppercase tracking-wider shadow-sm">
+              最新版本
+            </span>
+          </div>
+          <span className="text-xs font-mono text-white/40">2026-08-06</span>
+        </div>
+        <div className="space-y-2 text-xs text-white/70 leading-relaxed">
+          <p>• 【QQ音乐深度集成】彻底修复 QQ 音乐模式下登录界面与提示错乱，支持双平台独立 Web 窗口登录与凭证绑定。</p>
+          <p>• 【QQ音乐封面修复】修复 QQ 音乐 API 封面错乱与加载破损问题，支持全零 albummid 自动降级与全局图片加载容错。</p>
+          <p>• 【榜单与歌单优化】修复 QQ 音乐推荐歌单曲目重复缺陷，实现巅峰热歌榜、飙升榜、新歌榜权威榜单独立映射。</p>
+          <p>• 【播放性能重构】重构切歌与音源派发机制，取消空音源打断，实现单次原子化状态更新，彻底解决需手动暂停再播放问题。</p>
+          <p>• 【音源歌词解耦】歌词拉取改为后台静默非阻塞加载，加入 &lt;audio&gt; 播放器 onStalled / onWaiting 智能恢复机制。</p>
+          <p>• 【底栏收藏实时同步】修复底栏爱心收藏状态延迟缺陷，补充状态监听与多平台曲目 ID 规范匹配，实现秒级红心切换。</p>
+        </div>
+      </section>
+
       {/* Release v1.0.6 */}
-      <section className="glass-panel p-6 rounded-2xl space-y-5 border border-apple-red/30 shadow-2xl relative overflow-hidden">
+      <section className="glass-panel p-6 rounded-2xl space-y-5 border border-white/15 relative overflow-hidden shadow-xl">
         <div className="flex items-center justify-between border-b border-white/10 pb-4">
           <div className="flex items-center space-x-3">
             <span className="text-2xl font-extrabold text-white tracking-tight">v1.0.6</span>
-            <span className="px-2.5 py-0.5 rounded-full bg-apple-red text-white text-[10px] font-bold uppercase tracking-wider shadow-sm">
-              最新版本
+            <span className="px-2.5 py-0.5 rounded-full bg-apple-red/20 text-apple-red border border-apple-red/30 text-[10px] font-bold uppercase tracking-wider shadow-sm">
+              正式版本
             </span>
           </div>
           <span className="text-xs font-mono text-white/40">2026-08-06</span>
@@ -46,11 +67,11 @@ export const ChangelogView: React.FC = () => {
       </section>
 
       {/* Release v1.0.5 */}
-      <section className="glass-panel p-6 rounded-2xl space-y-5 border border-apple-red/30 shadow-2xl relative overflow-hidden">
+      <section className="glass-panel p-6 rounded-2xl space-y-5 border border-white/15 relative overflow-hidden shadow-xl">
         <div className="flex items-center justify-between border-b border-white/10 pb-4">
           <div className="flex items-center space-x-3">
             <span className="text-2xl font-extrabold text-white tracking-tight">v1.0.5</span>
-            <span className="px-2.5 py-0.5 rounded-full bg-apple-red text-white text-[10px] font-bold uppercase tracking-wider shadow-sm">
+            <span className="px-2.5 py-0.5 rounded-full bg-apple-red/20 text-apple-red border border-apple-red/30 text-[10px] font-bold uppercase tracking-wider shadow-sm">
               正式版本
             </span>
           </div>
@@ -65,11 +86,11 @@ export const ChangelogView: React.FC = () => {
       </section>
 
       {/* Release v1.0.4 */}
-      <section className="glass-panel p-6 rounded-2xl space-y-5 border border-white/15 shadow-2xl relative overflow-hidden">
+      <section className="glass-panel p-6 rounded-2xl space-y-5 border border-white/15 relative overflow-hidden shadow-xl">
         <div className="flex items-center justify-between border-b border-white/10 pb-4">
           <div className="flex items-center space-x-3">
             <span className="text-2xl font-extrabold text-white tracking-tight">v1.0.4</span>
-            <span className="px-2.5 py-0.5 rounded-full bg-apple-red text-white text-[10px] font-bold uppercase tracking-wider shadow-sm">
+            <span className="px-2.5 py-0.5 rounded-full bg-apple-red/20 text-apple-red border border-apple-red/30 text-[10px] font-bold uppercase tracking-wider shadow-sm">
               正式版本
             </span>
           </div>
@@ -82,7 +103,7 @@ export const ChangelogView: React.FC = () => {
             <div className="space-y-1">
               <h4 className="text-sm font-bold text-white">网易云同款独立桌面歌词 (Desktop Lyrics)</h4>
               <p className="text-xs text-white/60 leading-relaxed">
-                新增独立透明置顶桌面歌词窗口，支持随屏幕自由拖拽移动、快捷锁定 (鼠标穿透操作背景软件) 与一键解封播控。内置 6 组经典炫彩/霓虹渐变配色方案，支持通过调色板一键切换并自动持久化保存。采用纯正字体光晕与 SVG 投影渲染，彻底消除了文字描边与阴影暗块，支持由下至上连续平滑滚轴重绘与主次字号阶梯对比，最多展示两行歌词，零闪烁。
+                新增独立透明置顶桌面歌词窗口，支持随屏幕自由拖拽移动、快捷锁定 (鼠标穿透操作背景软件) 与一键解封播控。内置 6 组经典炫彩/霓虹渐变配色方案，支持通过调色板一键切换并自动持久化保存。
               </p>
             </div>
           </div>
@@ -92,7 +113,7 @@ export const ChangelogView: React.FC = () => {
             <div className="space-y-1">
               <h4 className="text-sm font-bold text-white">全屏歌词软件窗口全屏覆盖 (Fullscreen Coverage)</h4>
               <p className="text-xs text-white/60 leading-relaxed">
-                在全屏歌词模式顶部操控区新增【全屏覆盖 / 取消全屏覆盖】系统窗口掌控按钮，结合 Beta Music Player 桌面主进程的 enter/leave 原生事件监听，实现界面按钮与 OS 实际窗口状态的 100% 实时双向同步。
+                在全屏歌词模式顶部操控区新增【全屏覆盖 / 取消全屏覆盖】系统窗口掌控按钮，结合 Beta Music Player 桌面主进程事件监听，实现界面按钮与 OS 实际窗口状态的 100% 实时双向同步。
               </p>
             </div>
           </div>
@@ -102,27 +123,7 @@ export const ChangelogView: React.FC = () => {
             <div className="space-y-1">
               <h4 className="text-sm font-bold text-white">音频播控声音平滑淡入淡出 (Audio Fade In & Fade Out)</h4>
               <p className="text-xs text-white/60 leading-relaxed">
-                为播放、暂停及上下首切歌引入了发烧级余弦曲线音量平滑渐变算法（Ramp Volume Curve），切歌时旧歌声音柔和渐隐、新歌声音平滑渐现，播放/暂停开关无缝缓冲，彻底告别生硬爆音。
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-start space-x-3">
-            <CheckCircle2 className="w-5 h-5 text-apple-red shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <h4 className="text-sm font-bold text-white">VIP 歌曲检测逻辑与高清 CDN 图片缩放优化</h4>
-              <p className="text-xs text-white/60 leading-relaxed">
-                重构 VIP 判定算法，严格过滤 `fee === 8`（仅限 HQ 下载）的免费试听曲目，避免非 VIP 歌曲误标 VIP 标签；全面引入网易云图片 CDN 动态分辨率裁剪，图片传输体积骤降 90% 以上。
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-start space-x-3">
-            <CheckCircle2 className="w-5 h-5 text-apple-red shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <h4 className="text-sm font-bold text-white">启动自动更新检查与共享格式化模块重构</h4>
-              <p className="text-xs text-white/60 leading-relaxed">
-                新增启动自动检测新版本功能，引入 API 时间戳防浏览器 HTTP 缓存，解决重复检测误报；抽取 `src/utils/format.ts` 通用格式化工具模块，精简渲染闭包与冗余逻辑。
+                为播放、暂停及上下首切歌引入了发烧级余弦曲线音量平滑渐变算法（Ramp Volume Curve），旧歌声音柔和渐隐、新歌声音平滑渐现，彻底告别生硬爆音。
               </p>
             </div>
           </div>
@@ -130,12 +131,12 @@ export const ChangelogView: React.FC = () => {
       </section>
 
       {/* Release v1.0.3 */}
-      <section className="glass-panel p-6 rounded-2xl space-y-5 border border-white/10 opacity-80 hover:opacity-100 transition-opacity relative overflow-hidden">
+      <section className="glass-panel p-6 rounded-2xl space-y-5 border border-white/15 relative overflow-hidden shadow-xl">
         <div className="flex items-center justify-between border-b border-white/10 pb-4">
           <div className="flex items-center space-x-3">
             <span className="text-xl font-bold text-white tracking-tight">v1.0.3</span>
-            <span className="px-2.5 py-0.5 rounded-full bg-apple-red text-white text-[10px] font-bold uppercase tracking-wider shadow-sm">
-              正式版
+            <span className="px-2.5 py-0.5 rounded-full bg-apple-red/20 text-apple-red border border-apple-red/30 text-[10px] font-bold uppercase tracking-wider shadow-sm">
+              正式版本
             </span>
           </div>
           <span className="text-xs font-mono text-white/40">2026-07-24</span>
@@ -165,12 +166,12 @@ export const ChangelogView: React.FC = () => {
       </section>
 
       {/* Release v1.0.1 */}
-      <section className="glass-panel p-6 rounded-2xl space-y-5 border border-white/10 opacity-80 hover:opacity-100 transition-opacity relative overflow-hidden">
+      <section className="glass-panel p-6 rounded-2xl space-y-5 border border-white/15 relative overflow-hidden shadow-xl">
         <div className="flex items-center justify-between border-b border-white/10 pb-4">
           <div className="flex items-center space-x-3">
             <span className="text-xl font-bold text-white tracking-tight">v1.0.1</span>
-            <span className="px-2.5 py-0.5 rounded-full bg-apple-red text-white text-[10px] font-bold uppercase tracking-wider shadow-sm">
-              正式版
+            <span className="px-2.5 py-0.5 rounded-full bg-apple-red/20 text-apple-red border border-apple-red/30 text-[10px] font-bold uppercase tracking-wider shadow-sm">
+              正式版本
             </span>
           </div>
           <span className="text-xs font-mono text-white/40">2026-07-23</span>
@@ -200,89 +201,9 @@ export const ChangelogView: React.FC = () => {
           <div className="flex items-start space-x-3">
             <CheckCircle2 className="w-5 h-5 text-apple-red shrink-0 mt-0.5" />
             <div className="space-y-1">
-              <h4 className="text-sm font-bold text-white">全局键盘硬件媒体按键控制</h4>
-              <p className="text-xs text-white/60 leading-relaxed">
-                支持通过键盘物理媒体按键（播放/暂停、上一首、下一首）在应用工作于后台时进行全局播放控制。
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-start space-x-3">
-            <CheckCircle2 className="w-5 h-5 text-apple-red shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <h4 className="text-sm font-bold text-white">网易云在线音乐全局搜索</h4>
-              <p className="text-xs text-white/60 leading-relaxed">
-                顶部搜索框关联网易云音乐 Api，输入关键词并按回车即可全网搜索单曲，展示专属搜索视图与 VIP 标识，支持一键试听与全选播放。
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-start space-x-3">
-            <CheckCircle2 className="w-5 h-5 text-apple-red shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <h4 className="text-sm font-bold text-white">右侧播放队列抽屉</h4>
-              <p className="text-xs text-white/60 leading-relaxed">
-                底栏新增播放队列入口，支持右侧滑出抽屉实时查看待播放歌曲、移除特定曲目或一键清空队列。
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-start space-x-3">
-            <CheckCircle2 className="w-5 h-5 text-apple-red shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <h4 className="text-sm font-bold text-white">歌词动效平滑度优化</h4>
-              <p className="text-xs text-white/60 leading-relaxed">
-                优化全景歌词的渲染与行间平移动画算法，使歌词滚动与切换体验更为流畅自然。
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-start space-x-3">
-            <CheckCircle2 className="w-5 h-5 text-apple-red shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <h4 className="text-sm font-bold text-white">搜索栏历史搜索记录支持</h4>
-              <p className="text-xs text-white/60 leading-relaxed">
-                顶栏搜索框支持自动保存历史搜索记录，提供下拉历史快捷标签、单条删除与一键清空功能。
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-start space-x-3">
-            <CheckCircle2 className="w-5 h-5 text-apple-red shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <h4 className="text-sm font-bold text-white">网易云云端“我喜欢的音乐”双向红心同步</h4>
-              <p className="text-xs text-white/60 leading-relaxed">
-                登录网易云账号后，自动点亮在网易云官方已收藏歌曲的红心标识，在软件内点赞或取消收藏可实时双向同步至云端网易云账号。
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-start space-x-3">
-            <CheckCircle2 className="w-5 h-5 text-apple-red shrink-0 mt-0.5" />
-            <div className="space-y-1">
               <h4 className="text-sm font-bold text-white">Apple Music 风格“浏览”探索视图与权威榜单</h4>
               <p className="text-xs text-white/60 leading-relaxed">
                 解耦“现在就听”与“浏览”视图，全新打造包含网易云热歌榜、飙升榜、新歌榜、原创榜、ACG榜、欧美榜及热门曲风标签的探索专区。
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-start space-x-3">
-            <CheckCircle2 className="w-5 h-5 text-apple-red shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <h4 className="text-sm font-bold text-white">打包程序零配置内置 API 引擎</h4>
-              <p className="text-xs text-white/60 leading-relaxed">
-                打包可执行程序内置后台自动静默拉起 API 服务引擎，他人无需配置 Node.js 环境或环境依赖，双击 exe 即可开箱即用。
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-start space-x-3">
-            <CheckCircle2 className="w-5 h-5 text-apple-red shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <h4 className="text-sm font-bold text-white">背景流体动画性能智能调度</h4>
-              <p className="text-xs text-white/60 leading-relaxed">
-                智能优化 Canvas 渐变光斑渲染机制，窗口最小化或后台运行时自动挂起动画循环，大幅降低硬件开销与能耗。
               </p>
             </div>
           </div>
@@ -290,11 +211,11 @@ export const ChangelogView: React.FC = () => {
       </section>
 
       {/* Release v1.0.0 */}
-      <section className="glass-panel p-6 rounded-2xl space-y-4 border border-white/10 opacity-75 hover:opacity-100 transition-opacity">
+      <section className="glass-panel p-6 rounded-2xl space-y-4 border border-white/15 relative overflow-hidden shadow-xl">
         <div className="flex items-center justify-between border-b border-white/10 pb-4">
           <div className="flex items-center space-x-3">
             <span className="text-xl font-bold text-white tracking-tight">v1.0.0</span>
-            <span className="px-2.5 py-0.5 rounded-full bg-apple-red text-white text-[10px] font-bold uppercase tracking-wider shadow-sm">
+            <span className="px-2.5 py-0.5 rounded-full bg-apple-red/20 text-apple-red border border-apple-red/30 text-[10px] font-bold uppercase tracking-wider shadow-sm">
               初始正式版
             </span>
           </div>

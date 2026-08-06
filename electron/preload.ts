@@ -9,7 +9,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   isFullScreen: () => ipcRenderer.invoke('is-window-fullscreen'),
   selectAudioFiles: () => ipcRenderer.invoke('select-audio-files'),
   selectAudioFolder: () => ipcRenderer.invoke('select-audio-folder'),
-  loginViaWindow: () => ipcRenderer.invoke('login-via-window'),
+  loginViaWindow: (platform?: 'netease' | 'qq') => ipcRenderer.invoke('login-via-window', platform),
+  setQqCookie: (cookie: string) => ipcRenderer.send('set-qq-cookie', cookie),
   onMediaControl: (callback: (action: string) => void) => {
     const handler = (_event: any, action: string) => callback(action);
     ipcRenderer.on('media-control', handler);

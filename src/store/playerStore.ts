@@ -1,6 +1,8 @@
 import { create } from 'zustand';
-import { Song, LyricLine, UserProfile, Playlist } from '../types/music';
+import { Song, LyricLine, UserProfile, Playlist, Platform } from '../types/music';
 import { neteaseApi } from '../services/neteaseApi';
+import { musicApiAdapter } from '../services/musicApiAdapter';
+import { qqMusicApi } from '../services/qqMusicApi';
 
 interface PlayerState {
   // Audio & Playback state
@@ -18,9 +20,19 @@ interface PlayerState {
   // Queue Drawer State
   isQueueOpen: boolean;
 
+  // Multi-Platform & User Accounts
+  activePlatform: Platform;
+  searchPlatform: Platform;
+  accounts: { netease: UserProfile | null; qq: UserProfile | null };
+  user: UserProfile | null;
+  playlists: Playlist[];
+  isLoginModalOpen: boolean;
+  loginModalPlatform: Platform;
+
   // Search State
   searchQuery: string;
   searchResults: Song[];
+  searchPlatformResults: { netease: Song[]; qq: Song[] };
   searchHistory: string[];
   isSearching: boolean;
 
@@ -35,6 +47,8 @@ interface PlayerState {
   favoriteSongs: Song[];
   neteaseLikeIds: number[];
   setNeteaseLikeIds: (ids: number[]) => void;
+  qqLikeMids: string[];
+  setQqLikeMids: (mids: string[]) => void;
   toggleFavorite: (song: Song) => void;
   isFavorite: (songId: string | number) => boolean;
 
@@ -47,13 +61,9 @@ interface PlayerState {
   lyricFontSize: 'normal' | 'large';
   autoCheckUpdate: boolean;
 
-  // NetEase User & Playlists
-  user: UserProfile | null;
-  playlists: Playlist[];
-  isLoginModalOpen: boolean;
-
   // Actions
   setCurrentSong: (song: Song) => void;
+  updateCurrentSongAudioUrl: (audioUrl: string) => void;
   playSong: (song: Song, queue?: Song[]) => Promise<void>;
   togglePlayPause: () => void;
   setIsPlaying: (isPlaying: boolean) => void;
@@ -69,23 +79,31 @@ interface PlayerState {
   toggleQueueDrawer: () => void;
   setQueueOpen: (open: boolean) => void;
 
+  // Multi-Platform Actions
+  setActivePlatform: (platform: Platform) => void;
+  setSearchPlatform: (platform: Platform) => void;
+  setLoginModalPlatform: (platform: Platform) => void;
+  setAccount: (platform: Platform, user: UserProfile | null) => void;
+  switchAccountPlatform: (platform: Platform) => void;
+  refreshPlaylistsForPlatform: (platform: Platform) => Promise<void>;
+
   // Search Actions
   setSearchQuery: (query: string) => void;
-  performSearch: (query: string) => Promise<void>;
+  performSearch: (query: string, searchPlatformOverride?: Platform) => Promise<void>;
   removeSearchHistoryItem: (query: string) => void;
   clearSearchHistory: () => void;
 
   toggleRepeat: () => void;
   toggleShuffle: () => void;
   setFullLyricsMode: (open: boolean) => void;
-  setActiveTab: (tab: 'listen-now' | 'browse' | 'local' | 'playlist' | 'search' | 'changelog' | 'settings' | 'notice' | 'about') => void;
+  setActiveTab: (tab: PlayerState['activeTab']) => void;
   setSelectedPlaylist: (playlist: Playlist | null) => void;
+
   setUser: (user: UserProfile | null) => void;
   setPlaylists: (playlists: Playlist[]) => void;
   setIsLoginModalOpen: (open: boolean) => void;
   setToastMessage: (msg: string | null) => void;
 
-  // Settings Actions
   setIsFluidBgEnabled: (enabled: boolean) => void;
   setEnableLyricAnimation: (enabled: boolean) => void;
   setEnableLyricGlow: (enabled: boolean) => void;
@@ -95,7 +113,38 @@ interface PlayerState {
   setAutoCheckUpdate: (enabled: boolean) => void;
 }
 
+// Initial state helpers
+const initialHistory = (() => {
+  try {
+    const raw = localStorage.getItem('search_history');
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+})();
+
+const initialFavorites = (() => {
+  try {
+    const raw = localStorage.getItem('favorite_songs');
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+})();
+
+const initialAutoCheck = (() => {
+  try {
+    const raw = localStorage.getItem('auto_check_update');
+    return raw !== null ? JSON.parse(raw) : true;
+  } catch {
+    return true;
+  }
+})();
+
+const initialPlatform: Platform = (localStorage.getItem('active_platform') as Platform) || 'netease';
+
 export const usePlayerStore = create<PlayerState>((set, get) => ({
+  // Playback & Queue
   currentSong: null,
   isPlaying: false,
   currentTime: 0,
@@ -106,133 +155,106 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   queueIndex: 0,
   repeatMode: 'off',
   isShuffle: false,
-
   isQueueOpen: false,
 
+  // Multi-Platform & User Accounts
+  activePlatform: initialPlatform,
+  searchPlatform: initialPlatform,
+  accounts: {
+    netease: null,
+    qq: qqMusicApi.getCookie() ? { userId: 'qq_user', nickname: 'QQ 音乐用户', avatarUrl: '', isLoggedIn: true, platform: 'qq' } : null,
+  },
+  user: null,
+  playlists: [],
+  isLoginModalOpen: false,
+  loginModalPlatform: 'netease',
+
+  // Search State
   searchQuery: '',
   searchResults: [],
-  searchHistory: (() => {
-    try {
-      return JSON.parse(localStorage.getItem('search_history') || '[]');
-    } catch {
-      return [];
-    }
-  })(),
+  searchPlatformResults: { netease: [], qq: [] },
+  searchHistory: initialHistory,
   isSearching: false,
 
+  // Lyrics & UI State
   isFullLyricsMode: false,
   lyrics: [],
   activeTab: 'listen-now',
   selectedPlaylist: null,
-  favoriteSongs: (() => {
-    try {
-      return JSON.parse(localStorage.getItem('favorite_songs') || '[]');
-    } catch {
-      return [];
-    }
-  })(),
-  neteaseLikeIds: [],
-  setNeteaseLikeIds: (neteaseLikeIds) => set({ neteaseLikeIds }),
   toastMessage: null,
 
-  // Default motion & app settings
+  // Favorites
+  favoriteSongs: initialFavorites,
+  neteaseLikeIds: [],
+  setNeteaseLikeIds: (neteaseLikeIds) => set({ neteaseLikeIds }),
+  qqLikeMids: [],
+  setQqLikeMids: (mids) =>
+    set((state) => ({
+      qqLikeMids: Array.from(new Set([...state.qqLikeMids, ...mids])),
+    })),
+
+  // Motion Settings
   isFluidBgEnabled: true,
   enableLyricAnimation: true,
   enableLyricGlow: true,
   enableLyricBlur: true,
   enableArtworkAnimation: true,
-  lyricFontSize: 'large',
-  autoCheckUpdate: (() => {
-    try {
-      const saved = localStorage.getItem('auto_check_update');
-      return saved !== null ? JSON.parse(saved) : true;
-    } catch {
-      return true;
-    }
-  })(),
+  lyricFontSize: 'normal',
+  autoCheckUpdate: initialAutoCheck,
 
-  user: null,
-  playlists: [],
-  isLoginModalOpen: false,
+  // --- Actions ---
+  setCurrentSong: (currentSong) => set({ currentSong }),
 
-  setCurrentSong: (song) => set({ currentSong: song }),
+  // Replace the resolved audio URL of the song that is currently playing.
+  // Used by the AudioController retry path when a signed CDN URL expires or
+  // a transient network error breaks the media element.
+  updateCurrentSongAudioUrl: (audioUrl) =>
+    set((state) => (state.currentSong ? { currentSong: { ...state.currentSong, audioUrl } } : {})),
 
   playSong: async (song, newQueue) => {
-    // Check VIP Streaming Access & Trigger Toast
-    const isVipSong = Boolean(song.isVip || song.fee === 1);
-    const user = get().user;
-    const isUserVip = user && user.isLoggedIn && (user.vipType ?? 0) > 0;
-    if (isVipSong && !isUserVip) {
-      set({ toastMessage: '当前未登录网易云 VIP 账号，播放 VIP 歌曲可能受限制' });
-      setTimeout(() => {
-        if (get().toastMessage === '当前未登录网易云 VIP 账号，播放 VIP 歌曲可能受限制') {
-          set({ toastMessage: null });
-        }
-      }, 4000);
+    const { queue } = get();
+    const finalQueue = newQueue || (queue.length > 0 ? queue : [song]);
+    const index = finalQueue.findIndex((s) => s.id === song.id);
+
+    // Resolve fresh audio URL FIRST before setting currentSong so that currentSong
+    // always carries a valid audioUrl on the very first state update for instant autoplay.
+    let resolvedAudioUrl = song.audioUrl || '';
+    if (song.source !== 'local') {
+      try {
+        const fetchedUrl = await musicApiAdapter.getSongAudioUrl(song);
+        if (fetchedUrl) resolvedAudioUrl = fetchedUrl;
+      } catch {}
     }
 
-    let queue = newQueue || get().queue;
-    if (!queue.find((s) => s.id === song.id)) {
-      queue = [song, ...queue];
-    }
-    const queueIndex = queue.findIndex((s) => s.id === song.id);
-    const isNeteaseSong = song.source === 'netease' && Boolean(song.neteaseId);
-    const canPlayPublicly = isNeteaseSong && !isVipSong && !neteaseApi.getCookie();
-    const shouldResolveAudio = isNeteaseSong && !canPlayPublicly;
+    const playTarget: Song = { ...song, audioUrl: resolvedAudioUrl };
 
     set({
-      // Do not start the temporary outer URL and then swap it for the
-      // authenticated URL. That source replacement is the audible stutter
-      // users hear on VIP tracks.
-      currentSong: shouldResolveAudio ? { ...song, audioUrl: '' } : song,
-      queue,
-      queueIndex,
-      isPlaying: !shouldResolveAudio,
+      currentSong: playTarget,
+      isPlaying: true,
       currentTime: 0,
+      duration: song.duration || 0,
+      queue: finalQueue,
+      queueIndex: index >= 0 ? index : 0,
+      lyrics: [],
     });
 
-    // Lyrics are available for every NetEase track, regardless of whether it
-    // uses a public stream or an authenticated VIP stream.
-    if (isNeteaseSong && song.neteaseId) {
-      if (shouldResolveAudio) {
-        // Resolve playback independently from lyrics. Waiting for Promise.all
-        // made a slow lyrics request delay an already available VIP audio URL.
-        const preferredLevel = song.isVip || song.fee === 1 ? 'lossless' : 'standard';
-        neteaseApi.getSongAudioUrl(song.neteaseId, preferredLevel).then((fetchedUrl) => {
-          set((state) => state.currentSong?.id === song.id
-            ? fetchedUrl
-              ? {
-                  currentSong: { ...state.currentSong, audioUrl: fetchedUrl },
-                  isPlaying: true,
-                }
-              : {
-                  isPlaying: false,
-                  toastMessage: 'VIP 音源解析失败，请重新登录网易云账号后重试',
-                }
-            : {});
-        }).catch(() => {
-          // Do not silently switch to an unplayable public outer link.
-          set((state) => state.currentSong?.id === song.id
-            ? { isPlaying: false, toastMessage: 'VIP 音源解析失败，请检查本地 API 或重新登录' }
-            : {});
-        });
-      }
-
-      neteaseApi.getSongLyrics(song.neteaseId).then((fetchedLyrics) => {
-        set((state) => state.currentSong?.id === song.id ? { lyrics: fetchedLyrics } : {});
-      }).catch(() => {
-        // Lyrics are optional and must not block playback.
-      });
-    } else if (song.lyric) {
-      set({ lyrics: song.lyric });
-    } else {
-      set({
-        lyrics: [
-          { time: 0, text: `♪ ${song.name} - ${song.artist}` },
-          { time: 5, text: '本地音频播放中' },
-        ],
-      });
+    if (!resolvedAudioUrl && song.source !== 'local') {
+      set({ isPlaying: false });
+      const platformName = song.source === 'qq' ? 'QQ 音乐' : '网易云音乐';
+      get().setToastMessage(`无法获取《${song.name}》音源，该歌曲可能需要登录 ${platformName} VIP 账号`);
+      return;
     }
+
+    // Resolve Lyrics asynchronously in background without blocking audio player startup
+    setTimeout(async () => {
+      if (get().currentSong?.id !== song.id) return;
+      try {
+        const lyrics = await musicApiAdapter.getSongLyrics(song);
+        if (get().currentSong?.id === song.id && lyrics.length > 0) {
+          set({ lyrics });
+        }
+      } catch {}
+    }, 30);
   },
 
   togglePlayPause: () => set((state) => ({ isPlaying: !state.isPlaying })),
@@ -272,21 +294,91 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   removeFromQueue: (songId) =>
     set((state) => {
       const newQueue = state.queue.filter((s) => s.id !== songId);
-      const newIndex = state.currentSong
-        ? newQueue.findIndex((s) => s.id === state.currentSong?.id)
-        : 0;
+      const newIndex = state.currentSong ? newQueue.findIndex((s) => s.id === state.currentSong?.id) : 0;
       return { queue: newQueue, queueIndex: Math.max(0, newIndex) };
     }),
   clearQueue: () => set({ queue: [], queueIndex: 0 }),
   toggleQueueDrawer: () => set((state) => ({ isQueueOpen: !state.isQueueOpen })),
   setQueueOpen: (isQueueOpen) => set({ isQueueOpen }),
 
+  // --- Multi-Platform Actions ---
+  setActivePlatform: (activePlatform) => {
+    localStorage.setItem('active_platform', activePlatform);
+    set({
+      activePlatform,
+      user: get().accounts[activePlatform] || null,
+      // Clear stale playlists and selection from the previous platform so
+      // the sidebar doesn't show the old platform's covers under the new
+      // platform's label while the async refresh is in flight (or if it
+      // fails because the user isn't logged in to the new platform).
+      playlists: [],
+      selectedPlaylist: null,
+      // Reset to the home tab: the playlist detail view returns null when
+      // selectedPlaylist is cleared, which would render a blank white area
+      // if the user was viewing a playlist at the time of the switch.
+      activeTab: 'listen-now',
+    });
+    get().setToastMessage(`已切换为 ${activePlatform === 'qq' ? 'QQ 音乐' : '网易云音乐'} 平台`);
+    // Reload user playlists for the newly active platform
+    get().refreshPlaylistsForPlatform(activePlatform);
+  },
+
+  refreshPlaylistsForPlatform: async (platform) => {
+    try {
+      if (platform === 'qq') {
+        if (!qqMusicApi.getCookie()) {
+          if (get().activePlatform === 'qq') set({ playlists: [] });
+          return;
+        }
+        const userPlaylists = await qqMusicApi.getUserPlaylists();
+        if (get().activePlatform === 'qq') {
+          set({ playlists: userPlaylists });
+        }
+      } else {
+        const account = get().accounts.netease || (await neteaseApi.getUserAccount());
+        if (account) {
+          const userPlaylists = await neteaseApi.getUserPlaylists(Number(account.userId) || 0);
+          if (get().activePlatform === 'netease') {
+            set({ playlists: userPlaylists });
+          }
+        } else if (get().activePlatform === 'netease') {
+          set({ playlists: [] });
+        }
+      }
+    } catch {
+      // Keep previous playlist list on failure
+    }
+  },
+
+  setSearchPlatform: (searchPlatform) => set({ searchPlatform }),
+  setLoginModalPlatform: (loginModalPlatform) => set({ loginModalPlatform }),
+
+  setAccount: (platform, accountUser) =>
+    set((state) => {
+      const updatedAccounts = {
+        ...state.accounts,
+        [platform]: accountUser,
+      };
+      return {
+        accounts: updatedAccounts,
+        user: state.activePlatform === platform ? accountUser : state.user,
+      };
+    }),
+
+  switchAccountPlatform: (platform) => {
+    get().setActivePlatform(platform);
+  },
+
+  // --- Search Actions ---
   setSearchQuery: (searchQuery) => set({ searchQuery }),
-  performSearch: async (query) => {
+
+  performSearch: async (query, searchPlatformOverride) => {
     const trimmed = query.trim();
     if (!trimmed) return;
 
-    // Update history deduplicated max 10
+    const targetPlatform = searchPlatformOverride || get().searchPlatform;
+
+    // Update search history
     const currentHistory = get().searchHistory;
     const filtered = currentHistory.filter((item) => item !== trimmed);
     const updatedHistory = [trimmed, ...filtered].slice(0, 10);
@@ -298,11 +390,20 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       searchHistory: updatedHistory,
       isSearching: true,
       searchQuery: trimmed,
+      searchPlatform: targetPlatform,
       activeTab: 'search',
     });
+
     try {
-      const results = await neteaseApi.searchSongs(trimmed);
-      set({ searchResults: results, isSearching: false });
+      const results = await musicApiAdapter.search(targetPlatform, trimmed);
+      set((state) => ({
+        searchResults: results,
+        searchPlatformResults: {
+          ...state.searchPlatformResults,
+          [targetPlatform]: results,
+        },
+        isSearching: false,
+      }));
     } catch {
       set({ searchResults: [], isSearching: false });
     }
@@ -325,12 +426,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   toggleRepeat: () =>
     set((state) => ({
-      repeatMode:
-        state.repeatMode === 'off'
-          ? 'all'
-          : state.repeatMode === 'all'
-          ? 'one'
-          : 'off',
+      repeatMode: state.repeatMode === 'off' ? 'all' : state.repeatMode === 'all' ? 'one' : 'off',
     })),
 
   toggleShuffle: () => set((state) => ({ isShuffle: !state.isShuffle })),
@@ -343,6 +439,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   setUser: (user) => set({ user }),
   setPlaylists: (playlists) => set({ playlists }),
   setIsLoginModalOpen: (isLoginModalOpen) => set({ isLoginModalOpen }),
+
   setToastMessage: (toastMessage) => {
     set({ toastMessage });
     if (toastMessage) {
@@ -360,6 +457,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   setEnableLyricBlur: (enableLyricBlur) => set({ enableLyricBlur }),
   setEnableArtworkAnimation: (enableArtworkAnimation) => set({ enableArtworkAnimation }),
   setLyricFontSize: (lyricFontSize) => set({ lyricFontSize }),
+
   setAutoCheckUpdate: (autoCheckUpdate) => {
     try {
       localStorage.setItem('auto_check_update', JSON.stringify(autoCheckUpdate));
@@ -374,25 +472,44 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     let msg: string;
 
     const strId = String(song.id);
-    const numericId = song.neteaseId || Number(strId.replace(/^netease-/, ''));
+    const cleanId = strId.replace(/^(netease-|qq_|qq_rec_)/, '');
+    const numericId = song.neteaseId || Number(cleanId);
+    const qqMid = song.songmid || (song.source === 'qq' || strId.startsWith('qq_') ? cleanId : '');
 
     if (isFav) {
-      updatedFavorites = favorites.filter((s) => s.id !== song.id && (numericId === 0 || s.neteaseId !== numericId));
+      updatedFavorites = favorites.filter(
+        (s) =>
+          s.id !== song.id &&
+          (numericId === 0 || s.neteaseId !== numericId) &&
+          (!qqMid || (s.songmid !== qqMid && String(s.id).replace(/^(qq_|qq_rec_)/, '') !== qqMid))
+      );
       msg = `已取消收藏歌曲：${song.name}`;
-      if (numericId > 0) {
+
+      if (numericId > 0 && song.source === 'netease') {
         set((state) => ({
           neteaseLikeIds: state.neteaseLikeIds.filter((id) => id !== numericId),
         }));
         neteaseApi.likeSong(numericId, false).catch(() => {});
       }
+      if (qqMid) {
+        set((state) => ({
+          qqLikeMids: state.qqLikeMids.filter((m) => m !== qqMid && m !== cleanId),
+        }));
+      }
     } else {
       updatedFavorites = [song, ...favorites.filter((s) => s.id !== song.id)];
       msg = `已成功收藏歌曲：${song.name}`;
-      if (numericId > 0) {
+
+      if (numericId > 0 && song.source === 'netease') {
         set((state) => ({
           neteaseLikeIds: [numericId, ...state.neteaseLikeIds.filter((id) => id !== numericId)],
         }));
         neteaseApi.likeSong(numericId, true).catch(() => {});
+      }
+      if (qqMid) {
+        set((state) => ({
+          qqLikeMids: Array.from(new Set([qqMid, cleanId, ...state.qqLikeMids])),
+        }));
       }
     }
 
@@ -407,12 +524,22 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   isFavorite: (songId) => {
     if (!songId) return false;
     const strId = String(songId);
-    const numericId = Number(strId.replace(/^netease-/, ''));
-    const inLocal = get().favoriteSongs.some(
-      (s) => s.id === strId || (numericId > 0 && s.neteaseId === numericId)
-    );
-    const inNetease = numericId > 0 && get().neteaseLikeIds.includes(numericId);
-    return inLocal || inNetease;
+    const cleanId = strId.replace(/^(netease-|qq_|qq_rec_)/, '');
+    const numericId = Number(cleanId);
+
+    const inLocal = get().favoriteSongs.some((s) => {
+      const sId = String(s.id);
+      const sCleanId = sId.replace(/^(netease-|qq_|qq_rec_)/, '');
+      return (
+        sId === strId ||
+        sCleanId === cleanId ||
+        (Boolean(s.songmid) && (s.songmid === strId || s.songmid === cleanId)) ||
+        (numericId > 0 && isFinite(numericId) && s.neteaseId === numericId)
+      );
+    });
+
+    const inNetease = numericId > 0 && isFinite(numericId) && get().neteaseLikeIds.includes(numericId);
+    const inQq = Boolean(cleanId) && (get().qqLikeMids.includes(cleanId) || get().qqLikeMids.includes(strId));
+    return inLocal || inNetease || inQq;
   },
 }));
-

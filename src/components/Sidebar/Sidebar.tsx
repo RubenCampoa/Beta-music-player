@@ -4,13 +4,14 @@ import { usePlayerStore } from '../../store/playerStore';
 import { shallow } from 'zustand/shallow';
 
 export const Sidebar: React.FC = () => {
-  const { activeTab, setActiveTab, playlists, setSelectedPlaylist, selectedPlaylist } = usePlayerStore(
+  const { activeTab, setActiveTab, playlists, setSelectedPlaylist, selectedPlaylist, activePlatform } = usePlayerStore(
     (state) => ({
       activeTab: state.activeTab,
       setActiveTab: state.setActiveTab,
       playlists: state.playlists,
       setSelectedPlaylist: state.setSelectedPlaylist,
       selectedPlaylist: state.selectedPlaylist,
+      activePlatform: state.activePlatform,
     }),
     shallow,
   );
@@ -26,9 +27,7 @@ export const Sidebar: React.FC = () => {
           <button
             onClick={() => setActiveTab('listen-now')}
             className={`nav-item w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
-              activeTab === 'listen-now'
-                ? 'nav-item-active'
-                : ''
+              activeTab === 'listen-now' ? 'nav-item-active' : ''
             }`}
           >
             <PlayCircle className="w-4 h-4" />
@@ -37,9 +36,7 @@ export const Sidebar: React.FC = () => {
           <button
             onClick={() => setActiveTab('browse')}
             className={`nav-item w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
-              activeTab === 'browse'
-                ? 'nav-item-active'
-                : ''
+              activeTab === 'browse' ? 'nav-item-active' : ''
             }`}
           >
             <Compass className="w-4 h-4" />
@@ -55,9 +52,7 @@ export const Sidebar: React.FC = () => {
           <button
             onClick={() => setActiveTab('local')}
             className={`nav-item w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
-              activeTab === 'local'
-                ? 'nav-item-active'
-                : ''
+              activeTab === 'local' ? 'nav-item-active' : ''
             }`}
           >
             <HardDrive className="w-4 h-4" />
@@ -65,17 +60,17 @@ export const Sidebar: React.FC = () => {
           </button>
         </div>
 
-        {/* NetEase Cloud Playlists */}
+        {/* User Playlists */}
         <div className="space-y-1">
           <div className="nav-section-label px-3 text-xs font-semibold uppercase tracking-wider mb-2 flex items-center justify-between">
-            <span>网易云歌单</span>
+            <span>{activePlatform === 'qq' ? 'QQ 音乐歌单' : '网易云歌单'}</span>
             <ListMusic className="w-3.5 h-3.5 opacity-60" />
           </div>
 
           <div className="playlist-list space-y-0.5 max-h-56 overflow-y-auto pr-1">
             {playlists.length === 0 ? (
               <div className="px-3 py-2 text-xs text-[#a3aab5] italic">
-                登录网易云同步歌单
+                登录{activePlatform === 'qq' ? 'QQ音乐' : '网易云'}同步歌单
               </div>
             ) : (
               playlists.map((pl) => (
@@ -105,9 +100,7 @@ export const Sidebar: React.FC = () => {
           <button
             onClick={() => setActiveTab('settings')}
             className={`nav-item w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
-              activeTab === 'settings'
-                ? 'nav-item-active'
-                : ''
+              activeTab === 'settings' ? 'nav-item-active' : ''
             }`}
           >
             <Settings className="w-4 h-4" />
@@ -116,9 +109,7 @@ export const Sidebar: React.FC = () => {
           <button
             onClick={() => setActiveTab('notice')}
             className={`nav-item w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
-              activeTab === 'notice'
-                ? 'nav-item-active'
-                : ''
+              activeTab === 'notice' ? 'nav-item-active' : ''
             }`}
           >
             <AlertTriangle className="w-4 h-4" />
@@ -127,9 +118,7 @@ export const Sidebar: React.FC = () => {
           <button
             onClick={() => setActiveTab('changelog')}
             className={`nav-item w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
-              activeTab === 'changelog'
-                ? 'nav-item-active'
-                : ''
+              activeTab === 'changelog' ? 'nav-item-active' : ''
             }`}
           >
             <History className="w-4 h-4" />
@@ -138,9 +127,7 @@ export const Sidebar: React.FC = () => {
           <button
             onClick={() => setActiveTab('about')}
             className={`nav-item w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-all ${
-              activeTab === 'about'
-                ? 'nav-item-active'
-                : ''
+              activeTab === 'about' ? 'nav-item-active' : ''
             }`}
           >
             <Info className="w-4 h-4" />
@@ -151,10 +138,9 @@ export const Sidebar: React.FC = () => {
 
       {/* Footer Info */}
       <div className="sidebar-footer-label px-3 py-2 border-t border-black/10 text-[11px] text-[#929aa7] flex items-center justify-between">
-          <span>Beta Music Player</span>
-        <span className="bg-white/75 text-[#7d8795] px-1.5 py-0.5 rounded text-[9px]">v1.0.6</span>
+        <span>Beta Music Player</span>
+        <span className="bg-white/75 text-[#7d8795] px-1.5 py-0.5 rounded text-[9px]">v1.0.7</span>
       </div>
     </aside>
   );
 };
-

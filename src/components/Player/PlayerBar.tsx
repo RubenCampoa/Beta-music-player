@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { usePlayerStore } from '../../store/playerStore';
 import { neteaseApi, getOptimizedCoverUrl } from '../../services/neteaseApi';
-import { formatTime } from '../../utils/format';
+import { formatTime, handleImageError } from '../../utils/format';
 import { shallow } from 'zustand/shallow';
 
 const PlayerProgress = React.memo(() => {
@@ -97,6 +97,7 @@ export const PlayerBar: React.FC = React.memo(() => {
       toggleQueueDrawer: state.toggleQueueDrawer,
       toggleFavorite: state.toggleFavorite,
       isFavorite: state.isFavorite,
+      favoriteSongs: state.favoriteSongs,
     }),
     shallow,
   );
@@ -129,6 +130,7 @@ export const PlayerBar: React.FC = React.memo(() => {
                   alt={currentSong.name}
                   loading="lazy"
                   decoding="async"
+                  onError={handleImageError}
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                 />
                 <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">

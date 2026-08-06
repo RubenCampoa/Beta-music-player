@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, protocol, net, Tray, Menu, globalShortcut, nativeImage, screen } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, protocol, net, Tray, Menu, globalShortcut, nativeImage, screen, session } from 'electron';
 import path from 'path';
 import fs from 'fs';
 
@@ -391,9 +391,82 @@ function createWindow() {
   });
 }
 
+// --- QQ Music API request header injection ---
+// QQ Music CGI endpoints (lyrics, vkey, etc.) reject requests without an
+// "https://y.qq.com" Referer (returns retcode -1310). The renderer cannot
+// set this forbidden header itself, so we inject it at the network layer.
+// The stored QQ cookie is also attached so VIP vkey resolution can work.
+let qqMusicCookie = '';
+
+function setupQqApiHeaderInjection() {
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ['*://*.y.qq.com/*', '*://*.qq.com/*', '*://qpic.y.qq.com/*'] },
+    (details, callback) => {
+      const url = details.url;
+      const isQqApiCall = url.includes('/fcg-bin/') || url.includes('/cgi-bin/') || url.includes('/fcg_');
+      // Playlist/diss cover images on qpic.y.qq.com are hotlink-protected and
+      // return 403 without a y.qq.com Referer.
+      const isQqCoverImage = url.includes('qpic.y.qq.com');
+      if (isQqApiCall || isQqCoverImage) {
+        details.requestHeaders['Referer'] = 'https://y.qq.com/';
+        if (qqMusicCookie && isQqApiCall) {
+          details.requestHeaders['Cookie'] = qqMusicCookie;
+        }
+      }
+      callback({ requestHeaders: details.requestHeaders });
+    }
+  );
+}
+
+ipcMain.on('set-qq-cookie', (_event, cookie: string) => {
+  qqMusicCookie = typeof cookie === 'string' ? cookie : '';
+});
+
+// The bundled NetEase API (>= 4.38) resolves VIP playback through
+// /song/url/v1, which uses the "xeapi" encryption. That crypto needs a
+// public key exchange plus an anonymous token stored in the OS temp dir.
+// Only the package's CLI entry (app.js) runs generateConfig(); calling
+// serveNcmApi() directly skips it, so /song/url/v1 responds with code 404
+// and VIP tracks fail to play. Bootstrap the key material here.
+async function bootstrapNeteaseApiKeys() {
+  try {
+    const os = require('os');
+    const keyPath = path.join(os.tmpdir(), 'xeapi_public_key');
+    const tokenPath = path.join(os.tmpdir(), 'anonymous_token');
+    const ready = () => {
+      if (!fs.existsSync(keyPath)) return false;
+      try {
+        return fs.readFileSync(tokenPath, 'utf-8').trim().length > 0;
+      } catch {
+        return false;
+      }
+    };
+    const generateConfig = require('@neteasecloudmusicapienhanced/api/generateConfig.js');
+    // First pass writes the xeapi public key; the anonymous registration
+    // depends on that key, so a second pass is needed on a cold start.
+    for (let pass = 0; pass < 3 && !ready(); pass++) {
+      try {
+        await generateConfig();
+      } catch (err) {
+        console.warn('[NetEase API Bootstrap] generateConfig failed:', err);
+      }
+    }
+    if (ready()) {
+      console.log('[NetEase API Bootstrap] xeapi key & anonymous token ready');
+    } else {
+      console.warn('[NetEase API Bootstrap] key material still missing, VIP playback may fail');
+    }
+  } catch (err) {
+    console.warn('[NetEase API Bootstrap] unavailable:', err);
+  }
+}
+
 function startNeteaseServer() {
   try {
     const { server } = require('@neteasecloudmusicapienhanced/api');
+    bootstrapNeteaseApiKeys();
+    // The exchanged key has a limited lifetime; refresh it periodically.
+    setInterval(() => bootstrapNeteaseApiKeys(), 12 * 60 * 60 * 1000).unref?.();
     server
       .serveNcmApi({
         port: 3000,
@@ -410,8 +483,26 @@ function startNeteaseServer() {
   }
 }
 
+// --- QQ Music API Server (local qq-music-api HTTP service) ---
+// The @sansenjian/qq-music-api package exports a pre-configured Koa app.
+// We start it on port 3200 so the renderer can call QQ Music endpoints
+// through a local proxy instead of hitting QQ CGIs directly (which required
+// Referer/Cookie header injection and was fragile).
+function startQqMusicServer() {
+  try {
+    const qqApp = require('@sansenjian/qq-music-api');
+    qqApp.listen(3200, '127.0.0.1', () => {
+      console.log('[QQ Music API Server] Running on http://127.0.0.1:3200');
+    });
+  } catch (err) {
+    console.warn('[QQ Music API Server Launch Error]', err);
+  }
+}
+
 app.whenReady().then(() => {
   startNeteaseServer();
+  startQqMusicServer();
+  setupQqApiHeaderInjection();
 
   protocol.handle('app-audio', (request) => {
     const filePath = decodeURIComponent(request.url.slice('app-audio://'.length));
@@ -661,6 +752,113 @@ ipcMain.on('window-close', () => {
   }
 });
 
+ipcMain.handle('select-audio-folder', async () => {
+  if (!mainWindow) return [];
+  const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] });
+  return result.canceled ? [] : result.filePaths[0];
+});
+
+// Multi-Platform Cookie Login via Browser Window (NetEase & QQ Music)
+ipcMain.handle('login-via-window', async (_event, platform: 'netease' | 'qq' = 'netease') => {
+  return new Promise((resolve) => {
+    const isQq = platform === 'qq';
+    const loginWin = new BrowserWindow({
+      width: 1024,
+      height: 768,
+      title: isQq ? '登录 QQ 音乐' : '登录网易云音乐',
+      backgroundColor: '#ffffff',
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+      },
+    });
+
+    // Set a realistic desktop Chrome UA so QQ Music serves the full web app
+    // instead of a mobile redirect.
+    loginWin.webContents.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+    );
+
+    // Clear existing cookies for a fresh login
+    loginWin.webContents.session.clearStorageData({ storages: ['cookies'] }).then(() => {
+      if (isQq) {
+        // Load the QQ Music portal; the user clicks the login button which
+        // opens a QQ ptlogin2 iframe inside the page.
+        loginWin.loadURL('https://y.qq.com/');
+      } else {
+        loginWin.loadURL('https://music.163.com/#/login');
+      }
+    });
+
+    const checkCookies = async () => {
+      try {
+        if (isQq) {
+          // Query cookies by URL — this returns ALL cookies that would be
+          // sent with a request to y.qq.com, including both .qq.com domain
+          // cookies (uin, p_skey, etc.) and y.qq.com domain cookies
+          // (qqmusic_key, qm_keyst). The old code only queried .qq.com
+          // domain, which missed qqmusic_key set on y.qq.com.
+          const cookies = await loginWin.webContents.session.cookies.get({ url: 'https://y.qq.com' });
+
+          const hasLoginCookie = cookies.some((c) => {
+            // qqmusic_key: legacy QQ Music session key
+            if (c.name === 'qqmusic_key' && c.value.length > 5) return true;
+            // qm_keyst: modern QQ Music session key
+            if (c.name === 'qm_keyst' && c.value.length > 5) return true;
+            // uin / p_uin: QQ account identifier (must be a real UIN, not o0)
+            if ((c.name === 'uin' || c.name === 'p_uin') && c.value !== 'o0' && c.value !== '0' && c.value.length > 3) return true;
+            // p_skey: QQ login session key
+            if (c.name === 'p_skey' && c.value.length > 3) return true;
+            return false;
+          });
+
+          if (hasLoginCookie) {
+            // Deduplicate cookies by name (a cookie may exist on both .qq.com
+            // and y.qq.com domains; keep the longest value).
+            const cookieMap = new Map<string, string>();
+            for (const c of cookies) {
+              const existing = cookieMap.get(c.name);
+              if (!existing || c.value.length > existing.length) {
+                cookieMap.set(c.name, c.value);
+              }
+            }
+            const cookieStr = Array.from(cookieMap.entries())
+              .map(([name, value]) => `${name}=${value}`)
+              .join('; ');
+            loginWin.close();
+            resolve(cookieStr);
+          }
+        } else {
+          const cookies = await loginWin.webContents.session.cookies.get({ url: 'https://music.163.com' });
+          const musicU = cookies.find((c) => c.name === 'MUSIC_U');
+
+          if (musicU) {
+            const cookieStr = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
+            loginWin.close();
+            resolve(cookieStr);
+          }
+        }
+      } catch (e) {
+        console.error('Error reading cookies:', e);
+      }
+    };
+
+    const interval = setInterval(checkCookies, 1500);
+
+    // Auto-close after 5 minutes to prevent indefinite polling
+    const timeout = setTimeout(() => {
+      clearInterval(interval);
+      if (!loginWin.isDestroyed()) loginWin.close();
+    }, 5 * 60 * 1000);
+
+    loginWin.on('closed', () => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+      resolve(null);
+    });
+  });
+});
+
 // Local File Selection
 ipcMain.handle('select-audio-files', async () => {
   if (!mainWindow) return [];
@@ -670,54 +868,3 @@ ipcMain.handle('select-audio-files', async () => {
   });
   return result.canceled ? [] : result.filePaths;
 });
-
-ipcMain.handle('select-audio-folder', async () => {
-  if (!mainWindow) return [];
-  const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] });
-  return result.canceled ? [] : result.filePaths[0];
-});
-
-// NetEase Cloud Music Cookie Login via Browser Window
-ipcMain.handle('login-via-window', async () => {
-  return new Promise((resolve) => {
-    const loginWin = new BrowserWindow({
-      width: 1024,
-      height: 768,
-      title: '登录网易云音乐',
-      backgroundColor: '#ffffff',
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true,
-      },
-    });
-    
-    // Clear existing cookies for a fresh login
-    loginWin.webContents.session.clearStorageData({ storages: ['cookies'] }).then(() => {
-      loginWin.loadURL('https://music.163.com/#/login');
-    });
-
-    const checkCookies = async () => {
-      try {
-        const cookies = await loginWin.webContents.session.cookies.get({ url: 'https://music.163.com' });
-        const musicU = cookies.find(c => c.name === 'MUSIC_U');
-        
-        // MUSIC_U indicates a successful login
-        if (musicU) {
-          const cookieStr = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-          loginWin.close();
-          resolve(cookieStr);
-        }
-      } catch (e) {
-        console.error('Error reading cookies:', e);
-      }
-    };
-
-    const interval = setInterval(checkCookies, 1500);
-
-    loginWin.on('closed', () => {
-      clearInterval(interval);
-      resolve(null); // Return null if user closes window without logging in
-    });
-  });
-});
-

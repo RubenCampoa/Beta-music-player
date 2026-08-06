@@ -269,8 +269,13 @@ class NeteaseApiService {
   }
 
   // --- Song Playable Audio URL (Supports VIP signed CDN URLs, Meting Unblock & Multi-level fallback) ---
-  public async getSongAudioUrl(songId: number, level: string = 'lossless'): Promise<string> {
+  public async getSongAudioUrl(songId: number, level: string = 'lossless', forceRefresh: boolean = false): Promise<string> {
     const cacheKey = `${songId}:${level}`;
+    if (forceRefresh) {
+      // The retry path must not reuse a signed URL that the media element
+      // already failed to load (expired signature or dead CDN edge).
+      this.audioUrlCache.delete(cacheKey);
+    }
     const cached = this.audioUrlCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       return cached.url;
@@ -335,7 +340,28 @@ class NeteaseApiService {
       // Ignore
     }
 
-    // 4. High-Speed Meting Unblock Fallback Stream (Resolves VIP & restricted NetEase songs)
+    // 4. Unblock fallback via the bundled API. The official endpoints above
+    // simulate the Android client, whose entitlement checks are stricter
+    // than the web player's: even VIP accounts get an empty URL for many
+    // tracks (digital albums, SVIP-only songs, etc.). With unblock=true
+    // the API matches the track against alternative sources (kuwo/migu)
+    // and returns a playable stream instead.
+    try {
+      const res = await this.fetchApi<{ data: { url: string }[] }>(
+        `/song/url/v1?id=${songId}&level=exhigh&unblock=true`,
+        {},
+        12000,
+      );
+      if (res.data && res.data[0] && res.data[0].url) {
+        const url = res.data[0].url;
+        this.audioUrlCache.set(cacheKey, { url, expiresAt: Date.now() + 5 * 60 * 1000 });
+        return url;
+      }
+    } catch {
+      // Ignore unblock errors and fall through to the Meting mirror.
+    }
+
+    // 5. High-Speed Meting Unblock Fallback Stream (Resolves VIP & restricted NetEase songs)
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -362,7 +388,13 @@ class NeteaseApiService {
   // --- Song Lyrics Parsing (Main LRC + Translation tlyric) ---
   public async getSongLyrics(songId: number): Promise<LyricLine[]> {
     try {
-      const res = await this.fetchApi<{ lrc?: { lyric: string }; tlyric?: { lyric: string }; nolyric?: boolean; uncollected?: boolean }>(`/lyric?id=${songId}`);
+      const res = await this.fetchApi<{
+        lrc?: { lyric: string };
+        tlyric?: { lyric: string };
+        nolyric?: boolean;
+        uncollected?: boolean;
+      }>(`/lyric?id=${songId}`, {}, 2500);
+
       if (res.nolyric) {
         return [{ time: 0, text: '♪ 纯音乐，无歌词', translation: 'Instrumental Track' }];
       }

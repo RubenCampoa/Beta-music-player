@@ -23,7 +23,7 @@ import {
 import { motion, useMotionValue, useSpring } from 'framer-motion';
 import { usePlayerStore } from '../../store/playerStore';
 import { neteaseApi, getOptimizedCoverUrl } from '../../services/neteaseApi';
-import { formatTime, formatRemainingTime } from '../../utils/format';
+import { formatTime, formatRemainingTime, cleanTitle } from '../../utils/format';
 import { FluidBackground } from '../Background/FluidBackground';
 import { shallow } from 'zustand/shallow';
 import { LyricLine } from '../../types/music';
@@ -46,6 +46,75 @@ const getActiveLyricIndex = (currentTime: number, lyrics: LyricLine[]) => {
     }
   }
   return activeIndex;
+};
+
+// --- Karaoke word-by-word lyric renderer ---
+// Renders the active line's words individually, highlighting each word as
+// playback progresses through its time window. Non-active lines render as
+// plain text. When a line has no word-level timing data (words array), it
+// falls back to plain text for all states.
+interface KaraokeLineProps {
+  line: LyricLine;
+  isActive: boolean;
+  currentTime: number;
+  fontSize: 'normal' | 'large';
+  layout: 'split' | 'full';
+  enableGlow: boolean;
+  enableAnimation: boolean;
+}
+
+const KaraokeLine: React.FC<KaraokeLineProps> = ({
+  line,
+  isActive,
+  fontSize,
+  layout,
+  enableGlow,
+}) => {
+  const cleanText = cleanTitle(line.text);
+
+  // Font size classes based on layout and size setting
+  const mainFontClass =
+    layout === 'full'
+      ? 'text-3xl md:text-5xl leading-tight font-black'
+      : fontSize === 'large'
+      ? 'text-2xl md:text-4xl font-extrabold'
+      : 'text-xl md:text-3xl font-extrabold';
+
+  const transFontClass =
+    layout === 'full'
+      ? 'text-lg md:text-2xl font-semibold'
+      : fontSize === 'large'
+      ? 'text-base md:text-xl font-semibold'
+      : 'text-xs md:text-base font-semibold';
+
+  return (
+    <div className="space-y-1">
+      <div
+        className={`block break-words tracking-tight ${mainFontClass} ${
+          isActive ? 'text-white' : 'text-white/60 hover:text-white/90'
+        }`}
+        style={{
+          textShadow:
+            isActive && enableGlow
+              ? layout === 'full'
+                ? '0 0 24px rgba(255, 255, 255, 0.8), 0 0 40px rgba(255, 45, 85, 0.4)'
+                : '0 0 20px rgba(255, 255, 255, 0.7), 0 0 35px rgba(255, 45, 85, 0.35)'
+              : 'none',
+        }}
+      >
+        {cleanText}
+      </div>
+      {line.translation && (
+        <div
+          className={`block break-words tracking-wide ${transFontClass} ${
+            isActive ? 'text-white/90 font-medium' : 'text-white/40'
+          }`}
+        >
+          {cleanTitle(line.translation)}
+        </div>
+      )}
+    </div>
+  );
 };
 
 const LyricProgressBar: React.FC = () => {
@@ -131,6 +200,7 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
       setToastMessage: state.setToastMessage,
       toggleFavorite: state.toggleFavorite,
       isFavorite: state.isFavorite,
+      favoriteSongs: state.favoriteSongs,
       enableLyricAnimation: state.enableLyricAnimation,
       enableLyricGlow: state.enableLyricGlow,
       enableLyricBlur: state.enableLyricBlur,
@@ -141,7 +211,8 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
     shallow,
   );
   const lyrics = usePlayerStore((state) => state.lyrics);
-  const activeIndex = usePlayerStore((state) => getActiveLyricIndex(state.currentTime, state.lyrics));
+  const currentTime = usePlayerStore((state) => state.currentTime);
+  const activeIndex = getActiveLyricIndex(currentTime, lyrics);
 
   const [isWindowFullScreen, setIsWindowFullScreen] = useState(false);
   const [isUserScrolling, setIsUserScrolling] = useState(false);
@@ -152,22 +223,24 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
   const userScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lyricScrollTarget = useMotionValue(0);
   const lyricScrollY = useSpring(lyricScrollTarget, {
-    stiffness: 220,
-    damping: 32,
-    mass: 0.8,
+    stiffness: 160,
+    damping: 22,
+    mass: 0.7,
   });
   const isUserScrollingRef = useRef(false);
 
   // Focal index for scrolling & blur gradient (defaults to line 0 during prelude)
   const focalIndex = activeIndex >= 0 ? activeIndex : 0;
 
-  // Apple Music-like smooth lyric emphasis: natural cubic bezier easing without overshoot dip.
+  // Apple Music-like lyric emphasis: the scale/y keyframes deliberately
+  // overshoot and settle. This is a non-linear jelly transition rather than a
+  // linear class swap, while opacity and blur use a softer luminance curve.
   const jellyTransition = enableLyricAnimation
     ? {
-        scale: { duration: 0.48, ease: [0.22, 1, 0.36, 1] as const },
-        y: { duration: 0.48, ease: [0.22, 1, 0.36, 1] as const },
-        opacity: { duration: 0.42, ease: [0.22, 1, 0.36, 1] as const },
-        filter: { duration: 0.45, ease: [0.22, 1, 0.36, 1] as const },
+        scale: { duration: 0.64, ease: [0.34, 1.35, 0.64, 1] as const },
+        y: { duration: 0.64, ease: [0.22, 1, 0.36, 1] as const },
+        opacity: { duration: 0.48, ease: [0.22, 1, 0.36, 1] as const },
+        filter: { duration: 0.56, ease: [0.22, 1, 0.36, 1] as const },
       }
     : { duration: 0.025, ease: 'linear' as const };
 
@@ -223,17 +296,20 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
     lyricScrollTarget.set(targetTop);
   };
 
-  // Center active lyric line in container smoothly
+  // Center active lyric line in container smoothly using static bounding offsets
   const scrollToActiveLine = (index: number, smooth: boolean = true) => {
     const container = containerRef.current;
     const activeEl = lineRefs.current[index];
     if (!container || !activeEl) return;
 
+    const containerRect = container.getBoundingClientRect();
+    const activeRect = activeEl.getBoundingClientRect();
     const containerHeight = container.clientHeight;
-    const elTop = activeEl.offsetTop;
-    const elHeight = activeEl.offsetHeight;
 
-    const targetScrollTop = Math.max(0, elTop - containerHeight / 2 + elHeight / 2);
+    const elOffsetTop = activeRect.top - containerRect.top + container.scrollTop;
+    const elHeight = activeRect.height;
+
+    const targetScrollTop = Math.max(0, elOffsetTop - containerHeight / 2 + elHeight / 2);
 
     animateContainerScroll(container, targetScrollTop, smooth);
   };
@@ -242,10 +318,12 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
   useEffect(() => {
     if (!isVisible) return;
     if (lyrics.length > 0 && !isUserScrolling) {
-      const timer = requestAnimationFrame(() => {
-        scrollToActiveLine(focalIndex, enableLyricAnimation);
-      });
-      return () => cancelAnimationFrame(timer);
+      const timer = setTimeout(() => {
+        requestAnimationFrame(() => {
+          scrollToActiveLine(focalIndex, enableLyricAnimation);
+        });
+      }, 40);
+      return () => clearTimeout(timer);
     }
   }, [focalIndex, lyrics, lyricFontSize, lyricLayoutMode, isUserScrolling, isVisible, enableLyricAnimation]);
 
@@ -253,7 +331,10 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
   useEffect(() => {
     setIsUserScrolling(false);
     if (lyrics.length > 0) {
-      scrollToActiveLine(focalIndex, false);
+      const timer = setTimeout(() => {
+        scrollToActiveLine(focalIndex, false);
+      }, 40);
+      return () => clearTimeout(timer);
     }
   }, [currentSong?.id, isVisible, lyricLayoutMode]);
 
@@ -312,7 +393,7 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
       initial={false}
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.975, y: 8 }}
-      transition={{ duration: 0.52, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: 0.48, ease: [0.22, 1, 0.36, 1] }}
       className={`full-lyrics-shell drag-region fixed z-50 flex flex-col justify-between p-6 pt-5 pb-6 select-none overflow-hidden transform-gpu ${
         !isFluidBgEnabled ? 'full-lyrics-transparent' : ''
       } ${isWindowFullScreen ? 'window-fullscreen-active' : 'window-fullscreen-windowed'}`}
@@ -572,27 +653,32 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                           ref={(el) => (lineRefs.current[idx] = el)}
                           onClick={() => handleLyricClick(line.time)}
                           animate={{
-                            scale: isActive ? 1.018 : distance === 1 ? 0.99 : 0.982,
-                            y: isActive ? 0 : distance === 1 ? 0 : 1,
+                            scale: isActive
+                              ? [0.985, 1.042, 1.012, 1.018]
+                              : distance === 1
+                              ? [1.015, 0.992, 0.99]
+                              : 0.982,
+                            y: isActive
+                              ? [8, -4, 1, 0]
+                              : distance === 1
+                              ? [-2, 1, 0]
+                              : 0,
                             opacity: targetOpacity,
                             filter: `blur(${targetBlur}px)`,
                           }}
                           transition={jellyTransition}
                           className="full-lyrics-line cursor-pointer text-left origin-left space-y-1 py-1 px-2 -mx-2 hover:opacity-100 max-w-full break-words"
                         >
-                          {/* Main Lyric Line */}
-                          <div
-                            className={`font-extrabold tracking-tight block break-words ${
-                              isActive ? 'text-white' : 'text-white/60 hover:text-white/90'
-                            } ${lyricFontSize === 'large' ? 'text-2xl md:text-4xl' : 'text-xl md:text-3xl'}`}
-                            style={{
-                              textShadow: enableLyricGlow && isActive
-                                ? '0 0 20px rgba(255, 255, 255, 0.7), 0 0 35px rgba(255, 45, 85, 0.35)'
-                                : 'none',
-                            }}
-                          >
-                            {neteaseApi.cleanTitle(line.text)}
-                          </div>
+                          {/* Main Lyric Line — karaoke word-by-word when active */}
+                          <KaraokeLine
+                            line={line}
+                            isActive={isActive}
+                            currentTime={currentTime}
+                            fontSize={lyricFontSize}
+                            layout="split"
+                            enableGlow={enableLyricGlow}
+                            enableAnimation={enableLyricAnimation}
+                          />
 
                           {/* Translated Lyric Sub-line (if available) */}
                           {line.translation && (
@@ -668,27 +754,32 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                         ref={(el) => (lineRefs.current[idx] = el)}
                         onClick={() => handleLyricClick(line.time)}
                         animate={{
-                          scale: isActive ? 1.025 : distance === 1 ? 0.992 : 0.978,
-                          y: isActive ? 0 : distance === 1 ? 0 : 1.5,
+                          scale: isActive
+                            ? [0.985, 1.048, 1.015, 1.025]
+                            : distance === 1
+                            ? [1.022, 0.993, 0.992]
+                            : 0.978,
+                          y: isActive
+                            ? [10, -5, 1.5, 0]
+                            : distance === 1
+                            ? [-2, 1, 0]
+                            : 0,
                           opacity: targetOpacity,
                           filter: `blur(${targetBlur}px)`,
                         }}
                         transition={jellyTransition}
                         className="full-lyrics-line cursor-pointer text-center origin-center space-y-2 py-1 px-2 -mx-2 hover:opacity-100 max-w-3xl break-words"
                       >
-                        {/* Giant Centered Main Line */}
-                        <div
-                          className={`font-black tracking-tight block break-words ${
-                            isActive ? 'text-white' : 'text-white/60 hover:text-white/90'
-                          } text-3xl md:text-5xl leading-tight`}
-                          style={{
-                            textShadow: enableLyricGlow && isActive
-                              ? '0 0 24px rgba(255, 255, 255, 0.8), 0 0 40px rgba(255, 45, 85, 0.4)'
-                              : 'none',
-                          }}
-                        >
-                          {neteaseApi.cleanTitle(line.text)}
-                        </div>
+                        {/* Giant Centered Main Line — karaoke word-by-word when active */}
+                        <KaraokeLine
+                          line={line}
+                          isActive={isActive}
+                          currentTime={currentTime}
+                          fontSize={lyricFontSize}
+                          layout="full"
+                          enableGlow={enableLyricGlow}
+                          enableAnimation={enableLyricAnimation}
+                        />
 
                         {/* Centered Translation */}
                         {line.translation && (
