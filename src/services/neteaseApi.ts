@@ -447,15 +447,24 @@ class NeteaseApiService {
         }
         yrcLines.sort((a, b) => a.time - b.time);
 
-        // Attach translation lines by loose timestamp tolerance (YRC is the
-        // official timeline; translations, when present, usually follow it).
+        // Attach translation lines to the NEAREST tlyric timestamp within
+        // a loose 1.5s tolerance (same as the plain-LRC path). The YRC and
+        // tlyric timelines can drift by 0.3-0.5s (different lyric revisions,
+        // e.g. 恋愛サーキュレーション: ~0.42s offset), so the old strict
+        // 0.4s window silently dropped half the translations.
         if (transLyrics.length > 0) {
           for (const line of yrcLines) {
-            const trans = transLyrics.find(
-              (t) => Math.abs(t.time - line.time) < 0.4
-            );
-            if (trans) {
-              line.translation = trans.text;
+            let best: LyricLine | undefined;
+            let bestDiff = 1.5;
+            for (const trans of transLyrics) {
+              const diff = Math.abs(trans.time - line.time);
+              if (diff < bestDiff) {
+                bestDiff = diff;
+                best = trans;
+              }
+            }
+            if (best) {
+              line.translation = best.text;
             }
           }
         }
