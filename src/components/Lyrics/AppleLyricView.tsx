@@ -83,26 +83,21 @@ interface KaraokeLineProps {
 // edge is crossing it (p in (0,1)) — covered (p=1) and untouched (p=0) words
 // keep stable props and are skipped by React, so a slow song with a long line
 // does not rewrite every word's style on every animation frame.
-const WaveWord = React.memo(({ text, p, pop, glowEnabled }: { text: string; p: number; pop: number; glowEnabled: boolean }) => {
+const WaveWord = React.memo(({ text, p, glowEnabled }: { text: string; p: number; glowEnabled: boolean }) => {
   const covered = p >= 1;
   const edge = p > 0 && p < 1;
-  // Horizontal wave: the word is nudged sideways as the wave edge passes
-  // (a left-to-right rolling ocean), instead of a vertical bounce.
-  const shiftX = 4 * pop;
-  const scale = 1 + 0.1 * pop;
-  // Smooth easing so the brightness converges gently at the end of each
-  // word (no hard snap), and the glow fades in with the lit progress so
-  // the final highlight is not a sudden flash. Baseline 0.6 matches the
-  // line-level idle brightness (text-white/60) so karaoke words and plain
-  // lyric lines read at the same luminance; lit words reach full white.
+  // The font is untouched (no scale/translate): the wave is pure highlight
+  // — each word's luminance follows the singing progress through a
+  // non-linear ease (fast start, soft settle), so the highlight "paints
+  // over" the glyph instead of the glyph moving. Baseline 0.6 matches the
+  // line-level idle brightness (text-white/60); lit words reach full white.
   const eased = covered ? 1 : Math.sin((Math.min(1, Math.max(0, p)) * Math.PI) / 2);
   const intensity = 0.6 + 0.4 * eased;
 
   return (
     <span
-      className="inline-block will-change-transform"
+      className="inline-block"
       style={{
-        transform: `translateX(${shiftX}px) scale(${scale})`,
         // Explicit baseline keeps each karaoke word on the exact same
         // vertical line as plain lyric text — an inherited/other vertical
         // alignment would nudge the glyph baseline and change the line box.
@@ -165,15 +160,8 @@ const WaveLine: React.FC<{ line: LyricLine; glow: string }> = ({ line, glow }) =
         // keeps the wave rolling at a constant pace (a natural ocean wave);
         // per-word easing made it start/stop at every word boundary.
         const p = covered ? 1 : uncovered ? 0 : (cursor - wordStart) / (wordEnd - wordStart);
-        // Linked jelly as a continuous Gaussian envelope: the pop peaks as
-        // the wave edge REACHES the word's start (no lag after it arrives —
-        // a centred peak delayed the bounce by half the word), then decays
-        // as the edge rolls past. Clamped to 0 when negligible for memo.
-        const distFromEdge = wordStart - cursor;
-        const rawPop = Math.exp(-Math.pow(distFromEdge / 0.14, 2));
-        const pop = rawPop < 0.01 ? 0 : rawPop;
 
-        return <WaveWord key={idx} text={word.text} p={p} pop={pop} glowEnabled={glow !== 'none'} />;
+        return <WaveWord key={idx} text={word.text} p={p} glowEnabled={glow !== 'none'} />;
       })}
     </>
   );
