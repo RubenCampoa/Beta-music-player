@@ -62,6 +62,9 @@ interface PlayerState {
   // Per-song lyric line switch offset in milliseconds (positive = earlier,
   // negative = later). Resets to 0 (default) whenever a new song plays.
   lyricSwitchOffsetMs: number;
+  // Word-by-word (karaoke) lyric rendering. Off by default: per-word lines
+  // render cramped for English lyrics; the user opts in per session.
+  enableKaraoke: boolean;
   enableLyricAnimation: boolean;
   enableLyricGlow: boolean;
   enableLyricBlur: boolean;
@@ -115,6 +118,7 @@ interface PlayerState {
 
   setIsFluidBgEnabled: (enabled: boolean) => void;
   setLyricSwitchOffsetMs: (ms: number) => void;
+  setEnableKaraoke: (enabled: boolean) => void;
   setEnableLyricAnimation: (enabled: boolean) => void;
   setEnableLyricGlow: (enabled: boolean) => void;
   setEnableLyricBlur: (enabled: boolean) => void;
@@ -192,6 +196,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   // Motion Settings
   isFluidBgEnabled: true,
   lyricSwitchOffsetMs: 0,
+  enableKaraoke: false,
   enableLyricAnimation: true,
   enableLyricGlow: true,
   enableLyricBlur: true,
@@ -453,6 +458,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   setIsFluidBgEnabled: (isFluidBgEnabled) => set({ isFluidBgEnabled }),
   setLyricSwitchOffsetMs: (lyricSwitchOffsetMs) => set({ lyricSwitchOffsetMs }),
+  setEnableKaraoke: (enableKaraoke) => set({ enableKaraoke }),
   setEnableLyricAnimation: (enableLyricAnimation) => set({ enableLyricAnimation }),
   setEnableLyricGlow: (enableLyricGlow) => set({ enableLyricGlow }),
   setEnableLyricBlur: (enableLyricBlur) => set({ enableLyricBlur }),

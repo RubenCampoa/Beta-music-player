@@ -19,6 +19,7 @@ import {
   Columns,
   AlignLeft,
   Clock,
+  Sparkles,
 } from 'lucide-react';
 import { motion, useMotionValue, useSpring } from 'framer-motion';
 import { usePlayerStore } from '../../store/playerStore';
@@ -66,6 +67,7 @@ interface KaraokeLineProps {
   layout: 'split' | 'full';
   enableGlow: boolean;
   enableAnimation: boolean;
+  enableKaraoke: boolean;
 }
 
 // --- Active lyric line: "ocean wave" cover reveal ---
@@ -184,12 +186,17 @@ const KaraokeLine: React.FC<KaraokeLineProps> = ({
   fontSize,
   layout,
   enableGlow,
+  enableAnimation,
+  enableKaraoke,
 }) => {
   const cleanText = cleanTitle(line.text);
 
-  // Word-by-word karaoke data (NetEase YRC). Only the active line renders
-  // per-word; lines without word timing fall back to plain text.
-  const words = isActive && line.words && line.words.length > 0 ? line.words : null;
+  // Word-by-word karaoke data (NetEase YRC). Gated by the user toggle
+  // (off by default — per-word lines render cramped for English lyrics);
+  // only the active line renders per-word, lines without word timing fall
+  // back to plain text.
+  const words =
+    isActive && enableKaraoke && line.words && line.words.length > 0 ? line.words : null;
 
   // Font size classes based on layout and size setting
   const mainFontClass =
@@ -310,6 +317,8 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
     enableLyricBlur,
     lyricSwitchOffsetMs,
     setLyricSwitchOffsetMs,
+    enableKaraoke,
+    setEnableKaraoke,
     enableArtworkAnimation,
     lyricFontSize,
     isFluidBgEnabled,
@@ -337,6 +346,8 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
       enableLyricGlow: state.enableLyricGlow,
       lyricSwitchOffsetMs: state.lyricSwitchOffsetMs,
       setLyricSwitchOffsetMs: state.setLyricSwitchOffsetMs,
+      enableKaraoke: state.enableKaraoke,
+      setEnableKaraoke: state.setEnableKaraoke,
       enableLyricBlur: state.enableLyricBlur,
       enableArtworkAnimation: state.enableArtworkAnimation,
       lyricFontSize: state.lyricFontSize,
@@ -521,18 +532,7 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
           scrollToActiveLine(focalIndex, enableLyricAnimation);
         });
       }, 40);
-      // Final re-align once the line jelly (~0.64s) and spring have settled:
-      // transform-based measurements and line-height changes (karaoke wave
-      // line vs plain text) can otherwise leave a 1-2px residual shift.
-      const settleTimer = setTimeout(() => {
-        requestAnimationFrame(() => {
-          scrollToActiveLine(focalIndex, false);
-        });
-      }, 760);
-      return () => {
-        clearTimeout(timer);
-        clearTimeout(settleTimer);
-      };
+      return () => clearTimeout(timer);
     }
   }, [focalIndex, lyrics, lyricFontSize, lyricLayoutMode, isUserScrolling, isVisible, enableLyricAnimation]);
 
@@ -835,6 +835,27 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                   {lyricSwitchOffsetMs > 0 ? `+${lyricSwitchOffsetMs}` : lyricSwitchOffsetMs}ms
                 </span>
               </div>
+
+              {/* Karaoke (word-by-word) toggle — off by default */}
+              <div className="w-full flex items-center justify-between pt-3">
+                <span className="flex items-center space-x-2 text-white/80 text-xs font-medium">
+                  <Sparkles className="w-4 h-4 text-white/60" />
+                  <span>逐字歌词</span>
+                </span>
+                <button
+                  onClick={() => setEnableKaraoke(!enableKaraoke)}
+                  title="逐字歌词（逐词高亮）。默认关闭：英文歌词在逐字模式下较拥挤，中文歌词可开启体验波浪效果"
+                  className={`relative w-10 h-5 rounded-full transition-colors duration-200 ${
+                    enableKaraoke ? 'bg-white/90' : 'bg-white/20'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform duration-200 ${
+                      enableKaraoke ? 'translate-x-5 bg-black/80' : 'bg-white/80'
+                    }`}
+                  />
+                </button>
+              </div>
             </div>
 
             {/* Right Column: Full Screen Height Lyric Engine */}
@@ -925,6 +946,7 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                             layout="split"
                             enableGlow={enableLyricGlow}
                             enableAnimation={enableLyricAnimation}
+                            enableKaraoke={enableKaraoke}
                           />
                         </motion.div>
                       );
@@ -1031,6 +1053,7 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                           layout="full"
                           enableGlow={enableLyricGlow}
                           enableAnimation={enableLyricAnimation}
+                          enableKaraoke={enableKaraoke}
                         />
                       </motion.div>
                     );
