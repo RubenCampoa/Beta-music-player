@@ -407,6 +407,20 @@ class NeteaseApiService {
         uncollected?: boolean;
       }>(`/lyric/new?id=${songId}`, {}, 2500);
 
+      // NetEase's /lyric/new intermittently returns an empty tlyric (upstream
+      // instability, especially without login/cookies). One retry with a
+      // short delay recovers the translation in most of those cases; without
+      // it the line would silently show no translation at all.
+      if (!res.tlyric?.lyric && res.lrc?.lyric) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const retry = await this.fetchApi<{
+          tlyric?: { lyric: string };
+        }>(`/lyric/new?id=${songId}`, {}, 2500);
+        if (retry.tlyric?.lyric) {
+          res.tlyric = retry.tlyric;
+        }
+      }
+
       if (res.nolyric) {
         return [{ time: 0, text: '♪ 纯音乐，无歌词', translation: 'Instrumental Track' }];
       }
