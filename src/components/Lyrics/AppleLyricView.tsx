@@ -156,7 +156,10 @@ const WaveLine: React.FC<{ line: LyricLine; glow: string }> = ({ line, glow }) =
     <>
       {words.map((word, idx) => {
         const wordStart = word.time - line.time; // seconds into the line
-        const wordEnd = wordStart + (word.duration ?? 0.35);
+        // Guard against zero/NaN word durations in malformed YRC data: a
+        // 0-length word would divide by zero and render NaN styles.
+        const wordDuration = Math.max(word.duration ?? 0.35, 0.05);
+        const wordEnd = wordStart + wordDuration;
         const covered = cursor >= wordEnd;
         const uncovered = cursor < wordStart;
         // Word being crossed by the wave edge: 0..1 linear progress. Linear
