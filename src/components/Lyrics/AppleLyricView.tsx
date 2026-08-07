@@ -115,7 +115,7 @@ const WaveWord = React.memo(({ text, p, glowEnabled }: { text: string; p: number
           color: 'transparent',
           filter:
             lit && glowEnabled
-              ? 'drop-shadow(0 0 5px rgba(255,255,255,0.8)) drop-shadow(0 0 12px rgba(255,45,85,0.5))'
+              ? 'drop-shadow(0 0 10px rgba(255,255,255,0.95)) drop-shadow(0 0 20px rgba(255,45,85,0.55))'
               : 'none',
         }}
       >
