@@ -410,6 +410,16 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
     return lyricScrollY.on('change', (latest) => {
       const container = containerRef.current;
       if (container && !isUserScrollingRef.current && !manualScrollRef.current) {
+        // Snap the final fraction: an over-damped spring crawls the last
+        // 1-3px over ~400ms after the visible motion has finished, which
+        // reads (under magnification) as a late upward shift of the whole
+        // list. Once inside the threshold, land exactly on target.
+        const target = lyricScrollTarget.get();
+        if (Math.abs(latest - target) < 0.5) {
+          lyricScrollY.jump(target);
+          container.scrollTop = target;
+          return;
+        }
         container.scrollTop = latest;
       }
     });
