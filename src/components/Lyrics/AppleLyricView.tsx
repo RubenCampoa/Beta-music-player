@@ -84,32 +84,40 @@ interface KaraokeLineProps {
 // keep stable props and are skipped by React, so a slow song with a long line
 // does not rewrite every word's style on every animation frame.
 const WaveWord = React.memo(({ text, p, glowEnabled }: { text: string; p: number; glowEnabled: boolean }) => {
-  const covered = p >= 1;
+  const clamped = Math.min(1, Math.max(0, p));
+  // Non-linear cover progress (fast start, soft settle): the highlight is a
+  // wave edge that paints over the glyph — only the covered part of the
+  // word lights up at any instant, never the whole word at once. The font
+  // itself never moves (no scale/translate).
+  const eased = clamped >= 1 ? 1 : Math.sin((clamped * Math.PI) / 2);
+  const coverPct = eased * 100;
   const edge = p > 0 && p < 1;
-  // The font is untouched (no scale/translate): the wave is pure highlight
-  // — each word's luminance follows the singing progress through a
-  // non-linear ease (fast start, soft settle), so the highlight "paints
-  // over" the glyph instead of the glyph moving. Baseline 0.6 matches the
-  // line-level idle brightness (text-white/60); lit words reach full white.
-  const eased = covered ? 1 : Math.sin((Math.min(1, Math.max(0, p)) * Math.PI) / 2);
-  const intensity = 0.6 + 0.4 * eased;
 
   return (
-    <span
-      className="inline-block"
-      style={{
-        // Explicit baseline keeps each karaoke word on the exact same
-        // vertical line as plain lyric text — an inherited/other vertical
-        // alignment would nudge the glyph baseline and change the line box.
-        verticalAlign: 'baseline',
-        color: `rgba(255,255,255,${intensity})`,
-        textShadow:
-          (covered || edge) && glowEnabled
-            ? `0 0 ${8 + 18 * eased}px rgba(255,255,255,0.92), 0 0 ${14 + 32 * eased}px rgba(255,45,85,0.5)`
-            : undefined,
-      }}
-    >
-      {text}
+    <span className="relative inline-block" style={{ verticalAlign: 'baseline' }}>
+      {/* Base layer: idle dark glyph (matches line-level text-white/60). */}
+      <span className="inline-block" style={{ color: 'rgba(255,255,255,0.6)' }}>
+        {text}
+      </span>
+      {/* Cover layer: a white gradient clipped to the glyph shape. The wave
+          edge lights exactly the covered fraction of the word; the rest
+          stays dark (the base layer shows through the transparent part). */}
+      <span
+        className="absolute inset-0"
+        style={{
+          backgroundImage: `linear-gradient(to right, #ffffff ${coverPct}%, rgba(255,255,255,0) ${coverPct}%)`,
+          WebkitBackgroundClip: 'text',
+          backgroundClip: 'text',
+          WebkitTextFillColor: 'transparent',
+          color: 'transparent',
+          filter:
+            edge && glowEnabled
+              ? 'drop-shadow(0 0 5px rgba(255,255,255,0.75)) drop-shadow(0 0 12px rgba(255,45,85,0.45))'
+              : 'none',
+        }}
+      >
+        {text}
+      </span>
     </span>
   );
 });
@@ -835,24 +843,29 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
               </div>
 
               {/* Karaoke (word-by-word) toggle — off by default */}
-              <div className="w-full flex items-center justify-between pt-3">
-                <span className="flex items-center space-x-2 text-white/80 text-xs font-medium">
-                  <Sparkles className="w-4 h-4 text-white/60" />
-                  <span>逐字歌词</span>
-                </span>
-                <button
-                  onClick={() => setEnableKaraoke(!enableKaraoke)}
-                  title="逐字歌词（逐词高亮）。默认关闭：英文歌词在逐字模式下较拥挤，中文歌词可开启体验波浪效果"
-                  className={`relative w-10 h-5 rounded-full transition-colors duration-200 ${
-                    enableKaraoke ? 'bg-white/90' : 'bg-white/20'
-                  }`}
-                >
-                  <span
-                    className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform duration-200 ${
-                      enableKaraoke ? 'translate-x-5 bg-black/80' : 'bg-white/80'
+              <div className="w-full pt-3">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center space-x-2 text-white/80 text-xs font-medium">
+                    <Sparkles className="w-4 h-4 text-white/60" />
+                    <span>逐字歌词</span>
+                  </span>
+                  <button
+                    onClick={() => setEnableKaraoke(!enableKaraoke)}
+                    title="逐字歌词（逐词高亮）。默认关闭：英文歌词在逐字模式下较拥挤，中文歌词可开启体验波浪效果"
+                    className={`relative w-10 h-5 rounded-full transition-colors duration-200 ${
+                      enableKaraoke ? 'bg-white/90' : 'bg-white/20'
                     }`}
-                  />
-                </button>
+                  >
+                    <span
+                      className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform duration-200 ${
+                        enableKaraoke ? 'translate-x-5 bg-black/80' : 'bg-white/80'
+                      }`}
+                    />
+                  </button>
+                </div>
+                <p className="text-[10px] text-white/35 leading-tight pt-1">
+                  仅网易云支持逐字歌词的音乐开启后生效，QQ音乐暂未进行适配
+                </p>
               </div>
             </div>
 
