@@ -97,10 +97,11 @@ const WaveWord = React.memo(({ text, p, glowEnabled }: { text: string; p: number
   const scale = 1 + 0.18 * pop;
   // Smooth easing so the brightness converges gently at the end of each
   // word (no hard snap), and the glow fades in with the lit progress so
-  // the final highlight is not a sudden flash. The lit glow is boosted so
-  // highlighted words read clearly brighter than the dimmed rest.
+  // the final highlight is not a sudden flash. Baseline 0.6 matches the
+  // line-level idle brightness (text-white/60) so karaoke words and plain
+  // lyric lines read at the same luminance; lit words reach full white.
   const eased = covered ? 1 : Math.sin((Math.min(1, Math.max(0, p)) * Math.PI) / 2);
-  const intensity = 0.3 + 0.7 * eased;
+  const intensity = 0.6 + 0.4 * eased;
 
   return (
     <span
