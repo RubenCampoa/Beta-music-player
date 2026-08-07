@@ -101,6 +101,10 @@ const WaveWord = React.memo(({ text, p, pop, glowEnabled }: { text: string; p: n
       className="inline-block will-change-transform"
       style={{
         transform: `translateX(${shiftX}px) scale(${scale})`,
+        // Explicit baseline keeps each karaoke word on the exact same
+        // vertical line as plain lyric text — an inherited/other vertical
+        // alignment would nudge the glyph baseline and change the line box.
+        verticalAlign: 'baseline',
         color: `rgba(255,255,255,${intensity})`,
         textShadow:
           (covered || edge) && glowEnabled
@@ -517,7 +521,18 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
           scrollToActiveLine(focalIndex, enableLyricAnimation);
         });
       }, 40);
-      return () => clearTimeout(timer);
+      // Final re-align once the line jelly (~0.64s) and spring have settled:
+      // transform-based measurements and line-height changes (karaoke wave
+      // line vs plain text) can otherwise leave a 1-2px residual shift.
+      const settleTimer = setTimeout(() => {
+        requestAnimationFrame(() => {
+          scrollToActiveLine(focalIndex, false);
+        });
+      }, 760);
+      return () => {
+        clearTimeout(timer);
+        clearTimeout(settleTimer);
+      };
     }
   }, [focalIndex, lyrics, lyricFontSize, lyricLayoutMode, isUserScrolling, isVisible, enableLyricAnimation]);
 
