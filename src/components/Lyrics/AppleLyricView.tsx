@@ -115,7 +115,7 @@ const WaveWord = React.memo(({ text, p, glowEnabled }: { text: string; p: number
           color: 'transparent',
           filter:
             lit && glowEnabled
-              ? 'drop-shadow(0 0 10px rgba(255,255,255,0.95)) drop-shadow(0 0 20px rgba(255,45,85,0.55))'
+              ? 'drop-shadow(0 0 10px rgba(255,255,255,0.95))'
               : 'none',
         }}
       >
@@ -215,8 +215,8 @@ const KaraokeLine: React.FC<KaraokeLineProps> = ({
   const sungWordGlow =
     isActive && enableGlow
       ? layout === 'full'
-        ? '0 0 18px rgba(255, 255, 255, 0.85), 0 0 32px rgba(255, 45, 85, 0.45)'
-        : '0 0 14px rgba(255, 255, 255, 0.75), 0 0 26px rgba(255, 45, 85, 0.4)'
+        ? '0 0 18px rgba(255, 255, 255, 0.85)'
+        : '0 0 14px rgba(255, 255, 255, 0.75)'
       : 'none';
 
   return (
@@ -229,8 +229,8 @@ const KaraokeLine: React.FC<KaraokeLineProps> = ({
           textShadow:
             isActive && enableGlow && !words
               ? layout === 'full'
-                ? '0 0 26px rgba(255, 255, 255, 0.95), 0 0 46px rgba(255, 45, 85, 0.55)'
-                : '0 0 22px rgba(255, 255, 255, 0.9), 0 0 38px rgba(255, 45, 85, 0.5)'
+                ? '0 0 26px rgba(255, 255, 255, 0.95)'
+                : '0 0 22px rgba(255, 255, 255, 0.9)'
               : 'none',
         }}
       >
@@ -276,9 +276,7 @@ const PreChorusDots: React.FC<{ elapsed: number; firstTime: number }> = ({ elaps
             className="w-2.5 h-2.5 rounded-full"
             style={{
               background: lit ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.22)',
-              boxShadow: lit
-                ? '0 0 14px rgba(255,255,255,0.85), 0 0 28px rgba(255,45,85,0.45)'
-                : 'none',
+              boxShadow: lit ? '0 0 14px rgba(255,255,255,0.85)' : 'none',
             }}
             animate={lit ? { scale: [0.55, 1.35, 0.92, 1.12, 1] } : { scale: 1 }}
             transition={
