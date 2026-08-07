@@ -76,25 +76,16 @@ interface KaraokeLineProps {
 // split (covered left half lit, uncovered right half dark) plus a linked
 // upward jelly (overshoot) pop. The cursor is continuous, so the edge flows
 // through fast songs without flashing.
-const easeOutBack = (x: number): number => {
-  const c1 = 1.70158;
-  const c3 = c1 + 1;
-  return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
-};
 
 // One word of the wave line. Memoized: a word only re-renders while the wave
 // edge is crossing it (p in (0,1)) — covered (p=1) and untouched (p=0) words
 // keep stable props and are skipped by React, so a slow song with a long line
 // does not rewrite every word's style on every animation frame.
-const WaveWord = React.memo(({ text, p, glowEnabled }: { text: string; p: number; glowEnabled: boolean }) => {
+const WaveWord = React.memo(({ text, p, pop, glowEnabled }: { text: string; p: number; pop: number; glowEnabled: boolean }) => {
   const covered = p >= 1;
   const edge = p > 0 && p < 1;
-  // Linked jelly: sine envelope keeps start/end at rest while the
-  // overshoot makes the lift elastic; adjacent words share the same
-  // phase curve so the wave rolls through the line.
-  const pop = edge ? Math.sin(p * Math.PI) * easeOutBack(p) : 0;
-  const lift = -8 * pop;
-  const scale = 1 + 0.18 * pop;
+  const lift = -7 * pop;
+  const scale = 1 + 0.16 * pop;
   // Smooth easing so the brightness converges gently at the end of each
   // word (no hard snap), and the glow fades in with the lit progress so
   // the final highlight is not a sudden flash. Baseline 0.6 matches the
@@ -166,8 +157,16 @@ const WaveLine: React.FC<{ line: LyricLine; glow: string }> = ({ line, glow }) =
         // keeps the wave rolling at a constant pace (a natural ocean wave);
         // per-word easing made it start/stop at every word boundary.
         const p = covered ? 1 : uncovered ? 0 : (cursor - wordStart) / (wordEnd - wordStart);
+        // Linked jelly as a continuous Gaussian envelope: the pop is a
+        // smooth function of how far the wave edge is from this word's
+        // centre, so adjacent words rise/fall seamlessly as the wave rolls
+        // through — no per-word restart, which read as stuttering lifts on
+        // slow songs. Clamped to 0 when negligible so memoisation holds.
+        const distFromEdge = wordStart + wordDuration / 2 - cursor;
+        const rawPop = Math.exp(-Math.pow(distFromEdge / 0.14, 2));
+        const pop = rawPop < 0.01 ? 0 : rawPop;
 
-        return <WaveWord key={idx} text={word.text} p={p} glowEnabled={glow !== 'none'} />;
+        return <WaveWord key={idx} text={word.text} p={p} pop={pop} glowEnabled={glow !== 'none'} />;
       })}
     </>
   );
@@ -366,9 +365,12 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
   const userScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lyricScrollTarget = useMotionValue(0);
   const lyricScrollY = useSpring(lyricScrollTarget, {
-    stiffness: 160,
-    damping: 22,
-    mass: 0.7,
+    // Slower, well-damped spring so the list scroll settles at the same
+    // pace as the line jelly (~0.64s) — the move and the jelly read as one
+    // motion instead of "scroll first, bounce after".
+    stiffness: 120,
+    damping: 24,
+    mass: 0.9,
   });
   const isUserScrollingRef = useRef(false);
   // While a manual (non-spring) scroll animation is running, the spring
