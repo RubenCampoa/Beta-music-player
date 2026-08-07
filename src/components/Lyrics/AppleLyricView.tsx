@@ -84,8 +84,10 @@ interface KaraokeLineProps {
 const WaveWord = React.memo(({ text, p, pop, glowEnabled }: { text: string; p: number; pop: number; glowEnabled: boolean }) => {
   const covered = p >= 1;
   const edge = p > 0 && p < 1;
-  const lift = -7 * pop;
-  const scale = 1 + 0.16 * pop;
+  // Horizontal wave: the word is nudged sideways as the wave edge passes
+  // (a left-to-right rolling ocean), instead of a vertical bounce.
+  const shiftX = 4 * pop;
+  const scale = 1 + 0.1 * pop;
   // Smooth easing so the brightness converges gently at the end of each
   // word (no hard snap), and the glow fades in with the lit progress so
   // the final highlight is not a sudden flash. Baseline 0.6 matches the
@@ -98,7 +100,7 @@ const WaveWord = React.memo(({ text, p, pop, glowEnabled }: { text: string; p: n
     <span
       className="inline-block will-change-transform"
       style={{
-        transform: `translateY(${lift}px) scale(${scale})`,
+        transform: `translateX(${shiftX}px) scale(${scale})`,
         color: `rgba(255,255,255,${intensity})`,
         textShadow:
           (covered || edge) && glowEnabled
@@ -157,12 +159,11 @@ const WaveLine: React.FC<{ line: LyricLine; glow: string }> = ({ line, glow }) =
         // keeps the wave rolling at a constant pace (a natural ocean wave);
         // per-word easing made it start/stop at every word boundary.
         const p = covered ? 1 : uncovered ? 0 : (cursor - wordStart) / (wordEnd - wordStart);
-        // Linked jelly as a continuous Gaussian envelope: the pop is a
-        // smooth function of how far the wave edge is from this word's
-        // centre, so adjacent words rise/fall seamlessly as the wave rolls
-        // through — no per-word restart, which read as stuttering lifts on
-        // slow songs. Clamped to 0 when negligible so memoisation holds.
-        const distFromEdge = wordStart + wordDuration / 2 - cursor;
+        // Linked jelly as a continuous Gaussian envelope: the pop peaks as
+        // the wave edge REACHES the word's start (no lag after it arrives —
+        // a centred peak delayed the bounce by half the word), then decays
+        // as the edge rolls past. Clamped to 0 when negligible for memo.
+        const distFromEdge = wordStart - cursor;
         const rawPop = Math.exp(-Math.pow(distFromEdge / 0.14, 2));
         const pop = rawPop < 0.01 ? 0 : rawPop;
 
