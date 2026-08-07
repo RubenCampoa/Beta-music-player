@@ -14,7 +14,6 @@ let normalBoundsBeforeMaximize: Electron.Rectangle | null = null;
 let windowOpacityAnimation: NodeJS.Timeout | null = null;
 let windowBoundsAnimation: NodeJS.Timeout | null = null;
 let isAnimatingWindowBounds = false;
-let isProgrammaticMinimize = false;
 
 // Let Chromium choose the platform's normal compositor and frame pacing. The
 // old forced-rasterization flags disabled vsync for the transparent window,
@@ -212,7 +211,7 @@ function showMainWindowAnimated() {
   animateNativeOpacity(1, 260);
 }
 
-function animateWindowBounds(target: Electron.Rectangle, duration: number, onComplete?: () => void) {
+function animateWindowBounds(target: Electron.Rectangle, duration: number, onComplete?: () => void, frameInterval = 16) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (windowBoundsAnimation) clearTimeout(windowBoundsAnimation);
 
@@ -232,7 +231,7 @@ function animateWindowBounds(target: Electron.Rectangle, duration: number, onCom
     }, false);
 
     if (progress < 1) {
-      windowBoundsAnimation = setTimeout(tick, 16);
+      windowBoundsAnimation = setTimeout(tick, frameInterval);
     } else {
       windowBoundsAnimation = null;
       isAnimatingWindowBounds = false;
@@ -243,6 +242,7 @@ function animateWindowBounds(target: Electron.Rectangle, duration: number, onCom
   tick();
 }
 
+// Windows does not play its shrink-to-taskbar animation for frameless,
 function animateToggleMaximize() {
   if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isFullScreen() || mainWindow.isMinimized()) return;
   if (windowBoundsAnimation) return;
@@ -316,33 +316,14 @@ function createWindow() {
   mainWindow.on('resize', rememberWindowedBounds);
   mainWindow.on('move', rememberWindowedBounds);
 
-  mainWindow.on('minimize', (event: Electron.Event) => {
-    if (isProgrammaticMinimize) {
-      isProgrammaticMinimize = false;
-      return;
-    }
+  // Minimize/restore intentionally have no handlers: the OS plays its native
+  // window animation, and the renderer's custom shell transitions are only
+  // driven by the tray show path (showMainWindowAnimated) which has no
+  // native counterpart.
 
-    // On Windows this event can be cancelled, which lets a taskbar click use
-    // the same fade/shrink animation as the custom title-bar button. If the
-    // platform ignores preventDefault, the delayed minimize is harmless and
-    // the restore animation still remains active.
-    event.preventDefault();
-    sendWindowTransition('minimizing');
-    animateNativeOpacity(0, 220, () => {
-      if (!mainWindow || mainWindow.isDestroyed()) return;
-      isProgrammaticMinimize = true;
-      mainWindow.minimize();
-      mainWindow.setOpacity(1);
-    });
-  });
-
-  mainWindow.on('restore', () => {
-    mainWindow?.setOpacity(0);
-    mainWindow?.show();
-    mainWindow?.focus();
-    sendWindowTransition('restoring');
-    animateNativeOpacity(1, 260);
-  });
+  // Minimize/restore use the OS default behaviour (no custom window
+  // animation — custom shrink/grow animations were removed as they did not
+  // feel right on frameless transparent windows).
 
   mainWindow.on('maximize', () => {
     sendWindowTransition('maximizing');
@@ -786,14 +767,8 @@ function setMainWindowFullScreen(enabled: boolean) {
 // Basic Window Controls
 ipcMain.on('window-minimize', () => {
   if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isMinimized()) return;
-  sendWindowTransition('minimizing');
-  animateNativeOpacity(0, 220, () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    isProgrammaticMinimize = true;
-    mainWindow.minimize();
-    // Keep the window fully opaque for the next taskbar restore.
-    mainWindow.setOpacity(1);
-  });
+  // System default minimize behaviour.
+  mainWindow.minimize();
 });
 ipcMain.on('window-maximize', () => animateToggleMaximize());
 ipcMain.on('window-fullscreen', () => {

@@ -1,7 +1,17 @@
 import { Song, Playlist, UserProfile, LyricLine } from '../types/music';
-import { cleanTitle, getOptimizedCoverUrl, combineMainAndTransLyrics } from '../utils/format';
-
-export { cleanTitle, getOptimizedCoverUrl };
+import { cleanTitle, combineMainAndTransLyrics } from '../utils/format';
+import { parseYrc } from '../utils/yrc';
+import { parseLrc as parseLrcCommon } from '../utils/lrc';
+import { StorageKeys, getItem, setItem, removeItem } from '../utils/storage';
+import {
+  NeteaseTrack,
+  NeteaseArtist,
+  NeteasePlaylistItem,
+  NeteaseQrKeyResponse,
+  NeteaseQrImageResponse,
+  NeteaseSearchResponse,
+  NeteasePlaylistTracksResponse,
+} from '../types/netease';
 
 // High Availability API Mirror List (Local Primary + High-Speed HTTPS Fallback Mirrors)
 const API_BASE_ENDPOINTS = [
@@ -11,13 +21,13 @@ const API_BASE_ENDPOINTS = [
 ];
 
 class NeteaseApiService {
-  private cookie: string = localStorage.getItem('netease_cookie') || '';
+  private cookie: string = getItem(StorageKeys.neteaseCookie) || '';
   private activeBaseIndex: number = 0;
   private audioUrlCache = new Map<string, { url: string; expiresAt: number }>();
 
   public setCookie(cookie: string) {
     this.cookie = cookie;
-    localStorage.setItem('netease_cookie', cookie);
+    setItem(StorageKeys.neteaseCookie, cookie);
   }
 
   public getCookie(): string {
@@ -28,7 +38,7 @@ class NeteaseApiService {
     this.cookie = '';
     this.audioUrlCache.clear();
     this.activeBaseIndex = 0;
-    localStorage.removeItem('netease_cookie');
+    removeItem(StorageKeys.neteaseCookie);
   }
 
   // Resilient fetchApi with automatic failover mirror switching.
@@ -79,7 +89,7 @@ class NeteaseApiService {
   // --- QR Code Login Flow (Natively via api-enhanced) ---
   public async getQrKey(): Promise<string> {
     try {
-      const res = await this.fetchApi<any>('/login/qr/key');
+      const res = await this.fetchApi<NeteaseQrKeyResponse>('/login/qr/key');
       return res.data?.unikey || res.unikey || res.data?.key || res.key || '';
     } catch {
       return '';
@@ -89,7 +99,7 @@ class NeteaseApiService {
   public async getQrImage(key: string): Promise<string> {
     if (!key) return '';
     try {
-      const res = await this.fetchApi<any>(`/login/qr/create?key=${encodeURIComponent(key)}&qrimg=true`);
+      const res = await this.fetchApi<NeteaseQrImageResponse>(`/login/qr/create?key=${encodeURIComponent(key)}&qrimg=true`);
       return res.data?.qrimg || res.qrimg || res.data?.qrurl || '';
     } catch {
       return '';
@@ -157,12 +167,12 @@ class NeteaseApiService {
   // --- User Playlists ---
   public async getUserPlaylists(uid: number): Promise<Playlist[]> {
     try {
-      const res = await this.fetchApi<{ playlist: any[] }>(`/user/playlist?uid=${uid}`);
-      return (res.playlist || []).map((pl) => ({
+      const res = await this.fetchApi<{ playlist?: NeteasePlaylistItem[] }>(`/user/playlist?uid=${uid}`);
+      return (res.playlist || []).map((pl: NeteasePlaylistItem) => ({
         id: pl.id,
         name: pl.name,
-        coverImgUrl: pl.coverImgUrl,
-        trackCount: pl.trackCount,
+        coverImgUrl: pl.coverImgUrl || '',
+        trackCount: pl.trackCount || 0,
         creatorName: pl.creator?.nickname,
         description: pl.description,
         isUserPlaylist: true,
@@ -194,13 +204,13 @@ class NeteaseApiService {
   // --- Playlist Songs (Supports Unlimited Multi-Page Auto-Fetching) ---
   public async getPlaylistSongs(playlistId: string | number, allowFallback = true): Promise<Song[]> {
     try {
-      let allTracks: any[] = [];
+      let allTracks: NeteaseTrack[] = [];
       let offset = 0;
       const pageSize = 1000;
       let hasMore = true;
 
       while (hasMore) {
-        const res = await this.fetchApi<{ songs?: any[]; playlist?: { tracks: any[] } }>(
+        const res = await this.fetchApi<NeteasePlaylistTracksResponse>(
           `/playlist/track/all?id=${playlistId}&limit=${pageSize}&offset=${offset}`
         );
         const tracks = res.songs || res.playlist?.tracks || [];
@@ -232,7 +242,7 @@ class NeteaseApiService {
   public async searchSongs(keywords: string): Promise<Song[]> {
     try {
       // First try /cloudsearch which natively includes track.al.picUrl for all search results
-      const res = await this.fetchApi<{ result?: { songs?: any[] }; code?: number }>(
+      const res = await this.fetchApi<NeteaseSearchResponse>(
         `/cloudsearch?keywords=${encodeURIComponent(keywords)}`
       );
       const songs = res.result?.songs;
@@ -245,7 +255,7 @@ class NeteaseApiService {
 
     try {
       // Fallback to /search if /cloudsearch is unavailable
-      const res = await this.fetchApi<{ result?: { songs?: any[] } }>(
+      const res = await this.fetchApi<NeteaseSearchResponse>(
         `/search?keywords=${encodeURIComponent(keywords)}`
       );
       const songs = res.result?.songs || [];
@@ -253,9 +263,9 @@ class NeteaseApiService {
 
       // If search results lack picUrl, fetch full track details via /song/detail
       if (!songs[0].al?.picUrl && !songs[0].album?.picUrl) {
-        const ids = songs.map((s: any) => s.id).slice(0, 30).join(',');
+        const ids = songs.map((s: NeteaseTrack) => s.id).slice(0, 30).join(',');
         try {
-          const detailRes = await this.fetchApi<{ songs?: any[] }>(`/song/detail?ids=${ids}`);
+          const detailRes = await this.fetchApi<{ songs?: NeteaseTrack[] }>(`/song/detail?ids=${ids}`);
           if (detailRes.songs && detailRes.songs.length > 0) {
             return detailRes.songs.map((track) => this.formatTrackToSong(track));
           }
@@ -388,12 +398,14 @@ class NeteaseApiService {
   // --- Song Lyrics Parsing (Main LRC + Translation tlyric) ---
   public async getSongLyrics(songId: number): Promise<LyricLine[]> {
     try {
+      // /lyric/new returns lrc + tlyric + yrc (word-level karaoke) in one call.
       const res = await this.fetchApi<{
         lrc?: { lyric: string };
         tlyric?: { lyric: string };
+        yrc?: { lyric: string };
         nolyric?: boolean;
         uncollected?: boolean;
-      }>(`/lyric?id=${songId}`, {}, 2500);
+      }>(`/lyric/new?id=${songId}`, {}, 2500);
 
       if (res.nolyric) {
         return [{ time: 0, text: '♪ 纯音乐，无歌词', translation: 'Instrumental Track' }];
@@ -404,6 +416,37 @@ class NeteaseApiService {
 
       const mainLyrics = res.lrc?.lyric ? this.parseLrc(res.lrc.lyric) : [];
       const transLyrics = res.tlyric?.lyric ? this.parseLrc(res.tlyric.lyric) : [];
+      const yrcWords = parseYrc(res.yrc?.lyric);
+
+      // YRC (word-level karaoke) is the authoritative source when present:
+      // its timestamps can differ from the LRC's (different lyric revisions,
+      // e.g. 后来: lrc 12.571s vs yrc 12.21s), so lines are built from YRC
+      // itself instead of trying to match timestamps across sources.
+      if (yrcWords.size > 0) {
+        const yrcLines: LyricLine[] = [];
+        for (const [time, words] of yrcWords) {
+          yrcLines.push({
+            time,
+            text: words.map((word) => word.text).join(''),
+            words,
+          });
+        }
+        yrcLines.sort((a, b) => a.time - b.time);
+
+        // Attach translation lines by loose timestamp tolerance (YRC is the
+        // official timeline; translations, when present, usually follow it).
+        if (transLyrics.length > 0) {
+          for (const line of yrcLines) {
+            const trans = transLyrics.find(
+              (t) => Math.abs(t.time - line.time) < 0.4
+            );
+            if (trans) {
+              line.translation = trans.text;
+            }
+          }
+        }
+        return yrcLines;
+      }
 
       if (mainLyrics.length > 0) {
         return combineMainAndTransLyrics(mainLyrics, transLyrics);
@@ -418,52 +461,18 @@ class NeteaseApiService {
 
   // Parse LRC String into structured LyricLine array
   public parseLrc(lrcString: string): LyricLine[] {
-    if (!lrcString) return [];
-    const lines = lrcString.split(/\r?\n/);
-    const lyrics: LyricLine[] = [];
-    const tagReg = /\[(\d+):(\d{2})(?:[\.\:](\d{1,3}))?\]/g;
-    const metaReg = /^\[(ti|ar|al|by|offset|length|re|ve):/i;
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || metaReg.test(trimmed)) continue;
-
-      let match;
-      const times: number[] = [];
-      tagReg.lastIndex = 0;
-
-      while ((match = tagReg.exec(trimmed)) !== null) {
-        const minutes = parseInt(match[1], 10);
-        const seconds = parseInt(match[2], 10);
-        let millis = 0;
-        if (match[3]) {
-          const rawMs = match[3];
-          millis = rawMs.length === 3 ? parseInt(rawMs, 10) : parseInt(rawMs, 10) * 10;
-        }
-        times.push(minutes * 60 + seconds + millis / 1000);
-      }
-
-      if (times.length > 0) {
-        const text = this.cleanTitle(trimmed.replace(tagReg, '').trim());
-        if (text) {
-          for (const time of times) {
-            lyrics.push({ time, text });
-          }
-        }
-      }
-    }
-    return lyrics.sort((a, b) => a.time - b.time);
+    return parseLrcCommon(lrcString, { filterMeta: true });
   }
 
   public cleanTitle(str?: string): string {
     return cleanTitle(str);
   }
 
-  private formatTrackToSong(track: any): Song {
+  private formatTrackToSong(track: NeteaseTrack): Song {
     const artistName = track.ar
-      ? track.ar.map((a: any) => a.name).join(' / ')
+      ? track.ar.map((a: NeteaseArtist) => a.name).join(' / ')
       : track.artists
-      ? track.artists.map((a: any) => a.name).join(' / ')
+      ? track.artists.map((a: NeteaseArtist) => a.name).join(' / ')
       : '未知歌手';
 
     let rawCoverUrl =

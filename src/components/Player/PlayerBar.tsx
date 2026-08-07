@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Play,
   Pause,
@@ -16,8 +16,10 @@ import {
   Tv,
 } from 'lucide-react';
 import { usePlayerStore } from '../../store/playerStore';
-import { neteaseApi, getOptimizedCoverUrl } from '../../services/neteaseApi';
+import { neteaseApi } from '../../services/neteaseApi';
+import { getOptimizedCoverUrl } from '../../utils/format';
 import { formatTime, handleImageError } from '../../utils/format';
+import { emitAudioSeek } from '../../utils/events';
 import { shallow } from 'zustand/shallow';
 
 const PlayerProgress = React.memo(() => {
@@ -25,26 +27,70 @@ const PlayerProgress = React.memo(() => {
     (state) => ({ currentTime: state.currentTime, duration: state.duration }),
     shallow,
   );
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const draggingRef = useRef(false);
+  // While dragging, the bar is driven by a local preview value so the fill
+  // follows the pointer immediately (the store currentTime only ticks ~4x/s).
+  // The actual seek is committed once on release (Apple Music style) to avoid
+  // churning the audio with seeks on every pointermove.
+  const [dragPercent, setDragPercent] = useState<number | null>(null);
 
-  const handleProgressSeek = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!duration) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const percent = Math.max(0, Math.min(1, clickX / rect.width));
-    window.dispatchEvent(new CustomEvent('audio-seek', { detail: percent * duration }));
+  const updatePreview = (clientX: number) => {
+    if (!duration || !trackRef.current) return;
+    const rect = trackRef.current.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    setDragPercent(percent);
   };
 
-  const progressPercent = duration ? Math.min(100, (currentTime / duration) * 100) : 0;
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!duration) return;
+    draggingRef.current = true;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    updatePreview(e.clientX);
+  };
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!duration || !draggingRef.current) return;
+    updatePreview(e.clientX);
+  };
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    draggingRef.current = false;
+    if (duration && trackRef.current) {
+      const rect = trackRef.current.getBoundingClientRect();
+      if (rect.width > 0) {
+        const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        emitAudioSeek(percent * duration);
+      }
+    }
+    setDragPercent(null);
+  };
+  const handlePointerCancel = () => {
+    draggingRef.current = false;
+    setDragPercent(null);
+  };
+
+  const progressPercent =
+    dragPercent !== null
+      ? dragPercent * 100
+      : duration
+      ? Math.min(100, (currentTime / duration) * 100)
+      : 0;
 
   return (
     <div className="w-full flex items-center space-x-2.5 text-[11px] font-mono text-[#9aa3af]">
-      <span>{formatTime(currentTime)}</span>
+      <span>{formatTime(dragPercent !== null ? dragPercent * duration : currentTime)}</span>
       <div
-        onClick={handleProgressSeek}
-        className="progress-track relative flex-1 h-1.5 hover:h-2 rounded-full cursor-pointer overflow-visible transition-all"
+        ref={trackRef}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
+        className="progress-track relative flex-1 h-1.5 hover:h-2 rounded-full cursor-pointer overflow-visible transition-all touch-none"
       >
         <div
-          className="progress-fill h-full rounded-full relative transition-[width] duration-150 ease-out"
+          className={`progress-fill h-full rounded-full relative ${
+            dragPercent !== null ? 'transition-none' : 'transition-[width] duration-150 ease-out'
+          }`}
           style={{ width: `${progressPercent}%` }}
         >
           <div className="progress-thumb absolute right-0 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full shadow-md" />

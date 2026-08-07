@@ -3,7 +3,7 @@ import { Play, Music, ListMusic } from 'lucide-react';
 import { Song } from '../types/music';
 import { usePlayerStore } from '../store/playerStore';
 import { shallow } from 'zustand/shallow';
-import { getOptimizedCoverUrl, cleanTitle } from '../services/neteaseApi';
+import { getOptimizedCoverUrl, cleanTitle } from '../utils/format';
 import { musicApiAdapter } from '../services/musicApiAdapter';
 
 export const PlaylistView: React.FC = () => {

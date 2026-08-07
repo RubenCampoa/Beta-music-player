@@ -18,6 +18,7 @@ import {
   Settings,
 } from 'lucide-react';
 import { usePlayerStore } from '../store/playerStore';
+import { APP_VERSION, checkForUpdate } from '../utils/version';
 import { neteaseApi } from '../services/neteaseApi';
 import { qqMusicApi } from '../services/qqMusicApi';
 import { localMusicService } from '../services/localMusicService';
@@ -66,32 +67,24 @@ export const SettingsView: React.FC = () => {
     setToastMessage('正在从 GitHub 检查最新版本...');
     setIsCheckingUpdate(true);
     try {
-      const res = await fetch(
-        `https://api.github.com/repos/RubenCampoa/Beta-music-player/releases/latest?t=${Date.now()}`,
-        {
-          headers: {
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            Pragma: 'no-cache',
-          },
-        }
-      );
-
-      if (res.ok) {
-        const data = await res.json();
-        const latestTag = data.tag_name;
-        const currentVersion = 'v1.0.7';
-        const normalize = (v: string) => v.replace(/^v/i, '').trim();
-
-        if (latestTag && normalize(latestTag) !== normalize(currentVersion)) {
-          setToastMessage(`发现新版本 ${latestTag}！可在设置中点击检查更新进行查看与升级`);
-          if (data.html_url) {
-            window.open(data.html_url, '_blank');
+      const result = await checkForUpdate();
+      switch (result.status) {
+        case 'ok':
+          if (result.isNewer) {
+            setToastMessage(`发现新版本 ${result.latestTag}！可在设置中点击检查更新进行查看与升级`);
+            window.open(result.htmlUrl, '_blank');
+          } else {
+            setToastMessage(`当前已经是最新版本 (${APP_VERSION})`);
           }
-        } else {
-          setToastMessage(`当前已经是最新版本 (${currentVersion})`);
-        }
-      } else {
-        setToastMessage('当前已经是最新版本 (v1.0.7)');
+          break;
+        case 'rate-limited':
+          setToastMessage('GitHub API 暂时限流（每小时 60 次限额），请稍后再试');
+          break;
+        case 'not-found':
+          setToastMessage('未在 GitHub 找到发布信息，请稍后重试');
+          break;
+        default:
+          setToastMessage('检查更新失败，请检查网络连接');
       }
     } catch {
       setToastMessage('检查更新失败，请检查网络连接');
@@ -113,7 +106,7 @@ export const SettingsView: React.FC = () => {
         </div>
         <div className="flex items-center space-x-3">
           <div className="px-3 py-1 bg-white/5 rounded-full border border-white/10 text-xs text-white/60 font-medium">
-            Beta Music Player v1.0.7
+            Beta Music Player {APP_VERSION}
           </div>
           <button
             onClick={handleCheckUpdate}

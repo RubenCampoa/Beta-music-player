@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { ArrowRight, Clock3, Heart, Play, Sparkles } from 'lucide-react';
 import { Song, Playlist } from '../types/music';
 import { usePlayerStore } from '../store/playerStore';
-import { neteaseApi, getOptimizedCoverUrl } from '../services/neteaseApi';
+import { neteaseApi } from '../services/neteaseApi';
+import { getOptimizedCoverUrl } from '../utils/format';
 import { musicApiAdapter } from '../services/musicApiAdapter';
 import { shallow } from 'zustand/shallow';
 

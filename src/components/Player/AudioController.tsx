@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { usePlayerStore } from '../../store/playerStore';
 import { shallow } from 'zustand/shallow';
 import { musicApiAdapter } from '../../services/musicApiAdapter';
+import { onAudioSeek } from '../../utils/events';
 
 export const AudioController: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -21,6 +22,7 @@ export const AudioController: React.FC = () => {
     repeatMode,
     setIsPlaying,
     setCurrentTime,
+    setAudioElement,
     setDuration,
     nextSong,
   } = usePlayerStore(
@@ -32,6 +34,7 @@ export const AudioController: React.FC = () => {
       repeatMode: state.repeatMode,
       setIsPlaying: state.setIsPlaying,
       setCurrentTime: state.setCurrentTime,
+      setAudioElement: state.setAudioElement,
       setDuration: state.setDuration,
       nextSong: state.nextSong,
     }),
@@ -200,17 +203,20 @@ export const AudioController: React.FC = () => {
 
   // Handle Seek from custom events
   useEffect(() => {
-    const handleSeekEvent = (e: CustomEvent<number>) => {
+    return onAudioSeek((time) => {
       if (audioRef.current) {
-        audioRef.current.currentTime = e.detail;
-        setCurrentTime(e.detail);
+        audioRef.current.currentTime = time;
+        setCurrentTime(time);
       }
-    };
+    });
+  }, []);
 
-    window.addEventListener('audio-seek' as any, handleSeekEvent);
-    return () => {
-      window.removeEventListener('audio-seek' as any, handleSeekEvent);
-    };
+  // Expose the live <audio> element so frame-driven renderers (karaoke
+  // words, wave lines) can read the exact media clock instead of
+  // extrapolating from coarse timeupdate snapshots.
+  useEffect(() => {
+    setAudioElement(audioRef.current);
+    return () => setAudioElement(null);
   }, []);
 
   return (

@@ -2,9 +2,8 @@ import React from 'react';
 import { Search, Play, Music, Sparkles } from 'lucide-react';
 import { usePlayerStore } from '../store/playerStore';
 import { shallow } from 'zustand/shallow';
-import { getOptimizedCoverUrl } from '../services/neteaseApi';
 import { Song, Platform } from '../types/music';
-import { cleanTitle, DEFAULT_COVER_PLACEHOLDER } from '../utils/format';
+import { getOptimizedCoverUrl, cleanTitle, DEFAULT_COVER_PLACEHOLDER } from '../utils/format';
 
 export const SearchView: React.FC = () => {
   const {

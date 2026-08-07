@@ -1,5 +1,25 @@
 import { Song, Playlist, LyricLine, UserProfile } from '../types/music';
 import { cleanTitle, DEFAULT_COVER_PLACEHOLDER, combineMainAndTransLyrics } from '../utils/format';
+import { parseLrc as parseLrcCommon } from '../utils/lrc';
+import { StorageKeys, getItem, setItem, removeItem } from '../utils/storage';
+import {
+  QQSongItem,
+  QQSongSinger,
+  QQPay,
+  QQSearchResponse,
+  QQRankResponse,
+  QQSongInfoResponse,
+  QQPlayUrlResponse,
+  QQLyricResponse,
+  QQPlaylistListResponse,
+  QQPlaylistDetailResponse,
+  QQPlaylistItem,
+  QQUserPlaylistsResponse,
+  QQUserPlaylistItem,
+  QQUserDetailResponse,
+  QQQrResponse,
+  QQLoginCheckResponse,
+} from '../types/qq';
 
 // Local qq-music-api HTTP server (started by Electron main process on port 3200).
 // All QQ Music requests are proxied through this local server, which handles
@@ -21,17 +41,17 @@ const normalizeTitle = (title?: string): string =>
 // Pick the best search hit for (name, artist). Returns null when nothing
 // matches well enough — the caller keeps the original rank info instead of
 // risking a wrong song's VIP status / songmid.
-function findMatchingSearchHit(songs: any[], name: string, artist: string): any | null {
+function findMatchingSearchHit(songs: QQSongItem[], name: string, artist: string): QQSongItem | null {
   if (!songs || songs.length === 0) return null;
 
   const targetTitle = normalizeTitle(name);
   const targetHasVersionTag = VERSION_TAGS.test(name || '');
-  const singerMatch = (s: any) => {
-    const singers = Array.isArray(s.singer) ? s.singer.map((x: any) => x.name || '').join(' / ') : '';
+  const singerMatch = (s: QQSongItem) => {
+    const singers = Array.isArray(s.singer) ? s.singer.map((x: QQSongSinger) => x.name || '').join(' / ') : '';
     return singers.toLowerCase().includes((artist || '').toLowerCase());
   };
-  const titleMatch = (s: any) => normalizeTitle(s.songname || s.name) === targetTitle;
-  const noVersionTag = (s: any) => !VERSION_TAGS.test(s.songname || s.name || '');
+  const titleMatch = (s: QQSongItem) => normalizeTitle(s.songname || s.name) === targetTitle;
+  const noVersionTag = (s: QQSongItem) => !VERSION_TAGS.test(s.songname || s.name || '');
 
   const candidates = artist && artist !== '未知歌手' ? songs.filter(singerMatch) : songs;
   if (candidates.length === 0) return null;
@@ -49,7 +69,7 @@ class QQMusicApiService {
   private qqCookie: string = '';
 
   constructor() {
-    this.qqCookie = localStorage.getItem('qq_music_cookie') || '';
+    this.qqCookie = getItem(StorageKeys.qqMusicCookie) || '';
     this.syncCookieToMain(this.qqCookie);
   }
 
@@ -63,13 +83,13 @@ class QQMusicApiService {
 
   public setCookie(cookie: string) {
     this.qqCookie = cookie;
-    localStorage.setItem('qq_music_cookie', cookie);
+    setItem(StorageKeys.qqMusicCookie, cookie);
     this.syncCookieToMain(cookie);
   }
 
   public clearCookie() {
     this.qqCookie = '';
-    localStorage.removeItem('qq_music_cookie');
+    removeItem(StorageKeys.qqMusicCookie);
     this.syncCookieToMain('');
   }
 
@@ -117,7 +137,7 @@ class QQMusicApiService {
   // the 128k stream still plays for free (e.g. 安和桥: payplay 0,
   // paytrackmouth 1, verified playable anonymously). Marking those as VIP is
   // exactly the mislabel reported by users.
-  private checkIsVip(item: any): boolean {
+  private checkIsVip(item: QQSongItem): boolean {
     if (!item) return false;
 
     // Direct VIP flags (present on some other API sources)
@@ -148,7 +168,7 @@ class QQMusicApiService {
   // Map a raw QQ Music song item (from search / toplist / playlist responses)
   // to the app's Song type. Handles both old-style (songmid, songname) and
   // new-style (mid, name) field names.
-  private mapSongItem(item: any): Song {
+  private mapSongItem(item: QQSongItem): Song {
     const songmid = item.songmid || item.mid || (item.songId ? String(item.songId) : '');
 
     const rawAlbumMid =
@@ -187,7 +207,7 @@ class QQMusicApiService {
         : this.buildCoverUrl(albummid, singermid);
 
     const artistName = Array.isArray(item.singer)
-      ? item.singer.map((s: any) => s.name).join(' / ')
+      ? item.singer.map((s: QQSongSinger) => s.name).join(' / ')
       : item.singer || item.singerName || '未知歌手';
 
     return {
@@ -210,13 +230,13 @@ class QQMusicApiService {
   public async searchSongs(query: string, page: number = 1, pageSize: number = 30): Promise<Song[]> {
     if (!query.trim()) return [];
 
-    const data = await this.fetchApi<any>(
+    const data = await this.fetchApi<QQSearchResponse>(
       `/getSearchByKey?key=${encodeURIComponent(query)}&limit=${pageSize}&page=${page}`
     );
 
     const songList = data?.response?.data?.song?.list || [];
     if (songList.length > 0) {
-      return songList.map((item: any) => this.mapSongItem(item));
+      return songList.map((item: QQSongItem) => this.mapSongItem(item));
     }
 
     return this.getFallbackSongs(query);
@@ -232,7 +252,7 @@ class QQMusicApiService {
   // songs in parallel via search to get full details (songmid, pay info,
   // standard cover URL). This covers the home page's 15-song display.
   public async getToplistSongs(topid: number = 26): Promise<Song[]> {
-    const data = await this.fetchApi<any>(
+    const data = await this.fetchApi<QQRankResponse>(
       `/getRanks?topId=${topid}&limit=100&page=0`
     );
 
@@ -243,7 +263,7 @@ class QQMusicApiService {
     if (songList.length === 0) return [];
 
     // Map basic song info from rank data
-    const songs = songList.map((item: any) => this.mapSongItem(item));
+    const songs = songList.map((item: QQSongItem) => this.mapSongItem(item));
 
     // Resolve the first 20 songs in parallel via search to get a proper
     // songmid and cover URL. Rank songs only have a numeric songId and no
@@ -272,9 +292,9 @@ class QQMusicApiService {
   // detail endpoint returns the real musicu pay object (pay_month /
   // pay_play / price_track). Querying by songmid is required — the detail
   // endpoint returns an empty track_info for numeric songid lookups.
-  private async fetchSongPayInfo(songmid: string): Promise<any | null> {
+  private async fetchSongPayInfo(songmid: string): Promise<QQPay | null> {
     if (!songmid) return null;
-    const data = await this.fetchApi<any>(
+    const data = await this.fetchApi<QQSongInfoResponse>(
       `/getSongInfo?songmid=${encodeURIComponent(songmid)}`
     );
     return data?.response?.songinfo?.data?.track_info?.pay || null;
@@ -310,7 +330,7 @@ class QQMusicApiService {
       : ['128', 'm4a'];
 
     for (const quality of qualities) {
-      const data = await this.fetchApi<any>(
+      const data = await this.fetchApi<QQPlayUrlResponse>(
         `/getMusicPlay?songmid=${encodeURIComponent(songmid)}&quality=${quality}${this.cookieParam()}`
       );
 
@@ -329,7 +349,7 @@ class QQMusicApiService {
   private async resolveSongmidBySearch(name: string, artist: string): Promise<string | null> {
     try {
       const query = artist && artist !== '未知歌手' ? `${name} ${artist}` : name;
-      const data = await this.fetchApi<any>(
+      const data = await this.fetchApi<QQSearchResponse>(
         `/getSearchByKey?key=${encodeURIComponent(query)}&limit=5`
       );
       const songs = data?.response?.data?.song?.list || [];
@@ -348,7 +368,7 @@ class QQMusicApiService {
   private async resolveSongBySearch(name: string, artist: string): Promise<Song | null> {
     try {
       const query = artist && artist !== '未知歌手' ? `${name} ${artist}` : name;
-      const data = await this.fetchApi<any>(
+      const data = await this.fetchApi<QQSearchResponse>(
         `/getSearchByKey?key=${encodeURIComponent(query)}&limit=5`
       );
       const songs = data?.response?.data?.song?.list || [];
@@ -367,13 +387,13 @@ class QQMusicApiService {
   public async getSongLyrics(songmid: string): Promise<LyricLine[]> {
     if (!songmid) return [{ time: 0, text: '暂无歌词' }];
 
-    const data = await this.fetchApi<any>(
+    const data = await this.fetchApi<QQLyricResponse>(
       `/getLyric?songmid=${encodeURIComponent(songmid)}${this.cookieParam()}`
     );
 
     const lyricStr = data?.response?.lyric;
     if (lyricStr && typeof lyricStr === 'string') {
-      const mainLyrics = this.parseLrc(lyricStr);
+      const mainLyrics = this.parseLrc(this.filterQqMetaLines(lyricStr));
       let transLyrics: LyricLine[] = [];
 
       const transBase64 = data?.response?.trans;
@@ -395,54 +415,54 @@ class QQMusicApiService {
     ];
   }
 
+  // QQ lyrics embed metadata rows with timestamps, e.g. the first line is
+  // "[00:00.00]搁浅 - 周杰伦 (Jay Chou)" followed by "[00:04.08]词：宋健彰" /
+  // "[00:08.17]曲：周杰伦". Without filtering these the first lyric line is
+  // time 0, which breaks the pre-chorus countdown dots (activeIndex is never
+  // -1). Strip personnel rows everywhere, and the title row only when it is
+  // the very first line at time 0 (a real lyric line is never exactly this).
+  private filterQqMetaLines(lrc: string): string {
+    if (!lrc) return lrc;
+    const QQ_PERSONNEL_LINE = /^(词|作词|曲|作曲|编曲|制作人|制作|和声|录音|混音|母带|监制|出品|发行|企划|统筹|文案|封面|OP|SP)[：:]\s*/;
+    // Title row is "歌名 - 歌手 (备注)". QQ uses half-width '-', full-width
+    // '－' (U+FF0D), en/em dashes, with or without spaces, and song names may
+    // carry bracketed subtitles before the dash (e.g. "甲乙丙丁 (你我怎么两清) - 李佳薇").
+    const QQ_TITLE_LINE = /^.+[-—–－]\s*\S.*$/;
+    let firstTimedIdx = -1;
+    return lrc
+      .split(/\r?\n/)
+      .map((line, idx) => {
+        const m = line.match(/\[(\d+):(\d{2})(?:[\.:]\d{1,3})?\]/);
+        // Rows without a timestamp ([ti:...], [ar:...], [al:...], blank) are
+        // metadata — drop them entirely so the title row (the first timed
+        // row) keeps its "first" position regardless of leading meta rows.
+        if (!m) return '';
+        if (firstTimedIdx === -1) firstTimedIdx = idx;
+        const time = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+        const text = line.replace(/\[[^\]]*\]/g, '').trim();
+        if (QQ_PERSONNEL_LINE.test(text)) return '';
+        if (idx === firstTimedIdx && time === 0 && QQ_TITLE_LINE.test(text)) return '';
+        return line;
+      })
+      .filter((l) => l !== '')
+      .join('\n');
+  }
+
   public parseLrc(lrcString: string): LyricLine[] {
-    if (!lrcString) return [];
-    const lines = lrcString.split(/\r?\n/);
-    const lyrics: LyricLine[] = [];
-    const tagReg = /\[(\d+):(\d{2})(?:[\.\:](\d{1,3}))?\]/g;
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-
-      let match;
-      const times: number[] = [];
-      tagReg.lastIndex = 0;
-
-      while ((match = tagReg.exec(trimmed)) !== null) {
-        const minutes = parseInt(match[1], 10);
-        const seconds = parseInt(match[2], 10);
-        let millis = 0;
-        if (match[3]) {
-          const rawMs = match[3];
-          millis = rawMs.length === 3 ? parseInt(rawMs, 10) : parseInt(rawMs, 10) * 10;
-        }
-        times.push(minutes * 60 + seconds + millis / 1000);
-      }
-
-      if (times.length > 0) {
-        const text = cleanTitle(trimmed.replace(tagReg, '').trim());
-        if (text) {
-          for (const time of times) {
-            lyrics.push({ time, text });
-          }
-        }
-      }
-    }
-    return lyrics.sort((a, b) => a.time - b.time);
+    return parseLrcCommon(lrcString);
   }
 
   // --- QQ Music Recommendations & Playlists ---
   // GET /getSongLists?limit=20&page=0&sortId=5&categoryId=10000000
   public async getRecommendPlaylists(): Promise<Playlist[]> {
-    const data = await this.fetchApi<any>(
+    const data = await this.fetchApi<QQPlaylistListResponse>(
       `/getSongLists?limit=20&page=0&sortId=5&categoryId=10000000`
     );
 
     const list = data?.response?.data?.list || [];
 
     if (list.length > 0) {
-      return list.map((item: any) => {
+      return list.map((item: QQPlaylistItem) => {
         const dissid = item.dissid || item.id;
         const rawImg = item.imgurl || item.picurl || '';
         const coverImgUrl = rawImg
@@ -521,7 +541,7 @@ class QQMusicApiService {
       if (songs.length > 0) return songs;
     }
 
-    const data = await this.fetchApi<any>(
+    const data = await this.fetchApi<QQPlaylistDetailResponse>(
       `/getSongListDetail?disstid=${encodeURIComponent(rawId)}`
     );
 
@@ -529,7 +549,7 @@ class QQMusicApiService {
     const songList = cd?.songlist || [];
 
     if (songList.length > 0) {
-      return songList.map((item: any) => this.mapSongItem(item));
+      return songList.map((item: QQSongItem) => this.mapSongItem(item));
     }
 
     // Final fallback: search by genre keyword
@@ -600,11 +620,11 @@ class QQMusicApiService {
     const uin = this.parseUinFromCookie();
     if (!uin) return [];
 
-    const data = await this.fetchApi<any>(
+    const data = await this.fetchApi<QQUserPlaylistsResponse>(
       `/user/getUserPlaylists?uin=${uin}&limit=50${this.cookieParam()}`
     );
 
-    const playlists: any[] = data?.response?.data?.playlists || [];
+    const playlists: QQUserPlaylistItem[] = data?.response?.data?.playlists || [];
     if (playlists.length === 0) return [];
 
     const seen = new Set<string>();
@@ -660,7 +680,7 @@ class QQMusicApiService {
     let vipType = 0;
     let signature = 'QQ 音乐用户';
 
-    const data = await this.fetchApi<any>(
+    const data = await this.fetchApi<QQUserDetailResponse>(
       `/user/getUserDetail?uin=${uin}${this.cookieParam()}`
     );
 
@@ -669,7 +689,7 @@ class QQMusicApiService {
       nickname = creator.nick || creator.nickname || creator.name || '';
       avatarUrl = creator.avatarUrl || creator.headimg || creator.headImg || creator.avatar || fallbackAvatar;
       avatarUrl = avatarUrl.replace(/^http:/, 'https:');
-      if (creator.isvip === 1 || creator.vip_type > 0 || creator.greenvip === 1 || creator.is_green_vip === 1) {
+      if (creator.isvip === 1 || (creator.vip_type ?? 0) > 0 || creator.greenvip === 1 || creator.is_green_vip === 1) {
         vipType = 1;
         signature = 'QQ 音乐绿钻会员';
       }
@@ -699,7 +719,7 @@ class QQMusicApiService {
   // GET /getQQLoginQr → returns { img, ptqrtoken, qrsig } directly (no response wrapper)
   // The img field is a base64 data URI for the QR code image.
   public async getQrKey(): Promise<string> {
-    const data = await this.fetchApi<any>(`/getQQLoginQr`);
+    const data = await this.fetchApi<QQQrResponse>(`/getQQLoginQr`);
     if (!data) return '';
     const ptqrtoken = data.ptqrtoken || data.response?.ptqrtoken || '';
     const qrsig = data.qrsig || data.response?.qrsig || '';
@@ -732,7 +752,7 @@ class QQMusicApiService {
       });
       if (!res.ok) return { code: 800, message: '检查扫码状态失败' };
 
-      const data = await res.json();
+      const data = (await res.json()) as QQLoginCheckResponse;
       const result = data?.response || data;
 
       if (result.isOk) {

@@ -27,6 +27,7 @@ class LocalMusicDatabase extends Dexie {
 export const db = new LocalMusicDatabase();
 
 import jsmediatags from 'jsmediatags/dist/jsmediatags.min.js';
+import type { TagType } from 'jsmediatags/types';
 import { cleanTitle } from '../utils/format';
 
 class LocalMusicService {
@@ -39,7 +40,7 @@ class LocalMusicService {
     return new Promise((resolve) => {
       try {
         jsmediatags.read(blob, {
-          onSuccess: (tag: any) => {
+          onSuccess: (tag: TagType) => {
             const tags = tag.tags;
             let coverUrl: string | undefined;
             if (tags.picture) {
@@ -79,7 +80,7 @@ class LocalMusicService {
 
     if (file instanceof File) {
       blob = file;
-      filePath = (file as any).path || file.name;
+      filePath = (file as File & { path?: string }).path || file.name;
       name = this.cleanTitle(file.name.replace(/\.[^/.]+$/, ''));
 
       // Native duration extraction

@@ -3,12 +3,17 @@ import { Song, LyricLine, UserProfile, Playlist, Platform } from '../types/music
 import { neteaseApi } from '../services/neteaseApi';
 import { musicApiAdapter } from '../services/musicApiAdapter';
 import { qqMusicApi } from '../services/qqMusicApi';
+import { StorageKeys, loadJSON, saveJSON, getItem, setItem, removeItem } from '../utils/storage';
 
 interface PlayerState {
   // Audio & Playback state
   currentSong: Song | null;
   isPlaying: boolean;
   currentTime: number;
+  // Direct reference to the <audio> element, so time-sensitive renderers
+  // (e.g. karaoke words) can read the exact media clock every frame instead
+  // of extrapolating from the coarse ~250ms timeupdate snapshots.
+  audioElement: HTMLAudioElement | null;
   duration: number;
   volume: number;
   isMuted: boolean;
@@ -54,6 +59,9 @@ interface PlayerState {
 
   // Settings & Motion Controls State
   isFluidBgEnabled: boolean;
+  // Per-song lyric line switch offset in milliseconds (positive = earlier,
+  // negative = later). Resets to 0 (default) whenever a new song plays.
+  lyricSwitchOffsetMs: number;
   enableLyricAnimation: boolean;
   enableLyricGlow: boolean;
   enableLyricBlur: boolean;
@@ -68,6 +76,7 @@ interface PlayerState {
   togglePlayPause: () => void;
   setIsPlaying: (isPlaying: boolean) => void;
   setCurrentTime: (time: number) => void;
+  setAudioElement: (el: HTMLAudioElement | null) => void;
   setDuration: (duration: number) => void;
   setVolume: (volume: number) => void;
   toggleMute: () => void;
@@ -105,6 +114,7 @@ interface PlayerState {
   setToastMessage: (msg: string | null) => void;
 
   setIsFluidBgEnabled: (enabled: boolean) => void;
+  setLyricSwitchOffsetMs: (ms: number) => void;
   setEnableLyricAnimation: (enabled: boolean) => void;
   setEnableLyricGlow: (enabled: boolean) => void;
   setEnableLyricBlur: (enabled: boolean) => void;
@@ -115,39 +125,25 @@ interface PlayerState {
 
 // Initial state helpers
 const initialHistory = (() => {
-  try {
-    const raw = localStorage.getItem('search_history');
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
+  return loadJSON<string[]>(StorageKeys.searchHistory, []);
 })();
 
 const initialFavorites = (() => {
-  try {
-    const raw = localStorage.getItem('favorite_songs');
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
+  return loadJSON<Song[]>(StorageKeys.favoriteSongs, []);
 })();
 
 const initialAutoCheck = (() => {
-  try {
-    const raw = localStorage.getItem('auto_check_update');
-    return raw !== null ? JSON.parse(raw) : true;
-  } catch {
-    return true;
-  }
+  return loadJSON<boolean>(StorageKeys.autoCheckUpdate, true);
 })();
 
-const initialPlatform: Platform = (localStorage.getItem('active_platform') as Platform) || 'netease';
+const initialPlatform: Platform = (getItem(StorageKeys.activePlatform) as Platform) || 'netease';
 
 export const usePlayerStore = create<PlayerState>((set, get) => ({
   // Playback & Queue
   currentSong: null,
   isPlaying: false,
   currentTime: 0,
+  audioElement: null,
   duration: 0,
   volume: 0.8,
   isMuted: false,
@@ -195,6 +191,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   // Motion Settings
   isFluidBgEnabled: true,
+  lyricSwitchOffsetMs: 0,
   enableLyricAnimation: true,
   enableLyricGlow: true,
   enableLyricBlur: true,
@@ -236,6 +233,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       queue: finalQueue,
       queueIndex: index >= 0 ? index : 0,
       lyrics: [],
+      // Per-song lyric switch offset: next song starts from the 0ms default.
+      lyricSwitchOffsetMs: 0,
     });
 
     if (!resolvedAudioUrl && song.source !== 'local') {
@@ -260,6 +259,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   togglePlayPause: () => set((state) => ({ isPlaying: !state.isPlaying })),
   setIsPlaying: (isPlaying) => set({ isPlaying }),
   setCurrentTime: (currentTime) => set({ currentTime }),
+  setAudioElement: (audioElement) => set({ audioElement }),
   setDuration: (duration) => set({ duration }),
 
   setVolume: (volume) => set({ volume, isMuted: volume === 0 }),
@@ -303,7 +303,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   // --- Multi-Platform Actions ---
   setActivePlatform: (activePlatform) => {
-    localStorage.setItem('active_platform', activePlatform);
+    setItem(StorageKeys.activePlatform, activePlatform);
     set({
       activePlatform,
       user: get().accounts[activePlatform] || null,
@@ -383,7 +383,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const filtered = currentHistory.filter((item) => item !== trimmed);
     const updatedHistory = [trimmed, ...filtered].slice(0, 10);
     try {
-      localStorage.setItem('search_history', JSON.stringify(updatedHistory));
+      saveJSON(StorageKeys.searchHistory, updatedHistory);
     } catch {}
 
     set({
@@ -412,14 +412,14 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   removeSearchHistoryItem: (item) => {
     const updatedHistory = get().searchHistory.filter((h) => h !== item);
     try {
-      localStorage.setItem('search_history', JSON.stringify(updatedHistory));
+      saveJSON(StorageKeys.searchHistory, updatedHistory);
     } catch {}
     set({ searchHistory: updatedHistory });
   },
 
   clearSearchHistory: () => {
     try {
-      localStorage.removeItem('search_history');
+      removeItem(StorageKeys.searchHistory);
     } catch {}
     set({ searchHistory: [] });
   },
@@ -452,6 +452,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   setIsFluidBgEnabled: (isFluidBgEnabled) => set({ isFluidBgEnabled }),
+  setLyricSwitchOffsetMs: (lyricSwitchOffsetMs) => set({ lyricSwitchOffsetMs }),
   setEnableLyricAnimation: (enableLyricAnimation) => set({ enableLyricAnimation }),
   setEnableLyricGlow: (enableLyricGlow) => set({ enableLyricGlow }),
   setEnableLyricBlur: (enableLyricBlur) => set({ enableLyricBlur }),
@@ -460,7 +461,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   setAutoCheckUpdate: (autoCheckUpdate) => {
     try {
-      localStorage.setItem('auto_check_update', JSON.stringify(autoCheckUpdate));
+      saveJSON(StorageKeys.autoCheckUpdate, autoCheckUpdate);
     } catch {}
     set({ autoCheckUpdate });
   },
@@ -514,7 +515,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
 
     try {
-      localStorage.setItem('favorite_songs', JSON.stringify(updatedFavorites));
+      saveJSON(StorageKeys.favoriteSongs, updatedFavorites);
     } catch {}
 
     set({ favoriteSongs: updatedFavorites });

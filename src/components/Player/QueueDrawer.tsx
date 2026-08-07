@@ -3,7 +3,8 @@ import { X, Play, Trash2, Music, ListMusic } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePlayerStore } from '../../store/playerStore';
 import { shallow } from 'zustand/shallow';
-import { neteaseApi, getOptimizedCoverUrl } from '../../services/neteaseApi';
+import { neteaseApi } from '../../services/neteaseApi';
+import { getOptimizedCoverUrl } from '../../utils/format';
 
 export const QueueDrawer: React.FC = () => {
   const {

@@ -3,10 +3,21 @@ import { AlertTriangle, Github, Cpu, ExternalLink, ShieldAlert, Sparkles, Sun } 
 import { usePlayerStore } from '../store/playerStore';
 
 export const NoticeView: React.FC = () => {
-  const { setActiveTab } = usePlayerStore();
+  const { setActiveTab, setIsFluidBgEnabled, setEnableLyricAnimation, setEnableLyricGlow, setEnableLyricBlur } =
+    usePlayerStore();
 
   const openExternal = (url: string) => {
     window.open(url, '_blank');
+  };
+
+  // One-click performance preset: keep only the fluid background and turn off
+  // every lyric effect (jelly motion, glow, depth-of-field blur).
+  const applyPerformancePreset = () => {
+    setIsFluidBgEnabled(true);
+    setEnableLyricAnimation(false);
+    setEnableLyricGlow(false);
+    setEnableLyricBlur(false);
+    setActiveTab('settings');
   };
 
   return (
@@ -78,18 +89,18 @@ export const NoticeView: React.FC = () => {
           <div className="space-y-1 max-w-xl">
             <h4 className="text-base font-bold text-white flex items-center space-x-2">
               <ShieldAlert className="w-4 h-4 text-amber-400" />
-              <span>中低配设备优先关闭“动态流体光斑背景”</span>
+              <span>中低配设备推荐仅开启“全景流体模糊背景”</span>
             </h4>
             <p className="text-xs text-white/60 leading-relaxed">
-              如果感觉软件运行或歌词滑动时存在卡顿，请在「设置」中优先关闭 <strong>“Apple Music 动态流体光斑背景”</strong>，即可大幅降低显卡 GPU 渲染开销并恢复极速流畅体验。
+              如果感觉软件运行或歌词滑动时存在卡顿，请在「设置」中仅开启 <strong>“全景流体模糊背景”</strong>，并<strong>关闭设置中的所有歌词动效</strong>（歌词弹性随动、歌词高光漫反射发光、歌词景深模糊等），即可大幅降低 GPU 渲染开销并恢复流畅体验。
             </p>
           </div>
 
           <button
-            onClick={() => setActiveTab('settings')}
+            onClick={applyPerformancePreset}
             className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white font-medium text-xs transition-all border border-white/10 shrink-0"
           >
-            前往「设置」调整
+            一键设置
           </button>
         </div>
       </section>

@@ -1,9 +1,10 @@
 {
   "name": "beta-music-player",
-  "version": "1.0.7",
+  "version": "1.0.9",
   "private": true,
   "main": "dist-electron/main.js",
   "scripts": {
+    "postinstall": "node scripts/patch-ncm-lyric.js && node scripts/patch-qmusic-lyric.js && node scripts/patch-qmusic-cookie.js",
     "dev": "concurrently \"npm run start-api\" \"vite\"",
     "build": "tsc && vite build && electron-builder --win",
     "preview": "vite preview",
@@ -49,7 +50,7 @@
     }
   },
   "dependencies": {
-    "@neteasecloudmusicapienhanced/api": "latest",
+    "@neteasecloudmusicapienhanced/api": "4.38.0",
     "@sansenjian/qq-music-api": "^2.4.0",
     "@types/jsmediatags": "^3.9.6",
     "concurrently": "^8.2.2",

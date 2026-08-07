@@ -2,10 +2,17 @@ export type SongSource = 'netease' | 'qq' | 'local';
 
 export type Platform = 'netease' | 'qq';
 
+export interface LyricWord {
+  text: string;
+  time: number; // in seconds (word start)
+  duration?: number; // in seconds (word duration, for partial-highlight progress)
+}
+
 export interface LyricLine {
   time: number; // in seconds
   text: string;
   translation?: string;
+  words?: LyricWord[]; // word-level timing (karaoke), when available
 }
 
 export interface Song {

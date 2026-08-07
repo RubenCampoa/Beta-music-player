@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
+import { getItem, setItem, StorageKeys } from '../../utils/storage';
 import {
   Lock,
   Unlock,
@@ -13,6 +14,7 @@ import {
   Palette,
 } from 'lucide-react';
 import { cleanTitle } from '../../utils/format';
+import { Song } from '../../types/music';
 
 interface LyricLine {
   time: number;
@@ -29,6 +31,33 @@ interface DesktopLyricData {
   lyrics: LyricLine[];
   currentTime: number;
   isPlaying: boolean;
+}
+
+// Pure computation of the two displayed lines for a given time. Kept outside
+// the component so time ticks only pay for the comparison, not a render.
+function computeLines(lyrics: LyricLine[], currentTime: number, currentSong: Song | null | undefined, offsetMs = 0) {
+  // Shared per-song lyric switch offset (ms): positive activates lines
+  // earlier, negative later — matches the fullscreen lyric micro-adjust.
+  const syncTime = currentTime + offsetMs / 1000;
+  let activeIndex = -1;
+  for (let i = 0; i < lyrics.length; i++) {
+    if (syncTime >= lyrics[i].time) {
+      activeIndex = i;
+    } else {
+      break;
+    }
+  }
+  const activeLine = activeIndex >= 0 ? lyrics[activeIndex] : null;
+  const nextLine = activeIndex >= 0 && activeIndex + 1 < lyrics.length ? lyrics[activeIndex + 1] : null;
+  const line1Text = activeLine ? cleanTitle(activeLine.text) : currentSong ? cleanTitle(currentSong.name) : 'Beta Music Player';
+  const line2Text = activeLine?.translation
+    ? cleanTitle(activeLine.translation)
+    : nextLine
+    ? cleanTitle(nextLine.text)
+    : currentSong
+    ? cleanTitle(currentSong.artist)
+    : '桌面歌词';
+  return { activeIndex, line1Text, line2Text };
 }
 
 export interface ColorPreset {
@@ -85,17 +114,32 @@ export const COLOR_PRESETS: ColorPreset[] = [
 ];
 
 export const DesktopLyricView: React.FC = () => {
-  const [data, setData] = useState<DesktopLyricData>({
-    lyrics: [],
-    currentTime: 0,
+  // The displayed view state only changes when the song, the lyrics, or the
+  // active line actually changes. currentTime ticks (~120ms) are kept in a
+  // ref — they drive the active-line computation but never re-render the
+  // window while the text is unchanged (a transparent desktop window
+  // repaints its whole surface on every DOM change, which is the main
+  // performance cost).
+  const [viewData, setViewData] = useState({
+    currentSong: null as Song | null,
+    lyrics: [] as LyricLine[],
+    activeIndex: -1,
+    line1Text: '',
+    line2Text: '',
     isPlaying: false,
+    offsetMs: 0,
   });
+  const timeRef = useRef({ currentTime: 0 });
+  const viewDataRef = useRef(viewData);
+  useEffect(() => {
+    viewDataRef.current = viewData;
+  }, [viewData]);
 
   const [isLocked, setIsLocked] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [fontSize, setFontSize] = useState<'medium' | 'large' | 'xlarge'>('large');
   const [colorIndex, setColorIndex] = useState<number>(() => {
-    const saved = localStorage.getItem('desktop_lyric_color_preset');
+    const saved = getItem(StorageKeys.desktopLyricColorPreset);
     return saved ? parseInt(saved, 10) || 0 : 0;
   });
 
@@ -149,41 +193,53 @@ export const DesktopLyricView: React.FC = () => {
     };
   }, [isDragging]);
 
-  // Sync data from Electron IPC
+  // Sync data from Electron IPC. Full song/lyrics payloads re-render the
+  // view; time-only payloads update the ref and only commit a re-render when
+  // the active lyric line actually changes.
   useEffect(() => {
-    if (window.electronAPI?.onDesktopLyricData) {
-      const cleanup = window.electronAPI.onDesktopLyricData((payload) => {
-        setData(payload);
-      });
-      return cleanup;
-    }
+    if (!window.electronAPI?.onDesktopLyricData) return;
+    const cleanup = window.electronAPI.onDesktopLyricData((payload) => {
+      if (payload.lyrics !== undefined) {
+        // Song / lyrics changed (also covers the initial sync). Use the
+        // payload's currentTime (not the stale ref) so a desktop window
+        // opened mid-song lands on the right line on the very first frame.
+        timeRef.current.currentTime = payload.currentTime ?? timeRef.current.currentTime;
+        const lines = computeLines(payload.lyrics, timeRef.current.currentTime, payload.currentSong, payload.offsetMs ?? 0);
+        setViewData({
+          currentSong: payload.currentSong ?? null,
+          lyrics: payload.lyrics,
+          ...lines,
+          isPlaying: Boolean(payload.isPlaying),
+          offsetMs: payload.offsetMs ?? 0,
+        });
+        return;
+      }
+      // Time tick only: update the ref, re-render only if the active line
+      // or playing state changed.
+      timeRef.current.currentTime = payload.currentTime;
+      const cur = viewDataRef.current;
+      const offsetChanged = (payload.offsetMs ?? 0) !== cur.offsetMs;
+      if (payload.isPlaying !== cur.isPlaying) {
+        setViewData((prev) => ({ ...prev, isPlaying: payload.isPlaying, offsetMs: payload.offsetMs ?? 0 }));
+        return;
+      }
+      if (offsetChanged) {
+        // The user adjusted the per-song offset: re-align the active line
+        // immediately with the new offset instead of waiting for the next
+        // line switch.
+        const relined = computeLines(cur.lyrics, payload.currentTime, cur.currentSong, payload.offsetMs ?? 0);
+        setViewData((prev) => ({ ...prev, ...relined, offsetMs: payload.offsetMs ?? 0 }));
+        return;
+      }
+      const lines = computeLines(cur.lyrics, payload.currentTime, cur.currentSong, cur.offsetMs);
+      if (lines.activeIndex !== cur.activeIndex) {
+        setViewData((prev) => ({ ...prev, ...lines }));
+      }
+    });
+    return cleanup;
   }, []);
 
-  // Compute active lyric line and next preview line
-  const { lyrics, currentTime, currentSong, isPlaying } = data;
-  const syncTime = currentTime + 0.15;
-
-  let activeIndex = -1;
-  for (let i = 0; i < lyrics.length; i++) {
-    if (syncTime >= lyrics[i].time) {
-      activeIndex = i;
-    } else {
-      break;
-    }
-  }
-
-  const activeLine = activeIndex >= 0 ? lyrics[activeIndex] : null;
-  const nextLine = activeIndex >= 0 && activeIndex + 1 < lyrics.length ? lyrics[activeIndex + 1] : null;
-
-  // STRICTLY AT MOST 2 LINES DISPLAYED: Line 1 (Active) & Line 2 (Upcoming Preview)
-  const line1Text = activeLine ? cleanTitle(activeLine.text) : (currentSong ? cleanTitle(currentSong.name) : 'Beta Music Player');
-  const line2Text = activeLine?.translation
-    ? cleanTitle(activeLine.translation)
-    : nextLine
-    ? cleanTitle(nextLine.text)
-    : currentSong
-    ? cleanTitle(currentSong.artist)
-    : '桌面歌词';
+  const { currentSong, activeIndex, line1Text, line2Text, isPlaying } = viewData;
 
   const handleTopBarMouseEnter = () => {
     if (isLocked) {
@@ -225,7 +281,7 @@ export const DesktopLyricView: React.FC = () => {
     e.stopPropagation();
     const nextIdx = (colorIndex + 1) % COLOR_PRESETS.length;
     setColorIndex(nextIdx);
-    localStorage.setItem('desktop_lyric_color_preset', String(nextIdx));
+    setItem(StorageKeys.desktopLyricColorPreset, String(nextIdx));
   };
 
   const getFontSizeClasses = () => {

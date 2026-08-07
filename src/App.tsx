@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { TitleBar } from './components/TitleBar/TitleBar';
+import { LyricLine } from './types/music';
 import { Sidebar } from './components/Sidebar/Sidebar';
 import { PlayerBar } from './components/Player/PlayerBar';
 import { QueueDrawer } from './components/Player/QueueDrawer';
@@ -19,6 +20,7 @@ import { AboutView } from './views/AboutView';
 import { NoticeView } from './views/NoticeView';
 
 import { usePlayerStore } from './store/playerStore';
+import { checkForUpdate } from './utils/version';
 import { neteaseApi } from './services/neteaseApi';
 import { qqMusicApi } from './services/qqMusicApi';
 import { AlertCircle, Crown, Heart, CheckCircle2 } from 'lucide-react';
@@ -33,24 +35,40 @@ const DesktopLyricSync: React.FC = () => {
 
     let lastSyncTime = 0;
     let lastSongId: string | number | null = null;
+    let lastLyrics: LyricLine[] | null = null;
     let lastIsPlaying = false;
 
     const sync = (state: ReturnType<typeof usePlayerStore.getState>, force = false) => {
       const now = Date.now();
       const songId = state.currentSong?.id ?? null;
-      const stateChanged = lastSongId !== songId || lastIsPlaying !== state.isPlaying;
-
-      if (!force && now - lastSyncTime < 120 && !stateChanged) return;
-
+      const songChanged = lastSongId !== songId;
+      const lyricsChanged = lastLyrics !== state.lyrics;
+      const playingChanged = lastIsPlaying !== state.isPlaying;
+      // Full lyrics/song payload only when that data actually changes;
+      // otherwise push a minimal time payload. This keeps the desktop lyric
+      // window from re-rendering (and repainting its transparent surface)
+      // on every tick while a song is playing. Play/pause must bypass the
+      // throttle so the window's button state stays in sync instantly.
+      if (!songChanged && !lyricsChanged && !playingChanged && now - lastSyncTime < 120 && !force) return;
       lastSyncTime = now;
       lastSongId = songId;
+      lastLyrics = state.lyrics;
       lastIsPlaying = state.isPlaying;
-      sendDesktopLyricData({
-        currentSong: state.currentSong,
-        lyrics: state.lyrics,
-        currentTime: state.currentTime,
-        isPlaying: state.isPlaying,
-      });
+      sendDesktopLyricData(
+        songChanged || lyricsChanged || force
+          ? {
+              currentSong: state.currentSong,
+              lyrics: state.lyrics,
+              currentTime: state.currentTime,
+              isPlaying: state.isPlaying,
+              offsetMs: state.lyricSwitchOffsetMs,
+            }
+          : {
+              currentTime: state.currentTime,
+              isPlaying: state.isPlaying,
+              offsetMs: state.lyricSwitchOffsetMs,
+            }
+      );
     };
 
     // Subscribe without rendering this component on every audio timeupdate.
@@ -133,7 +151,7 @@ export const App: React.FC = () => {
 
   const shellAnimation =
     windowTransition === 'minimizing'
-      ? { opacity: [1, 0.84, 0], scale: [1, 0.985, 0.94], y: [0, 7, 15] }
+      ? { opacity: [1, 0.6, 0], scale: [1, 0.72, 0.14], y: [0, 10, 22] }
       : windowTransition === 'restoring' || windowTransition === 'opening'
       ? { opacity: [0, 0.72, 1], scale: [0.94, 1.012, 1], y: [15, -2, 0] }
       : windowTransition === 'maximizing'
@@ -204,28 +222,18 @@ export const App: React.FC = () => {
     initSession();
   }, []);
 
-  // Auto check for update from GitHub Releases on application startup
+  // Auto check for update from GitHub Releases on application startup.
+  // Throttled to once every 6h so the unauthenticated GitHub API quota
+  // (60 req/h/IP) is not burned on every launch.
   useEffect(() => {
     const checkAutoUpdate = async () => {
       if (!autoCheckUpdate) return;
-      try {
-        const res = await fetch(`https://api.github.com/repos/RubenCampoa/Beta-music-player/releases/latest?t=${Date.now()}`, {
-          headers: {
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache',
-          },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          const latestTag = (data.tag_name || '').trim();
-          const currentVersion = 'v1.0.7';
-          const normalize = (v: string) => v.replace(/^v/i, '').trim();
-          if (latestTag && normalize(latestTag) !== normalize(currentVersion)) {
-            setToastMessage(`发现新版本 ${latestTag}！可在设置中点击检查更新进行查看与升级`);
-          }
-        }
-      } catch {
-        // Silently ignore network error during startup check
+      const lastCheck = Number(localStorage.getItem('last_auto_update_check') || 0);
+      if (Date.now() - lastCheck < 6 * 3600 * 1000) return;
+      localStorage.setItem('last_auto_update_check', String(Date.now()));
+      const result = await checkForUpdate();
+      if (result.status === 'ok' && result.isNewer) {
+        setToastMessage(`发现新版本 ${result.latestTag}！可在设置中点击检查更新进行查看与升级`);
       }
     };
 

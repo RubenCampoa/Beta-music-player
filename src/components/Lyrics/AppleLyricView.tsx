@@ -13,17 +13,20 @@ import {
   Volume2,
   VolumeX,
   Heart,
-  Sparkles,
   X,
   Minimize2,
   Maximize,
   Columns,
   AlignLeft,
+  Clock,
 } from 'lucide-react';
 import { motion, useMotionValue, useSpring } from 'framer-motion';
 import { usePlayerStore } from '../../store/playerStore';
-import { neteaseApi, getOptimizedCoverUrl } from '../../services/neteaseApi';
-import { formatTime, formatRemainingTime, cleanTitle } from '../../utils/format';
+import { neteaseApi } from '../../services/neteaseApi';
+import { getOptimizedCoverUrl, cleanTitle } from '../../utils/format';
+import { formatTime } from '../../utils/format';
+import { emitAudioSeek } from '../../utils/events';
+import { LyricProgressBar } from './LyricProgressBar';
 import { FluidBackground } from '../Background/FluidBackground';
 import { shallow } from 'zustand/shallow';
 import { LyricLine } from '../../types/music';
@@ -35,8 +38,10 @@ interface AppleLyricViewProps {
   isVisible: boolean;
 }
 
-const getActiveLyricIndex = (currentTime: number, lyrics: LyricLine[]) => {
-  const syncTime = currentTime + 0.15;
+const getActiveLyricIndex = (currentTime: number, lyrics: LyricLine[], offsetMs = 0) => {
+  // User-adjustable per-song switch offset (ms): positive activates lines
+  // earlier, negative later. Default 0 — no built-in lookahead.
+  const syncTime = currentTime + offsetMs / 1000;
   let activeIndex = -1;
   for (let i = 0; i < lyrics.length; i += 1) {
     if (syncTime >= lyrics[i].time) {
@@ -63,14 +68,120 @@ interface KaraokeLineProps {
   enableAnimation: boolean;
 }
 
+// --- Active lyric line: "ocean wave" cover reveal ---
+// A single rAF loop drives a line-relative cursor from the real
+// <audio>.currentTime. Words fully covered by the wave are lit (white +
+// glow), words ahead of the wave stay dim, and the word currently being
+// crossed by the wave edge is revealed left-to-right with a hard light/dark
+// split (covered left half lit, uncovered right half dark) plus a linked
+// upward jelly (overshoot) pop. The cursor is continuous, so the edge flows
+// through fast songs without flashing.
+const easeOutBack = (x: number): number => {
+  const c1 = 1.70158;
+  const c3 = c1 + 1;
+  return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
+};
+
+// One word of the wave line. Memoized: a word only re-renders while the wave
+// edge is crossing it (p in (0,1)) — covered (p=1) and untouched (p=0) words
+// keep stable props and are skipped by React, so a slow song with a long line
+// does not rewrite every word's style on every animation frame.
+const WaveWord = React.memo(({ text, p, glowEnabled }: { text: string; p: number; glowEnabled: boolean }) => {
+  const covered = p >= 1;
+  const edge = p > 0 && p < 1;
+  // Linked jelly: sine envelope keeps start/end at rest while the
+  // overshoot makes the lift elastic; adjacent words share the same
+  // phase curve so the wave rolls through the line.
+  const pop = edge ? Math.sin(p * Math.PI) * easeOutBack(p) : 0;
+  const lift = -8 * pop;
+  const scale = 1 + 0.18 * pop;
+  // Smooth easing so the brightness converges gently at the end of each
+  // word (no hard snap), and the glow fades in with the lit progress so
+  // the final highlight is not a sudden flash. The lit glow is boosted so
+  // highlighted words read clearly brighter than the dimmed rest.
+  const eased = covered ? 1 : Math.sin((Math.min(1, Math.max(0, p)) * Math.PI) / 2);
+  const intensity = 0.3 + 0.7 * eased;
+
+  return (
+    <span
+      className="inline-block will-change-transform"
+      style={{
+        transform: `translateY(${lift}px) scale(${scale})`,
+        color: `rgba(255,255,255,${intensity})`,
+        textShadow:
+          (covered || edge) && glowEnabled
+            ? `0 0 ${8 + 18 * eased}px rgba(255,255,255,0.92), 0 0 ${14 + 32 * eased}px rgba(255,45,85,0.5)`
+            : undefined,
+      }}
+    >
+      {text}
+    </span>
+  );
+});
+
+const WaveLine: React.FC<{ line: LyricLine; glow: string }> = ({ line, glow }) => {
+  const words = line.words || [];
+  const [cursor, setCursor] = useState(0); // seconds relative to line start
+
+  // Drive the line cursor from the live media clock with exponential
+  // smoothing. <audio>.currentTime on the main thread is quantized (~50ms
+  // steps), which reads as slight jitter on slow songs. Exponential
+  // convergence (per-frame alpha) glides over those steps without the hard
+  // corners of a clamp; a large delta (seek / track switch) snaps instantly.
+  useEffect(() => {
+    let raf = 0;
+    let prev: number | null = null;
+    const tick = () => {
+      const state = usePlayerStore.getState();
+      const audioEl = state.audioElement;
+      const raw = audioEl && !Number.isNaN(audioEl.currentTime) ? audioEl.currentTime : state.currentTime;
+      const target = raw - line.time;
+      if (prev === null) {
+        prev = target;
+        setCursor(target);
+      } else {
+        const delta = target - prev;
+        const alpha = Math.abs(delta) > 0.5 ? 1 : 0.5;
+        prev = prev + delta * alpha;
+        setCursor(prev);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [line]);
+
+  return (
+    <>
+      {words.map((word, idx) => {
+        const wordStart = word.time - line.time; // seconds into the line
+        const wordEnd = wordStart + (word.duration ?? 0.35);
+        const covered = cursor >= wordEnd;
+        const uncovered = cursor < wordStart;
+        // Word being crossed by the wave edge: 0..1 linear progress. Linear
+        // keeps the wave rolling at a constant pace (a natural ocean wave);
+        // per-word easing made it start/stop at every word boundary.
+        const p = covered ? 1 : uncovered ? 0 : (cursor - wordStart) / (wordEnd - wordStart);
+
+        return <WaveWord key={idx} text={word.text} p={p} glowEnabled={glow !== 'none'} />;
+      })}
+    </>
+  );
+};
+
 const KaraokeLine: React.FC<KaraokeLineProps> = ({
   line,
   isActive,
+  currentTime,
   fontSize,
   layout,
   enableGlow,
 }) => {
   const cleanText = cleanTitle(line.text);
+
+  // Word-by-word karaoke data (NetEase YRC). Only the active line renders
+  // per-word; lines without word timing fall back to plain text.
+  const words = isActive && line.words && line.words.length > 0 ? line.words : null;
 
   // Font size classes based on layout and size setting
   const mainFontClass =
@@ -87,6 +198,13 @@ const KaraokeLine: React.FC<KaraokeLineProps> = ({
       ? 'text-base md:text-xl font-semibold'
       : 'text-xs md:text-base font-semibold';
 
+  const sungWordGlow =
+    isActive && enableGlow
+      ? layout === 'full'
+        ? '0 0 18px rgba(255, 255, 255, 0.85), 0 0 32px rgba(255, 45, 85, 0.45)'
+        : '0 0 14px rgba(255, 255, 255, 0.75), 0 0 26px rgba(255, 45, 85, 0.4)'
+      : 'none';
+
   return (
     <div className="space-y-1">
       <div
@@ -95,14 +213,18 @@ const KaraokeLine: React.FC<KaraokeLineProps> = ({
         }`}
         style={{
           textShadow:
-            isActive && enableGlow
+            isActive && enableGlow && !words
               ? layout === 'full'
-                ? '0 0 24px rgba(255, 255, 255, 0.8), 0 0 40px rgba(255, 45, 85, 0.4)'
-                : '0 0 20px rgba(255, 255, 255, 0.7), 0 0 35px rgba(255, 45, 85, 0.35)'
+                ? '0 0 26px rgba(255, 255, 255, 0.95), 0 0 46px rgba(255, 45, 85, 0.55)'
+                : '0 0 22px rgba(255, 255, 255, 0.9), 0 0 38px rgba(255, 45, 85, 0.5)'
               : 'none',
         }}
       >
-        {cleanText}
+        {words ? (
+          <WaveLine line={line} glow={sungWordGlow} />
+        ) : (
+          cleanText
+        )}
       </div>
       {line.translation && cleanTitle(line.translation) !== cleanText && (
         <div
@@ -117,41 +239,42 @@ const KaraokeLine: React.FC<KaraokeLineProps> = ({
   );
 };
 
-const LyricProgressBar: React.FC = () => {
-  const currentTime = usePlayerStore((state) => state.currentTime);
-  const duration = usePlayerStore((state) => state.duration);
-  const progressPercent = duration ? Math.min(100, (currentTime / duration) * 100) : 0;
+// --- Pre-chorus "about to start" countdown (Apple Music style) ---
+// While the intro is still playing (no lyric line active yet), the first
+// lyric line shows three dots that light up one by one with a jelly
+// (overshoot) pop. The countdown finishes slightly BEFORE the vocals begin
+// so the last dot is clearly visible, then the first lyric line appears.
+const LEAD_TIME = 0.9; // seconds before the first line that dot 3 lights up
 
-  const handleProgressSeek = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!duration) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const percent = Math.max(0, Math.min(1, clickX / rect.width));
-    window.dispatchEvent(new CustomEvent('audio-seek', { detail: percent * duration }));
-  };
+const PreChorusDots: React.FC<{ elapsed: number; firstTime: number }> = ({ elapsed, firstTime }) => {
+  // Cap the lead so a very short intro still gets a sensible 3-step timing.
+  const lead = Math.min(LEAD_TIME, firstTime * 0.4);
+  const end = Math.max(0, firstTime - lead);
+  const thresholds = [end / 3, (end * 2) / 3, end];
 
   return (
-    <div className="w-full space-y-1.5 pt-1">
-      <div
-        onClick={handleProgressSeek}
-        className="progress-track relative w-full h-2 hover:h-2.5 rounded-full cursor-pointer overflow-visible transition-all"
-      >
-        <div
-          className="progress-fill h-full rounded-full relative transition-[width] duration-150 ease-out"
-          style={{ width: `${progressPercent}%` }}
-        >
-          <div className="progress-thumb absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full shadow-md" />
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between text-xs font-mono text-white/50 px-0.5">
-        <span>{formatTime(currentTime)}</span>
-        <div className="flex items-center space-x-1 bg-white/10 text-white/70 px-2 py-0.5 rounded-full text-[10px] font-semibold border border-white/10">
-          <Sparkles className="w-3 h-3 text-cyan-400" />
-          <span>高解析无损</span>
-        </div>
-        <span>{formatRemainingTime(currentTime, duration)}</span>
-      </div>
+    <div className="flex items-center space-x-2.5">
+      {[0, 1, 2].map((i) => {
+        const lit = elapsed >= thresholds[i];
+        return (
+          <motion.span
+            key={i}
+            className="w-2.5 h-2.5 rounded-full"
+            style={{
+              background: lit ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.22)',
+              boxShadow: lit
+                ? '0 0 14px rgba(255,255,255,0.85), 0 0 28px rgba(255,45,85,0.45)'
+                : 'none',
+            }}
+            animate={lit ? { scale: [0.55, 1.35, 0.92, 1.12, 1] } : { scale: 1 }}
+            transition={
+              lit
+                ? { duration: 0.5, times: [0, 0.35, 0.6, 0.8, 1], ease: 'easeOut' }
+                : { duration: 0.2 }
+            }
+          />
+        );
+      })}
     </div>
   );
 };
@@ -172,12 +295,13 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
     toggleShuffle,
     setVolume,
     toggleMute,
-    setToastMessage,
     toggleFavorite,
     isFavorite,
     enableLyricAnimation,
     enableLyricGlow,
     enableLyricBlur,
+    lyricSwitchOffsetMs,
+    setLyricSwitchOffsetMs,
     enableArtworkAnimation,
     lyricFontSize,
     isFluidBgEnabled,
@@ -203,6 +327,8 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
       favoriteSongs: state.favoriteSongs,
       enableLyricAnimation: state.enableLyricAnimation,
       enableLyricGlow: state.enableLyricGlow,
+      lyricSwitchOffsetMs: state.lyricSwitchOffsetMs,
+      setLyricSwitchOffsetMs: state.setLyricSwitchOffsetMs,
       enableLyricBlur: state.enableLyricBlur,
       enableArtworkAnimation: state.enableArtworkAnimation,
       lyricFontSize: state.lyricFontSize,
@@ -212,7 +338,20 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
   );
   const lyrics = usePlayerStore((state) => state.lyrics);
   const currentTime = usePlayerStore((state) => state.currentTime);
-  const activeIndex = getActiveLyricIndex(currentTime, lyrics);
+  const activeIndex = getActiveLyricIndex(currentTime, lyrics, lyricSwitchOffsetMs);
+
+  // Pre-chorus state: lyrics exist but the first line hasn't started yet —
+  // show the Apple Music style "about to start" dots.
+  const isPreChorus = lyrics.length > 0 && activeIndex === -1;
+  // First REAL lyric line: skip any stray time-0 metadata row that survived
+  // filtering (title/personnel rows are time 0), so the countdown and the
+  // dots' visibility are driven by the actual vocal start, not by a 0s row.
+  const firstLyricTime = lyrics.find((l) => l.time > 0)?.time ?? lyrics[0]?.time ?? 0;
+  // The dots must stay visible until the vocals actually begin. activeIndex
+  // has a +0.15s lookahead (lyrics activate slightly early), so isPreChorus
+  // flips false before the first lyric time — gate the dots on the raw lyric
+  // time instead, keeping them up for a beat past the first line.
+  const showPreChorusDots = firstLyricTime > 0 && currentTime < firstLyricTime + lyricSwitchOffsetMs / 1000 + 0.2;
 
   const [isWindowFullScreen, setIsWindowFullScreen] = useState(false);
   const [isUserScrolling, setIsUserScrolling] = useState(false);
@@ -228,6 +367,12 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
     mass: 0.7,
   });
   const isUserScrollingRef = useRef(false);
+  // While a manual (non-spring) scroll animation is running, the spring
+  // output must not also write scrollTop — two writers fight and the list
+  // visibly jitters. manualScrollRef gates the spring writer; scrollRafRef
+  // cancels a previous run when a new line switch starts mid-scroll.
+  const manualScrollRef = useRef(false);
+  const scrollRafRef = useRef<number | null>(null);
 
   // Focal index for scrolling & blur gradient (defaults to line 0 during prelude)
   const focalIndex = activeIndex >= 0 ? activeIndex : 0;
@@ -242,7 +387,7 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
         opacity: { duration: 0.48, ease: [0.22, 1, 0.36, 1] as const },
         filter: { duration: 0.56, ease: [0.22, 1, 0.36, 1] as const },
       }
-    : { duration: 0.025, ease: 'linear' as const };
+    : { duration: 0 };
 
   useEffect(() => {
     isUserScrollingRef.current = isUserScrolling;
@@ -254,11 +399,18 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
   useEffect(() => {
     return lyricScrollY.on('change', (latest) => {
       const container = containerRef.current;
-      if (container && !isUserScrollingRef.current) {
+      if (container && !isUserScrollingRef.current && !manualScrollRef.current) {
         container.scrollTop = latest;
       }
     });
   }, [lyricScrollY]);
+
+  // Cancel any in-flight manual scroll when the view unmounts.
+  useEffect(() => {
+    return () => {
+      if (scrollRafRef.current !== null) cancelAnimationFrame(scrollRafRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isVisible) return;
@@ -289,8 +441,42 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
   // the line emphasis and remains smooth when the next timestamp arrives.
   const animateContainerScroll = (container: HTMLElement, targetTop: number, smooth: boolean = true) => {
     if (!smooth) {
-      container.scrollTop = targetTop;
-      lyricScrollTarget.set(targetTop);
+      // A hard scrollTop jump reads as a flash when the active line changes
+      // mid-playback. Use a short non-overshooting ease-out instead. The
+      // spring writer is gated while this runs (single writer), any previous
+      // run is cancelled so rapid line switches cannot stack two animations,
+      // and the spring is NOT fed mid-run — feeding it makes its laggy output
+      // yank the list back to an old position when the gate lifts. On finish,
+      // sync the spring target AND jump its output to the final value so the
+      // gate can lift without any pull-back.
+      if (scrollRafRef.current !== null) cancelAnimationFrame(scrollRafRef.current);
+      const start = container.scrollTop;
+      const delta = targetTop - start;
+      if (Math.abs(delta) < 2) {
+        container.scrollTop = targetTop;
+        lyricScrollTarget.set(targetTop);
+        lyricScrollY.jump(targetTop);
+        return;
+      }
+      manualScrollRef.current = true;
+      const duration = 180;
+      const t0 = performance.now();
+      const step = (now: number) => {
+        const p = Math.min(1, (now - t0) / duration);
+        const eased = 1 - Math.pow(1 - p, 3);
+        const v = start + delta * eased;
+        container.scrollTop = v;
+        if (p < 1) {
+          scrollRafRef.current = requestAnimationFrame(step);
+        } else {
+          container.scrollTop = targetTop;
+          lyricScrollTarget.set(targetTop);
+          lyricScrollY.jump(targetTop);
+          manualScrollRef.current = false;
+          scrollRafRef.current = null;
+        }
+      };
+      scrollRafRef.current = requestAnimationFrame(step);
       return;
     }
     lyricScrollTarget.set(targetTop);
@@ -365,7 +551,7 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
 
   const handleLyricClick = (time: number) => {
     setIsUserScrolling(false);
-    window.dispatchEvent(new CustomEvent('audio-seek', { detail: time }));
+    emitAudioSeek(time);
   };
 
   const handleToggleWindowFullScreen = () => {
@@ -608,6 +794,24 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                 />
                 <Volume2 className="w-4 h-4 text-white/40" />
               </div>
+
+              {/* Lyric Switch Offset (per-song, ms) — right under the volume bar */}
+              <div className="w-full flex items-center space-x-3 pt-3">
+                <Clock className="w-4 h-4 text-white/60 shrink-0" />
+                <input
+                  type="range"
+                  min="-2000"
+                  max="2000"
+                  step="50"
+                  value={lyricSwitchOffsetMs}
+                  onChange={(e) => setLyricSwitchOffsetMs(parseInt(e.target.value, 10))}
+                  title="歌词切换时间微调：正值提前、负值延后（换歌后恢复默认 0ms）"
+                  className="flex-1 accent-white h-1.5 bg-white/20 rounded-lg cursor-pointer"
+                />
+                <span className="text-[11px] font-mono text-white/60 w-14 text-right shrink-0">
+                  {lyricSwitchOffsetMs > 0 ? `+${lyricSwitchOffsetMs}` : lyricSwitchOffsetMs}ms
+                </span>
+              </div>
             </div>
 
             {/* Right Column: Full Screen Height Lyric Engine */}
@@ -625,6 +829,16 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                   </div>
                 ) : (
                   <div className="w-full flex flex-col space-y-7 items-start pt-64 pb-80 pr-14 md:pr-20">
+                    {/* Pre-chorus countdown dots — shown above the first lyric
+                        line so the first line itself is never replaced. Works
+                        on both platforms: QQ lyrics have their title/personnel
+                        rows filtered so the first line is the real first
+                        lyric (its timestamp drives the countdown). */}
+                    {showPreChorusDots && currentSong?.source === 'netease' && (
+                      <div className="pl-2 pb-1">
+                        <PreChorusDots elapsed={currentTime} firstTime={firstLyricTime} />
+                      </div>
+                    )}
                     {lyrics.map((line, idx) => {
                       const isActive = idx === activeIndex;
                       const distance = Math.abs(idx - focalIndex);
@@ -654,14 +868,22 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                           onClick={() => handleLyricClick(line.time)}
                           animate={{
                             scale: isActive
-                              ? [0.985, 1.042, 1.012, 1.018]
+                              ? enableLyricAnimation
+                                ? [0.985, 1.042, 1.012, 1.018]
+                                : 1.018
                               : distance === 1
-                              ? [1.015, 0.992, 0.99]
+                              ? enableLyricAnimation
+                                ? [1.015, 0.992, 0.99]
+                                : 0.99
                               : 0.982,
                             y: isActive
-                              ? [8, -4, 1, 0]
+                              ? enableLyricAnimation
+                                ? [8, -4, 1, 0]
+                                : 0
                               : distance === 1
-                              ? [-2, 1, 0]
+                              ? enableLyricAnimation
+                                ? [-2, 1, 0]
+                                : 0
                               : 0,
                             opacity: targetOpacity,
                             filter: `blur(${targetBlur}px)`,
@@ -669,7 +891,9 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                           transition={jellyTransition}
                           className="full-lyrics-line cursor-pointer text-left origin-left space-y-1 py-1 px-2 -mx-2 hover:opacity-100 max-w-full break-words"
                         >
-                          {/* Main Lyric Line */}
+                          {/* Main Lyric Line — always rendered; the pre-chorus
+                              countdown dots sit ABOVE the list, never
+                              replacing the first lyric line. */}
                           <KaraokeLine
                             line={line}
                             isActive={isActive}
@@ -717,6 +941,14 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                 </div>
               ) : (
                 <div className="w-full flex flex-col space-y-8 items-center pt-64 pb-80">
+                  {/* Pre-chorus countdown dots — same lead-in as split view,
+                      both platforms (QQ title/personnel rows are filtered so
+                      the first lyric timestamp is real). */}
+                  {showPreChorusDots && currentSong?.source === 'netease' && (
+                    <div className="pb-2">
+                      <PreChorusDots elapsed={currentTime} firstTime={firstLyricTime} />
+                    </div>
+                  )}
                   {lyrics.map((line, idx) => {
                     const isActive = idx === activeIndex;
                     const distance = Math.abs(idx - focalIndex);
@@ -744,14 +976,22 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                         onClick={() => handleLyricClick(line.time)}
                         animate={{
                           scale: isActive
-                            ? [0.985, 1.048, 1.015, 1.025]
+                            ? enableLyricAnimation
+                              ? [0.985, 1.048, 1.015, 1.025]
+                              : 1.025
                             : distance === 1
-                            ? [1.022, 0.993, 0.992]
+                            ? enableLyricAnimation
+                              ? [1.022, 0.993, 0.992]
+                              : 0.992
                             : 0.978,
                           y: isActive
-                            ? [10, -5, 1.5, 0]
+                            ? enableLyricAnimation
+                              ? [10, -5, 1.5, 0]
+                              : 0
                             : distance === 1
-                            ? [-2, 1, 0]
+                            ? enableLyricAnimation
+                              ? [-2, 1, 0]
+                              : 0
                             : 0,
                           opacity: targetOpacity,
                           filter: `blur(${targetBlur}px)`,

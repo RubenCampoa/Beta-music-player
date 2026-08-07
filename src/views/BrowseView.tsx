@@ -3,7 +3,8 @@ import { Compass, Flame, Award, Disc, Play } from 'lucide-react';
 import { Song, Playlist } from '../types/music';
 import { usePlayerStore } from '../store/playerStore';
 import { shallow } from 'zustand/shallow';
-import { getOptimizedCoverUrl, neteaseApi } from '../services/neteaseApi';
+import { getOptimizedCoverUrl } from '../utils/format';
+import { neteaseApi } from '../services/neteaseApi';
 import { musicApiAdapter } from '../services/musicApiAdapter';
 
 export const BrowseView: React.FC = () => {

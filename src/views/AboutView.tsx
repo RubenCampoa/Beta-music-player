@@ -1,5 +1,6 @@
 import React from 'react';
 import { Github, Heart, Sparkles, ExternalLink, Code2, Disc, Music, User } from 'lucide-react';
+import { APP_VERSION } from '../utils/version';
 
 export const AboutView: React.FC = () => {
   const openExternal = (url: string) => {
@@ -16,7 +17,7 @@ export const AboutView: React.FC = () => {
         </div>
         <div className="px-3 py-1 bg-white/5 rounded-full border border-white/10 text-xs text-white/60 font-medium flex items-center space-x-1.5">
           <Disc className="w-3.5 h-3.5 text-apple-red animate-spin" />
-          <span>v1.0.7 正式版</span>
+          <span>{APP_VERSION} 正式版</span>
         </div>
       </div>
 

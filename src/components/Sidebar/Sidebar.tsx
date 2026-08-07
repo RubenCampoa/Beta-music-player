@@ -2,6 +2,7 @@ import React from 'react';
 import { PlayCircle, Compass, HardDrive, ListMusic, Heart, Settings, Info, AlertTriangle, History } from 'lucide-react';
 import { usePlayerStore } from '../../store/playerStore';
 import { shallow } from 'zustand/shallow';
+import { APP_VERSION } from '../../utils/version';
 
 export const Sidebar: React.FC = () => {
   const { activeTab, setActiveTab, playlists, setSelectedPlaylist, selectedPlaylist, activePlatform } = usePlayerStore(
@@ -139,7 +140,7 @@ export const Sidebar: React.FC = () => {
       {/* Footer Info */}
       <div className="sidebar-footer-label px-3 py-2 border-t border-black/10 text-[11px] text-[#929aa7] flex items-center justify-between">
         <span>Beta Music Player</span>
-        <span className="bg-white/75 text-[#7d8795] px-1.5 py-0.5 rounded text-[9px]">v1.0.7</span>
+        <span className="bg-white/75 text-[#7d8795] px-1.5 py-0.5 rounded text-[9px]">{APP_VERSION}</span>
       </div>
     </aside>
   );

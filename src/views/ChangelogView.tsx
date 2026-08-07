@@ -17,17 +17,61 @@ export const ChangelogView: React.FC = () => {
         </div>
         <div className="px-3 py-1 bg-apple-red/20 rounded-full border border-apple-red/30 text-xs text-apple-red font-semibold flex items-center space-x-1.5">
           <Disc className="w-3.5 h-3.5 animate-spin" />
-          <span>当前版本 v1.0.7</span>
+          <span>当前版本 v1.0.9</span>
         </div>
       </div>
 
-      {/* Release v1.0.7 */}
+      {/* Release v1.0.9 */}
       <section className="glass-panel p-6 rounded-2xl space-y-5 border border-apple-red/40 shadow-2xl relative overflow-hidden">
         <div className="flex items-center justify-between border-b border-white/10 pb-4">
           <div className="flex items-center space-x-3">
-            <span className="text-2xl font-extrabold text-white tracking-tight">v1.0.7</span>
+            <span className="text-2xl font-extrabold text-white tracking-tight">v1.0.9</span>
             <span className="px-2.5 py-0.5 rounded-full bg-apple-red text-white text-[10px] font-bold uppercase tracking-wider shadow-sm">
               最新版本
+            </span>
+          </div>
+          <span className="text-xs font-mono text-white/40">2026-08-07</span>
+        </div>
+        <div className="space-y-2 text-xs text-white/70 leading-relaxed">
+          <p>• 【逐字歌词性能】逐字波浪组件 memo 化，慢歌长句每帧仅更新正在唱的一个字，逐字点亮流畅不卡顿。</p>
+          <p>• 【歌词时间轴】直连音频实时媒体时钟并做指数平滑，消除慢歌逐字抖动与时间外推漂移。</p>
+          <p>• 【高亮增强】激活歌词光晕更亮一档（逐字与非逐字），随点亮进度平滑淡入。</p>
+          <p>• 【前奏倒计时】三个圆点仅网易云模式显示，消失时机锚定真实开唱时间；QQ 歌词元数据过滤升级（标题/词曲行，兼容全角连字符、括号副标题与 [ti:] 前置 meta）。</p>
+          <p>• 【歌词切换时间微调】全屏歌词音量条下方新增滑块，按每首歌独立调整歌词行切换偏移（-2000ms ~ +2000ms），播放下一首自动恢复默认 0ms。</p>
+          <p>• 【窗口行为】移除自定义最小化/恢复动画，回归 Windows 系统默认窗口动画。</p>
+          <p>• 【检查更新】修复版本比较逻辑（旧标签不再误报新版本）、版本号统一读取、区分 API 限流与网络失败、启动检查 6 小时节流。</p>
+          <p>• 【设置】「性能与卡顿优化建议」更新并新增「一键设置」，一键仅开启流体背景并关闭全部歌词动效。</p>
+        </div>
+      </section>
+
+      {/* Release v1.0.8 */}
+      <section className="glass-panel p-6 rounded-2xl space-y-5 border border-white/15 relative overflow-hidden shadow-xl">
+        <div className="flex items-center justify-between border-b border-white/10 pb-4">
+          <div className="flex items-center space-x-3">
+            <span className="text-2xl font-extrabold text-white tracking-tight">v1.0.8</span>
+            <span className="px-2.5 py-0.5 rounded-full bg-apple-red/20 text-apple-red border border-apple-red/30 text-[10px] font-bold uppercase tracking-wider shadow-sm">
+              正式版本
+            </span>
+          </div>
+          <span className="text-xs font-mono text-white/40">2026-08-07</span>
+        </div>
+        <div className="space-y-2 text-xs text-white/70 leading-relaxed">
+          <p>• 【逐字歌词】新增网易云逐字歌词（YRC）支持：支持逐字歌词的歌曲全屏歌词自动逐字点亮，采用行级联动的海浪式非线性果冻动画，唱到哪亮到哪、快歌不闪现，字渐亮缓出收敛、发光平滑渐入。</p>
+          <p>• 【前奏倒计时】全屏歌词前奏阶段新增三个圆点依次点亮倒计时（Apple Music 风格），第三个圆点亮起即开唱，不遮挡第一句歌词。</p>
+          <p>• 【安全加固】恢复 webSecurity 与窗口沙箱、注入内容安全策略（CSP）、app-audio 本地音频协议白名单校验、本地 API 仅绑定 127.0.0.1、修复端口占用崩溃与本地音乐加载链路。</p>
+          <p>• 【QQ 音乐识别修复】VIP 判定改为以“播放受限”为准（安和桥等高品质付费歌曲不再误标 VIP），榜单歌曲接入权威付费信息校验，严格匹配防止同名翻唱/DJ 版错配。</p>
+          <p>• 【播放修复】修复内容安全策略误拦截 http 音源导致的“音源播放失败”，QQ 封面跨域注入修复流体背景取色。</p>
+          <p>• 【进度条交互】播放进度条支持拖拽滑动（拖动实时预览、松手定位），修复拖动不跟手与卡顿。</p>
+        </div>
+      </section>
+
+      {/* Release v1.0.7 */}
+      <section className="glass-panel p-6 rounded-2xl space-y-5 border border-white/15 relative overflow-hidden shadow-xl">
+        <div className="flex items-center justify-between border-b border-white/10 pb-4">
+          <div className="flex items-center space-x-3">
+            <span className="text-2xl font-extrabold text-white tracking-tight">v1.0.7</span>
+            <span className="px-2.5 py-0.5 rounded-full bg-apple-red/20 text-apple-red border border-apple-red/30 text-[10px] font-bold uppercase tracking-wider shadow-sm">
+              正式版本
             </span>
           </div>
           <span className="text-xs font-mono text-white/40">2026-08-06</span>
