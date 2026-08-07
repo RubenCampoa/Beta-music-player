@@ -21,7 +21,7 @@ import {
   Clock,
   Sparkles,
 } from 'lucide-react';
-import { motion, useMotionValue, useSpring } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { usePlayerStore } from '../../store/playerStore';
 import { neteaseApi } from '../../services/neteaseApi';
 import { getOptimizedCoverUrl, cleanTitle } from '../../utils/format';
@@ -376,65 +376,26 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
   const userScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const lyricScrollTarget = useMotionValue(0);
-  const lyricScrollY = useSpring(lyricScrollTarget, {
-    // Slower, well-damped spring so the list scroll settles at the same
-    // pace as the line jelly (~0.64s) — the move and the jelly read as one
-    // motion instead of "scroll first, bounce after".
-    stiffness: 120,
-    damping: 24,
-    mass: 0.9,
-  });
-  const isUserScrollingRef = useRef(false);
-  // While a manual (non-spring) scroll animation is running, the spring
-  // output must not also write scrollTop — two writers fight and the list
-  // visibly jitters. manualScrollRef gates the spring writer; scrollRafRef
-  // cancels a previous run when a new line switch starts mid-scroll.
-  const manualScrollRef = useRef(false);
+  // Deterministic RAF scroll — no spring tail crawl.
   const scrollRafRef = useRef<number | null>(null);
 
   // Focal index for scrolling & blur gradient (defaults to line 0 during prelude)
   const focalIndex = activeIndex >= 0 ? activeIndex : 0;
 
-  // Apple Music-like lyric emphasis: the scale/y keyframes deliberately
-  // overshoot and settle. This is a non-linear jelly transition rather than a
-  // linear class swap, while opacity and blur use a softer luminance curve.
+  // Apple Music-like lyric emphasis: scale and y overshoot and settle.
+  // y keyframes are padded with a duplicate 0 at the end + `times` mapping
+  // so the bounce completes at ~72% of the duration and the last 28% holds
+  // at exactly y:0 — no ease-out tail crawl, no sub-pixel drift.
   const jellyTransition = enableLyricAnimation
     ? {
-        scale: { duration: 0.64, ease: [0.34, 1.35, 0.64, 1] as const },
-        y: { duration: 0.64, ease: [0.22, 1, 0.36, 1] as const },
+        scale: { duration: 0.62, ease: [0.34, 1.56, 0.64, 1] as const },
+        y: { duration: 0.68, ease: [0.22, 1, 0.36, 1] as const, times: [0, 0.12, 0.45, 0.72, 1] },
         opacity: { duration: 0.48, ease: [0.22, 1, 0.36, 1] as const },
-        filter: { duration: 0.56, ease: [0.22, 1, 0.36, 1] as const },
+        filter: { duration: 0.52, ease: [0.22, 1, 0.36, 1] as const },
       }
     : { duration: 0 };
 
-  useEffect(() => {
-    isUserScrollingRef.current = isUserScrolling;
-  }, [isUserScrolling]);
-
-  // Drive scrollTop from a spring so quick lyric changes preserve momentum
-  // instead of cancelling one fixed-duration RAF animation and starting a
-  // second one from a stop.
-  useEffect(() => {
-    return lyricScrollY.on('change', (latest) => {
-      const container = containerRef.current;
-      if (container && !isUserScrollingRef.current && !manualScrollRef.current) {
-        // Snap the final fraction: an over-damped spring crawls the last
-        // 1-3px over ~400ms after the visible motion has finished, which
-        // reads (under magnification) as a late upward shift of the whole
-        // list. Once inside the threshold, land exactly on target.
-        const target = lyricScrollTarget.get();
-        if (Math.abs(latest - target) < 0.5) {
-          lyricScrollY.jump(target);
-          container.scrollTop = target;
-          return;
-        }
-        container.scrollTop = latest;
-      }
-    });
-  }, [lyricScrollY]);
-
-  // Cancel any in-flight manual scroll when the view unmounts.
+  // Cancel any in-flight scroll animation when the view unmounts.
   useEffect(() => {
     return () => {
       if (scrollRafRef.current !== null) cancelAnimationFrame(scrollRafRef.current);
@@ -459,6 +420,12 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
 
   // Handle user manual scroll interaction (pause auto-scroll for 4s)
   const handleUserScroll = () => {
+    // The user takes over: cancel any in-flight RAF scroll animation so it
+    // stops fighting the wheel/touch/mouse input (single writer).
+    if (scrollRafRef.current !== null) {
+      cancelAnimationFrame(scrollRafRef.current);
+      scrollRafRef.current = null;
+    }
     setIsUserScrolling(true);
     if (userScrollTimeoutRef.current) clearTimeout(userScrollTimeoutRef.current);
     userScrollTimeoutRef.current = setTimeout(() => {
@@ -466,49 +433,39 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
     }, 4000);
   };
 
-  // Spring-based scrolling gives the lyric list the same non-linear feel as
-  // the line emphasis and remains smooth when the next timestamp arrives.
+  // Deterministic RAF scroll — uses a quartic ease-out curve and lands on an
+  // exact integer pixel. No spring, no tail crawl, no sub-pixel drift.
   const animateContainerScroll = (container: HTMLElement, targetTop: number, smooth: boolean = true) => {
-    if (!smooth) {
-      // A hard scrollTop jump reads as a flash when the active line changes
-      // mid-playback. Use a short non-overshooting ease-out instead. The
-      // spring writer is gated while this runs (single writer), any previous
-      // run is cancelled so rapid line switches cannot stack two animations,
-      // and the spring is NOT fed mid-run — feeding it makes its laggy output
-      // yank the list back to an old position when the gate lifts. On finish,
-      // sync the spring target AND jump its output to the final value so the
-      // gate can lift without any pull-back.
-      if (scrollRafRef.current !== null) cancelAnimationFrame(scrollRafRef.current);
-      const start = container.scrollTop;
-      const delta = targetTop - start;
-      if (Math.abs(delta) < 2) {
-        container.scrollTop = targetTop;
-        lyricScrollTarget.set(targetTop);
-        lyricScrollY.jump(targetTop);
-        return;
-      }
-      manualScrollRef.current = true;
-      const duration = 180;
-      const t0 = performance.now();
-      const step = (now: number) => {
-        const p = Math.min(1, (now - t0) / duration);
-        const eased = 1 - Math.pow(1 - p, 3);
-        const v = start + delta * eased;
-        container.scrollTop = v;
-        if (p < 1) {
-          scrollRafRef.current = requestAnimationFrame(step);
-        } else {
-          container.scrollTop = targetTop;
-          lyricScrollTarget.set(targetTop);
-          lyricScrollY.jump(targetTop);
-          manualScrollRef.current = false;
-          scrollRafRef.current = null;
-        }
-      };
-      scrollRafRef.current = requestAnimationFrame(step);
+    // Cancel any in-flight scroll first.
+    if (scrollRafRef.current !== null) {
+      cancelAnimationFrame(scrollRafRef.current);
+      scrollRafRef.current = null;
+    }
+
+    const finalTarget = Math.round(targetTop);
+    const start = container.scrollTop;
+    const delta = finalTarget - start;
+
+    if (!smooth || Math.abs(delta) < 2) {
+      container.scrollTop = finalTarget;
       return;
     }
-    lyricScrollTarget.set(targetTop);
+
+    const duration = 420;
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const p = Math.min(1, (now - t0) / duration);
+      // Quartic ease-out: smooth deceleration, more non-linear feel
+      const eased = 1 - Math.pow(1 - p, 4);
+      container.scrollTop = Math.round(start + delta * eased);
+      if (p < 1) {
+        scrollRafRef.current = requestAnimationFrame(step);
+      } else {
+        container.scrollTop = finalTarget;
+        scrollRafRef.current = null;
+      }
+    };
+    scrollRafRef.current = requestAnimationFrame(step);
   };
 
   // Center active lyric line in container smoothly using static bounding offsets
@@ -925,20 +882,16 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                           animate={{
                             scale: isActive
                               ? enableLyricAnimation
-                                ? [0.985, 1.042, 1.012, 1.018]
+                                ? [0.985, 1.042, 1.018]
                                 : 1.018
                               : distance === 1
                               ? enableLyricAnimation
-                                ? [1.015, 0.992, 0.99]
+                                ? [1.015, 0.99]
                                 : 0.99
                               : 0.982,
                             y: isActive
                               ? enableLyricAnimation
-                                ? [8, -4, 1, 0]
-                                : 0
-                              : distance === 1
-                              ? enableLyricAnimation
-                                ? [-2, 1, 0]
+                                ? [0, 8, -3, 0, 0]
                                 : 0
                               : 0,
                             opacity: targetOpacity,
@@ -1034,20 +987,16 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                         animate={{
                           scale: isActive
                             ? enableLyricAnimation
-                              ? [0.985, 1.048, 1.015, 1.025]
+                              ? [0.985, 1.048, 1.025]
                               : 1.025
                             : distance === 1
                             ? enableLyricAnimation
-                              ? [1.022, 0.993, 0.992]
+                              ? [1.022, 0.992]
                               : 0.992
                             : 0.978,
                           y: isActive
                             ? enableLyricAnimation
-                              ? [10, -5, 1.5, 0]
-                              : 0
-                            : distance === 1
-                            ? enableLyricAnimation
-                              ? [-2, 1, 0]
+                              ? [0, 10, -4, 0, 0]
                               : 0
                             : 0,
                           opacity: targetOpacity,
