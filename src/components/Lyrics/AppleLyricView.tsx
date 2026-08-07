@@ -90,8 +90,11 @@ const WaveWord = React.memo(({ text, p, glowEnabled }: { text: string; p: number
   // word lights up at any instant, never the whole word at once. The font
   // itself never moves (no scale/translate).
   const eased = clamped >= 1 ? 1 : Math.sin((clamped * Math.PI) / 2);
-  const coverPct = eased * 100;
-  const edge = p > 0 && p < 1;
+  // Covered words are pinned to a full 100% cover (never 99.9% from float
+  // rounding) and keep a permanent glow — the whole sung portion of the
+  // line stays highlighted, not just the word under the wave edge.
+  const coverPct = clamped >= 1 ? 100 : eased * 100;
+  const lit = p >= 1 || (p > 0 && p < 1);
 
   return (
     <span className="relative inline-block" style={{ verticalAlign: 'baseline' }}>
@@ -111,8 +114,8 @@ const WaveWord = React.memo(({ text, p, glowEnabled }: { text: string; p: number
           WebkitTextFillColor: 'transparent',
           color: 'transparent',
           filter:
-            edge && glowEnabled
-              ? 'drop-shadow(0 0 5px rgba(255,255,255,0.75)) drop-shadow(0 0 12px rgba(255,45,85,0.45))'
+            lit && glowEnabled
+              ? 'drop-shadow(0 0 5px rgba(255,255,255,0.8)) drop-shadow(0 0 12px rgba(255,45,85,0.5))'
               : 'none',
         }}
       >
