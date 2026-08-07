@@ -495,12 +495,13 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
     const activeEl = lineRefs.current[index];
     if (!container || !activeEl) return;
 
-    const containerRect = container.getBoundingClientRect();
-    const activeRect = activeEl.getBoundingClientRect();
     const containerHeight = container.clientHeight;
-
-    const elOffsetTop = activeRect.top - containerRect.top + container.scrollTop;
-    const elHeight = activeRect.height;
+    // Use layout position (offsetTop/offsetHeight), NOT getBoundingClientRect:
+    // the latter includes the in-flight jelly transform (scale/y), which made
+    // the scroll target drift and left the line offset by a few px after the
+    // animation finished.
+    const elOffsetTop = activeEl.offsetTop;
+    const elHeight = activeEl.offsetHeight;
 
     const targetScrollTop = Math.max(0, elOffsetTop - containerHeight / 2 + elHeight / 2);
 
