@@ -107,6 +107,10 @@ npm run build
 
 ---
 
+## ⚠️ 注意事项
+
+> **QQ 音乐测试模式**：目前 QQ 音乐属于测试模式，可能会存在一系列问题，例如无法正常获取歌词翻译等。若遇到问题，欢迎前往 [GitHub Issues](https://github.com/RubenCampoa/Beta-music-player/issues) 提交 Issue；若并非 API 问题，后续会着手修复。
+
 ## 📋 版本更新历史 (Changelog)
 
 ### v1.0.8 (2026-08-07)

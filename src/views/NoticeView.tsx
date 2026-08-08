@@ -60,7 +60,24 @@ export const NoticeView: React.FC = () => {
         </div>
       </section>
 
-      {/* 2. AI Assistance Statement */}
+      {/* 2. QQ Music Beta Notice */}
+      <section className="glass-panel p-6 rounded-2xl space-y-4 border border-amber-500/20 shadow-xl">
+        <div className="flex items-center space-x-2 text-amber-400 font-bold text-lg">
+          <AlertTriangle className="w-5 h-5" />
+          <span className="text-white">QQ 音乐测试模式</span>
+        </div>
+
+        <div className="p-5 bg-white/5 rounded-xl border border-amber-500/20 space-y-2">
+          <p className="text-xs text-white/60 leading-relaxed">
+            目前 QQ 音乐属于 <strong>测试模式</strong>，可能会存在一系列问题，例如无法正常获取歌词翻译等。
+          </p>
+          <p className="text-xs text-white/60 leading-relaxed">
+            若遇到问题，欢迎前往 GitHub 提交 <strong>Issue</strong>；若并非 API 问题，后续会着手修复。
+          </p>
+        </div>
+      </section>
+
+      {/* 3. AI Assistance Statement */}
       <section className="glass-panel p-6 rounded-2xl space-y-4 border border-white/10 shadow-xl">
         <div className="flex items-center space-x-2 text-purple-400 font-bold text-lg">
           <Sparkles className="w-5 h-5" />
