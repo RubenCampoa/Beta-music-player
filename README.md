@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v1.0.1-brightgreen.svg" alt="Version" />
+  <img src="https://img.shields.io/badge/Release-v1.0.8-brightgreen.svg" alt="Version" />
   <img src="https://img.shields.io/badge/Platform-Windows_x64-blue.svg" alt="Platform" />
   <img src="https://img.shields.io/badge/Electron-31.x-4B8BF5.svg" alt="Electron" />
   <img src="https://img.shields.io/badge/React-18.x-61DAFB.svg" alt="React" />
@@ -108,6 +108,16 @@ npm run build
 ---
 
 ## 📋 版本更新历史 (Changelog)
+
+### v1.0.8 (2026-08-07)
+- 🎤 新增网易云逐字歌词（YRC）支持：海浪式非线性果冻点亮动效、memo 化性能优化、直连音频实时媒体时钟消除慢歌抖动
+- ✨ 高亮光晕增强、逐字与逐行亮度统一；前奏三点倒计时（主流音乐 App 风格，仅网易云）
+- ⏱️ 新增「歌词切换时间微调」：每首歌独立调整歌词行切换偏移，播放下一首自动恢复默认
+- 🎵 QQ 歌词元数据过滤升级（标题行/词曲行/前置 meta），歌词列表与倒计时不再被脏行干扰
+- 🪟 移除自定义最小化/恢复动画，回归 Windows 系统默认窗口行为
+- 🔄 修复检查更新版本比较逻辑、区分 API 限流与网络失败、启动检查 6 小时节流
+- 🔒 安全加固：恢复 webSecurity 与沙箱、注入 CSP、本地 API 仅绑定 127.0.0.1
+- 📦 依赖固定（网易云 API 4.38.0），保证构建可复现
 
 ### v1.0.1 (2026-07-23)
 - 🎵 支持本地 MP3/FLAC 音频 ID3 标签与嵌入封面提取
