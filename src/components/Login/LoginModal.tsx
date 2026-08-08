@@ -35,6 +35,11 @@ export const LoginModal: React.FC = () => {
       if (account) {
         setAccount('netease', account);
         setActivePlatform('netease');
+        // Refresh the cloud liked-song ids so hearts light up immediately in
+        // the "我喜欢的音乐" playlist after a mid-session login (previously
+        // only fetched at startup).
+        const likeIds = await neteaseApi.getLikelist(Number(account.userId) || 0);
+        usePlayerStore.getState().setNeteaseLikeIds(likeIds);
         setToastMessage(`网易云账号已登录：${account.nickname}`);
       }
     } else {
@@ -42,6 +47,28 @@ export const LoginModal: React.FC = () => {
       if (account) {
         setAccount('qq', account);
         setActivePlatform('qq');
+        // Refresh the QQ liked-song mids the same way so hearts in the
+        // "我喜欢" playlist are lit right after login (not only when the
+        // playlist is opened).
+        try {
+          const playlists = await qqMusicApi.getUserPlaylists();
+          const fav = playlists.find(
+            (p) => p.name.includes('我喜欢') || p.name.includes('喜欢')
+          );
+          if (fav) {
+            const tracks = await qqMusicApi.getPlaylistSongs(fav.id);
+            const mids: string[] = [];
+            tracks.forEach((s) => {
+              if (s.songmid) mids.push(s.songmid);
+              const clean = String(s.id).replace(/^qq_/, '');
+              if (clean) mids.push(clean);
+            });
+            if (mids.length > 0) usePlayerStore.getState().setQqLikeMids(mids);
+          }
+        } catch {
+          // Playlist sync is best-effort; heart state falls back to the
+          // per-playlist sync in PlaylistView.
+        }
         setToastMessage(`QQ 音乐账号已登录：${account.nickname}`);
       }
     }

@@ -208,6 +208,27 @@ export const App: React.FC = () => {
       const qqAccount = await qqMusicApi.getUserAccount();
       if (qqAccount) {
         setAccount('qq', qqAccount);
+        // Pre-load the QQ liked-song mids so hearts in the "我喜欢"
+        // playlist are lit from launch (previously only synced when the
+        // playlist itself was opened).
+        try {
+          const playlists = await qqMusicApi.getUserPlaylists();
+          const fav = playlists.find(
+            (p) => p.name.includes('我喜欢') || p.name.includes('喜欢')
+          );
+          if (fav) {
+            const tracks = await qqMusicApi.getPlaylistSongs(fav.id);
+            const mids: string[] = [];
+            tracks.forEach((s) => {
+              if (s.songmid) mids.push(s.songmid);
+              const clean = String(s.id).replace(/^qq_/, '');
+              if (clean) mids.push(clean);
+            });
+            if (mids.length > 0) usePlayerStore.getState().setQqLikeMids(mids);
+          }
+        } catch {
+          // Best-effort; falls back to the per-playlist sync in PlaylistView.
+        }
       }
 
       // Load user playlists for whichever platform is currently active
