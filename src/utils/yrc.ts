@@ -35,8 +35,8 @@ export function parseYrc(yrcString?: string): Map<number, LyricWord[]> {
     YRC_WORD_RE.lastIndex = 0;
     let wordMatch: RegExpExecArray | null;
     while ((wordMatch = YRC_WORD_RE.exec(content)) !== null) {
-      const text = wordMatch[4].trim();
-      if (!text) continue;
+      const text = wordMatch[4];
+      if (!text.trim()) continue;
       words.push({
         text,
         time: Number(wordMatch[1]) / 1000,

@@ -347,7 +347,7 @@ export const App: React.FC = () => {
         </main>
       </motion.div>
 
-      {/* Fullscreen Apple Music Lyric Mode */}
+      {/* Fullscreen Lyric Mode */}
       <AnimatePresence initial={false}>
         {isFullLyricsMode && <AppleLyricView key="full-lyrics" isVisible />}
       </AnimatePresence>

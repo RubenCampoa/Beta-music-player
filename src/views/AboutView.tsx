@@ -96,7 +96,7 @@ export const AboutView: React.FC = () => {
           <div className="p-4 bg-white/5 rounded-xl border border-white/10 space-y-1.5">
             <div className="font-bold text-white text-sm flex items-center space-x-1.5">
               <Music className="w-4 h-4 text-apple-red" />
-              <span>Apple Music 视觉风格</span>
+              <span>现代视觉风格</span>
             </div>
             <p className="leading-relaxed text-white/60">
               基于 Canvas 实时提取专辑封面主色调，渲染高帧率流体渐变光斑背景，搭配暗黑毛玻璃界面。

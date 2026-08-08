@@ -17,7 +17,7 @@ class LocalMusicDatabase extends Dexie {
   public songs!: Table<LocalSongRecord, string>;
 
   constructor() {
-    super('AppleMusicLocalLibrary');
+    super('MusicPlayerLocalLibrary');
     this.version(1).stores({
       songs: 'id, name, artist, album, addedAt',
     });

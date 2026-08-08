@@ -304,7 +304,7 @@ export const SettingsView: React.FC = () => {
           <div className="flex items-center justify-between p-4 bg-white/5 rounded-xl border border-white/10">
             <div>
               <h4 className="text-sm font-semibold text-white">Apple 歌词弹性随动</h4>
-              <p className="text-xs text-white/50">歌词切换时触发 Apple Music 果冻弹跳缩放</p>
+              <p className="text-xs text-white/50">歌词切换时触发果冻弹跳缩放</p>
             </div>
             <input
               type="checkbox"

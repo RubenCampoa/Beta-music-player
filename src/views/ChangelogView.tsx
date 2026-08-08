@@ -43,7 +43,7 @@ export const ChangelogView: React.FC = () => {
           <p>• 【检查更新】修复版本比较逻辑（旧标签不再误报新版本）、版本号统一读取、区分 API 限流与网络失败、启动检查 6 小时节流。</p>
           <p>• 【设置】「性能与卡顿优化建议」更新并新增「一键设置」，一键仅开启流体背景并关闭全部歌词动效。</p>
           <p>• 【逐字歌词】新增网易云逐字歌词（YRC）支持：支持逐字歌词的歌曲全屏歌词自动逐字点亮，采用行级联动的海浪式非线性果冻动画，唱到哪亮到哪、快歌不闪现，字渐亮缓出收敛、发光平滑渐入。</p>
-          <p>• 【前奏倒计时】全屏歌词前奏阶段新增三个圆点依次点亮倒计时（Apple Music 风格），第三个圆点亮起即开唱，不遮挡第一句歌词。</p>
+          <p>• 【前奏倒计时】全屏歌词前奏阶段新增三个圆点依次点亮倒计时（主流音乐 App 风格），第三个圆点亮起即开唱，不遮挡第一句歌词。</p>
           <p>• 【安全加固】恢复 webSecurity 与窗口沙箱、注入内容安全策略（CSP）、app-audio 本地音频协议白名单校验、本地 API 仅绑定 127.0.0.1、修复端口占用崩溃与本地音乐加载链路。</p>
           <p>• 【QQ 音乐识别修复】VIP 判定改为以“播放受限”为准（安和桥等高品质付费歌曲不再误标 VIP），榜单歌曲接入权威付费信息校验，严格匹配防止同名翻唱/DJ 版错配。</p>
           <p>• 【播放修复】修复内容安全策略误拦截 http 音源导致的“音源播放失败”，QQ 封面跨域注入修复流体背景取色。</p>
@@ -92,7 +92,7 @@ export const ChangelogView: React.FC = () => {
           <p>• 修复首页推荐偶尔播放预制歌曲的问题，“查看全部”现在会正确进入每日推荐歌单。</p>
           <p>• 首页推荐封面新增悬停交互和点击播放，搜索历史下拉层恢复不透明并支持完整点击操作。</p>
           <p>• 登录弹窗隐藏底部播放栏，统一 Beta Music Player 应用名称、图标和 Windows 打包身份。</p>
-          <p>• 移除 Google 相关文案与外部字体引用，更新为 AI 辅助开发说明。</p>
+          <p>• 移除第三方品牌文案与外部字体引用，更新为 AI 辅助开发说明。</p>
         </div>
       </section>
 
@@ -231,7 +231,7 @@ export const ChangelogView: React.FC = () => {
           <div className="flex items-start space-x-3">
             <CheckCircle2 className="w-5 h-5 text-apple-red shrink-0 mt-0.5" />
             <div className="space-y-1">
-              <h4 className="text-sm font-bold text-white">Apple Music 风格“浏览”探索视图与权威榜单</h4>
+              <h4 className="text-sm font-bold text-white">「浏览」探索视图与权威榜单</h4>
               <p className="text-xs text-white/60 leading-relaxed">
                 解耦“现在就听”与“浏览”视图，全新打造包含网易云热歌榜、飙升榜、新歌榜、原创榜、ACG榜、欧美榜及热门曲风标签的探索专区。
               </p>
@@ -255,7 +255,7 @@ export const ChangelogView: React.FC = () => {
         <div className="space-y-3">
           <div className="flex items-start space-x-2 text-xs text-white/70">
             <Sparkles className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-            <span>Apple Music 风格响应式流体光斑背景与毛玻璃高斯模糊面板。</span>
+            <span>响应式流体光斑背景与毛玻璃高斯模糊面板。</span>
           </div>
           <div className="flex items-start space-x-2 text-xs text-white/70">
             <Sparkles className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />

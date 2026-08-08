@@ -532,7 +532,7 @@ class NeteaseApiService {
     return [
       {
         id: 'fallback-1',
-        name: 'Stay (Apple Music Session)',
+        name: 'Stay (Live Session)',
         artist: 'The Kid LAROI & Justin Bieber',
         album: 'F*CK LOVE 3: OVER YOU',
         duration: 141,

@@ -20,7 +20,7 @@ export const Sidebar: React.FC = () => {
   return (
     <aside className="app-sidebar h-[calc(100vh-3rem-5rem)] glass-sidebar flex flex-col justify-between p-3 select-none text-sm z-20">
       <div className="space-y-6">
-        {/* Apple Music Main Navigation */}
+        {/* Main Navigation */}
         <div className="space-y-1">
           <div className="nav-section-label px-3 text-xs font-semibold uppercase tracking-wider mb-2">
             推荐

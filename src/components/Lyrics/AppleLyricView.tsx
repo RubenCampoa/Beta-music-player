@@ -97,7 +97,7 @@ const WaveWord = React.memo(({ text, p, glowEnabled }: { text: string; p: number
   const lit = p >= 1 || (p > 0 && p < 1);
 
   return (
-    <span className="relative inline-block" style={{ verticalAlign: 'baseline' }}>
+    <span className="relative inline-block whitespace-pre-wrap" style={{ verticalAlign: 'baseline' }}>
       {/* Base layer: idle dark glyph (matches line-level text-white/60). */}
       <span className="inline-block" style={{ color: 'rgba(255,255,255,0.6)' }}>
         {text}
@@ -253,7 +253,7 @@ const KaraokeLine: React.FC<KaraokeLineProps> = ({
   );
 };
 
-// --- Pre-chorus "about to start" countdown (Apple Music style) ---
+// --- Pre-chorus "about to start" countdown (streaming-app style) ---
 // While the intro is still playing (no lyric line active yet), the first
 // lyric line shows three dots that light up one by one with a jelly
 // (overshoot) pop. The countdown finishes slightly BEFORE the vocals begin
@@ -357,7 +357,7 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
   const activeIndex = getActiveLyricIndex(currentTime, lyrics, lyricSwitchOffsetMs);
 
   // Pre-chorus state: lyrics exist but the first line hasn't started yet —
-  // show the Apple Music style "about to start" dots.
+  // show the streaming-app style "about to start" dots.
   const isPreChorus = lyrics.length > 0 && activeIndex === -1;
   // First REAL lyric line: skip any stray time-0 metadata row that survived
   // filtering (title/personnel rows are time 0), so the countdown and the
@@ -382,7 +382,7 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
   // Focal index for scrolling & blur gradient (defaults to line 0 during prelude)
   const focalIndex = activeIndex >= 0 ? activeIndex : 0;
 
-  // Apple Music-like lyric emphasis: scale and y overshoot and settle.
+  // Streaming-app-like lyric emphasis: scale and y overshoot and settle.
   // y keyframes are padded with a duplicate 0 at the end + `times` mapping
   // so the bounce completes at ~72% of the duration and the last 28% holds
   // at exactly y:0 — no ease-out tail crawl, no sub-pixel drift.

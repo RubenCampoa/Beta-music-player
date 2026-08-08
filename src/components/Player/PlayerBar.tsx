@@ -31,7 +31,7 @@ const PlayerProgress = React.memo(() => {
   const draggingRef = useRef(false);
   // While dragging, the bar is driven by a local preview value so the fill
   // follows the pointer immediately (the store currentTime only ticks ~4x/s).
-  // The actual seek is committed once on release (Apple Music style) to avoid
+  // The actual seek is committed once on release (streaming-app style) to avoid
   // churning the audio with seeks on every pointermove.
   const [dragPercent, setDragPercent] = useState<number | null>(null);
 
@@ -168,7 +168,7 @@ export const PlayerBar: React.FC = React.memo(() => {
             <div
               onClick={() => setFullLyricsMode(!isFullLyricsMode)}
               className="flex items-center space-x-3.5 cursor-pointer group truncate"
-              title="点击展开 Apple Music 歌词动效"
+              title="点击展开歌词动效"
             >
               <div className="relative w-12 h-12 rounded-lg overflow-hidden border border-black/10 shadow-md shrink-0">
                 <img
