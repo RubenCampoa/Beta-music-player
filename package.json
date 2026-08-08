@@ -1,6 +1,6 @@
 {
   "name": "beta-music-player",
-  "version": "1.0.9",
+  "version": "1.0.8",
   "private": true,
   "main": "dist-electron/main.js",
   "scripts": {

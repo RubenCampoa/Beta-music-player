@@ -17,15 +17,16 @@ export const ChangelogView: React.FC = () => {
         </div>
         <div className="px-3 py-1 bg-apple-red/20 rounded-full border border-apple-red/30 text-xs text-apple-red font-semibold flex items-center space-x-1.5">
           <Disc className="w-3.5 h-3.5 animate-spin" />
-          <span>当前版本 v1.0.9</span>
+          <span>当前版本 v1.0.8</span>
         </div>
       </div>
 
-      {/* Release v1.0.9 */}
+      {/* Release v1.0.8 — latest */}
+      {/* Release v1.0.8 — latest */}
       <section className="glass-panel p-6 rounded-2xl space-y-5 border border-apple-red/40 shadow-2xl relative overflow-hidden">
         <div className="flex items-center justify-between border-b border-white/10 pb-4">
           <div className="flex items-center space-x-3">
-            <span className="text-2xl font-extrabold text-white tracking-tight">v1.0.9</span>
+            <span className="text-2xl font-extrabold text-white tracking-tight">v1.0.8</span>
             <span className="px-2.5 py-0.5 rounded-full bg-apple-red text-white text-[10px] font-bold uppercase tracking-wider shadow-sm">
               最新版本
             </span>
@@ -41,21 +42,6 @@ export const ChangelogView: React.FC = () => {
           <p>• 【窗口行为】移除自定义最小化/恢复动画，回归 Windows 系统默认窗口动画。</p>
           <p>• 【检查更新】修复版本比较逻辑（旧标签不再误报新版本）、版本号统一读取、区分 API 限流与网络失败、启动检查 6 小时节流。</p>
           <p>• 【设置】「性能与卡顿优化建议」更新并新增「一键设置」，一键仅开启流体背景并关闭全部歌词动效。</p>
-        </div>
-      </section>
-
-      {/* Release v1.0.8 */}
-      <section className="glass-panel p-6 rounded-2xl space-y-5 border border-white/15 relative overflow-hidden shadow-xl">
-        <div className="flex items-center justify-between border-b border-white/10 pb-4">
-          <div className="flex items-center space-x-3">
-            <span className="text-2xl font-extrabold text-white tracking-tight">v1.0.8</span>
-            <span className="px-2.5 py-0.5 rounded-full bg-apple-red/20 text-apple-red border border-apple-red/30 text-[10px] font-bold uppercase tracking-wider shadow-sm">
-              正式版本
-            </span>
-          </div>
-          <span className="text-xs font-mono text-white/40">2026-08-07</span>
-        </div>
-        <div className="space-y-2 text-xs text-white/70 leading-relaxed">
           <p>• 【逐字歌词】新增网易云逐字歌词（YRC）支持：支持逐字歌词的歌曲全屏歌词自动逐字点亮，采用行级联动的海浪式非线性果冻动画，唱到哪亮到哪、快歌不闪现，字渐亮缓出收敛、发光平滑渐入。</p>
           <p>• 【前奏倒计时】全屏歌词前奏阶段新增三个圆点依次点亮倒计时（Apple Music 风格），第三个圆点亮起即开唱，不遮挡第一句歌词。</p>
           <p>• 【安全加固】恢复 webSecurity 与窗口沙箱、注入内容安全策略（CSP）、app-audio 本地音频协议白名单校验、本地 API 仅绑定 127.0.0.1、修复端口占用崩溃与本地音乐加载链路。</p>
