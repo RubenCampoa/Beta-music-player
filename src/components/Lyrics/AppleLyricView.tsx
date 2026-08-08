@@ -374,10 +374,21 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
   const [lyricLayoutMode, setLyricLayoutMode] = useState<'split' | 'full'>('split');
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
   const userScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   // Deterministic RAF scroll — no spring tail crawl.
   const scrollRafRef = useRef<number | null>(null);
+  // Current scroll offset in pixels. Scrolling is driven by a transform on
+  // the inner content wrapper (GPU-composited) instead of scrollTop: writing
+  // scrollTop every frame relayouts and repaints the whole large lyric list,
+  // which made line-switch animations run at a low frame rate.
+  const scrollYRef = useRef(0);
+  const maxScrollRef = useRef(0);
+  const dragStateRef = useRef<{ startY: number; startScroll: number } | null>(null);
+  // Set when a mouse drag moved far enough that the follow-up click should be
+  // suppressed (dragging the list must not also jump the playback position).
+  const suppressClickRef = useRef(false);
 
   // Focal index for scrolling & blur gradient (defaults to line 0 during prelude)
   const focalIndex = activeIndex >= 0 ? activeIndex : 0;
@@ -402,6 +413,36 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
     };
   }, []);
 
+  // Native wheel listener with passive:false so we can preventDefault and
+  // drive the transform-based scroll manually (React attaches wheel as a
+  // passive listener, where preventDefault is ignored).
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      beginUserScroll();
+      applyScroll(scrollYRef.current + e.deltaY);
+    };
+    container.addEventListener('wheel', onWheel, { passive: false });
+    return () => container.removeEventListener('wheel', onWheel);
+    // Re-bind when the split/full layout swaps the container node (the two
+    // branches share one ref but mount different elements).
+  }, [lyricLayoutMode]);
+
+  // Keep the scrollable range in sync with content/container size changes
+  // (lyrics, font size and layout mode all change the content height).
+  useEffect(() => {
+    const container = containerRef.current;
+    const content = contentRef.current;
+    if (!container || !content) return;
+    updateMaxScroll();
+    const ro = new ResizeObserver(() => updateMaxScroll());
+    ro.observe(container);
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, [lyrics, isVisible, lyricLayoutMode, lyricFontSize]);
+
   useEffect(() => {
     if (!isVisible) return;
 
@@ -418,10 +459,27 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
     }
   }, [isVisible]);
 
-  // Handle user manual scroll interaction (pause auto-scroll for 4s)
-  const handleUserScroll = () => {
-    // The user takes over: cancel any in-flight RAF scroll animation so it
-    // stops fighting the wheel/touch/mouse input (single writer).
+  // Apply a scroll offset as a GPU-composited translateY on the content
+  // wrapper (clamped to the scrollable range).
+  const applyScroll = (y: number) => {
+    const clamped = Math.min(maxScrollRef.current, Math.max(0, y));
+    scrollYRef.current = clamped;
+    if (contentRef.current) {
+      contentRef.current.style.transform = `translate3d(0, ${-clamped}px, 0)`;
+    }
+  };
+
+  const updateMaxScroll = () => {
+    const container = containerRef.current;
+    const content = contentRef.current;
+    if (container && content) {
+      maxScrollRef.current = Math.max(0, content.offsetHeight - container.clientHeight);
+    }
+  };
+
+  // User takes over scrolling: cancel any in-flight RAF animation (single
+  // writer) and pause auto-follow for 4s.
+  const beginUserScroll = () => {
     if (scrollRafRef.current !== null) {
       cancelAnimationFrame(scrollRafRef.current);
       scrollRafRef.current = null;
@@ -431,6 +489,40 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
     userScrollTimeoutRef.current = setTimeout(() => {
       setIsUserScrolling(false);
     }, 4000);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    dragStateRef.current = { startY: e.touches[0].clientY, startScroll: scrollYRef.current };
+    beginUserScroll();
+  };
+  const handleTouchMove = (e: React.TouchEvent) => {
+    const s = dragStateRef.current;
+    if (!s) return;
+    applyScroll(s.startScroll - (e.touches[0].clientY - s.startY));
+  };
+  const handleTouchEnd = () => {
+    dragStateRef.current = null;
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    dragStateRef.current = { startY: e.clientY, startScroll: scrollYRef.current };
+    beginUserScroll();
+  };
+  const handleMouseMove = (e: React.MouseEvent) => {
+    const s = dragStateRef.current;
+    if (!s) return;
+    applyScroll(s.startScroll - (e.clientY - s.startY));
+    // A drag of more than 5px is a scroll gesture: suppress the click that
+    // browsers synthesize after mouseup so it cannot seek the song.
+    if (Math.abs(e.clientY - s.startY) > 5) suppressClickRef.current = true;
+  };
+  const handleMouseUp = () => {
+    dragStateRef.current = null;
+    // The synthesized click fires right after mouseup; clear the suppress
+    // flag afterwards so a later genuine lyric click is not swallowed.
+    setTimeout(() => {
+      suppressClickRef.current = false;
+    }, 0);
   };
 
   // Deterministic RAF scroll — uses a quartic ease-out curve and lands on an
@@ -443,11 +535,11 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
     }
 
     const finalTarget = Math.round(targetTop);
-    const start = container.scrollTop;
+    const start = scrollYRef.current;
     const delta = finalTarget - start;
 
     if (!smooth || Math.abs(delta) < 2) {
-      container.scrollTop = finalTarget;
+      applyScroll(finalTarget);
       return;
     }
 
@@ -457,11 +549,11 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
       const p = Math.min(1, (now - t0) / duration);
       // Quartic ease-out: smooth deceleration, more non-linear feel
       const eased = 1 - Math.pow(1 - p, 4);
-      container.scrollTop = Math.round(start + delta * eased);
+      applyScroll(start + delta * eased);
       if (p < 1) {
         scrollRafRef.current = requestAnimationFrame(step);
       } else {
-        container.scrollTop = finalTarget;
+        applyScroll(finalTarget);
         scrollRafRef.current = null;
       }
     };
@@ -537,6 +629,12 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
   if (!isVisible) return null;
 
   const handleLyricClick = (time: number) => {
+    // A real drag (scroll gesture) suppresses the synthesized click so it
+    // cannot seek the song; consume the flag regardless.
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
     setIsUserScrolling(false);
     emitAudioSeek(time);
   };
@@ -831,17 +929,25 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
             <div className="relative h-full w-full min-h-0">
               <div
                 ref={containerRef}
-                onWheel={handleUserScroll}
-                onTouchStart={handleUserScroll}
-                onMouseDown={handleUserScroll}
-                className="h-full w-full overflow-y-auto no-scrollbar relative px-4 md:px-8 flex flex-col items-start justify-start mask-v-fade"
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseUp}
+                className="h-full w-full overflow-hidden no-scrollbar relative px-4 md:px-8 flex flex-col items-start justify-start mask-v-fade select-none"
+                style={{ touchAction: 'none' }}
               >
                 {lyrics.length === 0 ? (
                   <div className="text-white/40 text-lg font-medium italic my-auto self-center">
                     暂无歌词
                   </div>
                 ) : (
-                  <div className="w-full flex flex-col space-y-7 items-start pt-64 pb-80 pr-14 md:pr-20">
+                  <div
+                    ref={contentRef}
+                    className="w-full flex flex-col space-y-7 items-start pt-64 pb-80 pr-14 md:pr-20"
+                  >
                     {/* Pre-chorus countdown dots — shown above the first lyric
                         line so the first line itself is never replaced. Works
                         on both platforms: QQ lyrics have their title/personnel
@@ -940,17 +1046,25 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
           <div className="flex-1 w-full max-w-4xl mx-auto flex flex-col min-h-0 relative">
             <div
               ref={containerRef}
-              onWheel={handleUserScroll}
-              onTouchStart={handleUserScroll}
-              onMouseDown={handleUserScroll}
-              className="h-full w-full overflow-y-auto no-scrollbar relative px-4 md:px-12 flex flex-col items-center justify-start text-center mask-v-fade"
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+              className="h-full w-full overflow-hidden no-scrollbar relative px-4 md:px-12 flex flex-col items-center justify-start text-center mask-v-fade select-none"
+              style={{ touchAction: 'none' }}
             >
               {lyrics.length === 0 ? (
                 <div className="text-white/40 text-xl font-medium italic my-auto">
                   暂无歌词
                 </div>
               ) : (
-                <div className="w-full flex flex-col space-y-8 items-center pt-64 pb-80">
+                <div
+                  ref={contentRef}
+                  className="w-full flex flex-col space-y-8 items-center pt-64 pb-80"
+                >
                   {/* Pre-chorus countdown dots — same lead-in as split view,
                       both platforms (QQ title/personnel rows are filtered so
                       the first lyric timestamp is real). */}
