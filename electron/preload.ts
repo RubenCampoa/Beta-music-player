@@ -10,7 +10,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectAudioFiles: () => ipcRenderer.invoke('select-audio-files'),
   selectAudioFolder: () => ipcRenderer.invoke('select-audio-folder'),
   readAudioFile: (filePath: string) => ipcRenderer.invoke('read-audio-file', filePath),
-  loginViaWindow: (platform?: 'netease' | 'qq') => ipcRenderer.invoke('login-via-window', platform),
+  fetchCoverAsDataUrl: (url: string) => ipcRenderer.invoke('fetch-cover-as-data-url', url),
+  loginViaWindow: (platform?: 'netease' | 'qq' | 'kugou') => ipcRenderer.invoke('login-via-window', platform),
   setQqCookie: (cookie: string) => ipcRenderer.send('set-qq-cookie', cookie),
   onMediaControl: (callback: (action: string) => void) => {
     const handler = (_event: any, action: string) => callback(action);

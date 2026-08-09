@@ -400,18 +400,33 @@ let qqMusicCookie = '';
 
 function setupQqApiHeaderInjection() {
   session.defaultSession.webRequest.onBeforeSendHeaders(
-    { urls: ['*://*.y.qq.com/*', '*://*.qq.com/*', '*://qpic.y.qq.com/*'] },
+    {
+      urls: [
+        '*://*.y.qq.com/*',
+        '*://*.qq.com/*',
+        '*://*.qpic.cn/*',
+        '*://*.qlogo.cn/*',
+        '*://*.gtimg.cn/*',
+        '*://*.kugou.com/*',
+        '*://*.kgimg.com/*',
+      ],
+    },
     (details, callback) => {
       const url = details.url;
       const isQqApiCall = url.includes('/fcg-bin/') || url.includes('/cgi-bin/') || url.includes('/fcg_');
-      // Playlist/diss cover images on qpic.y.qq.com are hotlink-protected and
-      // return 403 without a y.qq.com Referer.
-      const isQqCoverImage = url.includes('qpic.y.qq.com');
+      // QQ uses qpic/qlogo/gtimg/imgcache for different cover response shapes.
+      // Image requests can be hotlink-protected and need a y.qq.com Referer.
+      const isQqCoverImage =
+        /(?:qpic\.|qlogo\.|gtimg\.|imgcache\.qq\.com)/i.test(url) ||
+        /\.(?:jpg|jpeg|png|webp)(?:\?|$)/i.test(url);
       if (isQqApiCall || isQqCoverImage) {
         details.requestHeaders['Referer'] = 'https://y.qq.com/';
         if (qqMusicCookie && isQqApiCall) {
           details.requestHeaders['Cookie'] = qqMusicCookie;
         }
+      }
+      if (/kugou\.com|kgimg\.com/i.test(url)) {
+        details.requestHeaders['Referer'] = 'https://www.kugou.com/';
       }
       callback({ requestHeaders: details.requestHeaders });
     }
@@ -430,7 +445,19 @@ ipcMain.on('set-qq-cookie', (_event, cookie: string) => {
 // are simple GETs (no preflight), so the response header alone is sufficient.
 function setupQqCoverCors() {
   session.defaultSession.webRequest.onHeadersReceived(
-    { urls: ['*://y.gtimg.cn/*', '*://*.gtimg.cn/*', '*://qpic.y.qq.com/*'] },
+    {
+      urls: [
+        '*://y.gtimg.cn/*',
+        '*://*.gtimg.cn/*',
+        '*://qpic.y.qq.com/*',
+        '*://*.qpic.cn/*',
+        '*://*.qlogo.cn/*',
+        '*://imgcache.qq.com/*',
+        '*://mobilecdn.kugou.com/*',
+        '*://*.kugou.com/*',
+        '*://*.kgimg.com/*',
+      ],
+    },
     (details, callback) => {
       const responseHeaders = details.responseHeaders ?? {};
       responseHeaders['Access-Control-Allow-Origin'] = ['*'];
@@ -525,9 +552,41 @@ function startQqMusicServer() {
   }
 }
 
+// --- KuGou Music API Server ---
+// KuGouMusicApi reads PORT/HOST/platform while startService initializes.
+async function startKugouMusicServer() {
+  const previousPort = process.env.PORT;
+  const previousHost = process.env.HOST;
+  process.env.PORT = '3400';
+  process.env.HOST = '127.0.0.1';
+  // `lite` selects the KuGou Concept Edition credentials and API routes,
+  // including its WeChat login and union-VIP validation.
+  process.env.platform = 'lite';
+  try {
+    const { startService } = require('kugoumusicapi/server.js');
+    const kugouApp = await startService();
+    kugouApp?.service?.on?.('error', (err: any) => {
+      if (err?.code === 'EADDRINUSE') {
+        console.warn('[KuGou Music API Server] Port 3400 already in use — KuGou features may be unavailable.');
+      } else {
+        console.warn('[KuGou Music API Server Error]', err);
+      }
+    });
+    console.log('[KuGou Music API Server] Running on http://127.0.0.1:3400');
+  } catch (err) {
+    console.warn('[KuGou Music API Server Launch Error]', err);
+  } finally {
+    if (previousPort === undefined) delete process.env.PORT;
+    else process.env.PORT = previousPort;
+    if (previousHost === undefined) delete process.env.HOST;
+    else process.env.HOST = previousHost;
+  }
+}
+
 app.whenReady().then(() => {
   startNeteaseServer();
   startQqMusicServer();
+  void startKugouMusicServer();
   setupQqApiHeaderInjection();
   setupQqCoverCors();
 
@@ -800,14 +859,15 @@ ipcMain.handle('select-audio-folder', async () => {
   return result.canceled ? [] : result.filePaths[0];
 });
 
-// Multi-Platform Cookie Login via Browser Window (NetEase & QQ Music)
-ipcMain.handle('login-via-window', async (_event, platform: 'netease' | 'qq' = 'netease') => {
+// Multi-platform cookie login via the providers' official web pages.
+ipcMain.handle('login-via-window', async (_event, platform: 'netease' | 'qq' | 'kugou' = 'netease') => {
   return new Promise((resolve) => {
     const isQq = platform === 'qq';
+    const isKugou = platform === 'kugou';
     const loginWin = new BrowserWindow({
       width: 1024,
       height: 768,
-      title: isQq ? '登录 QQ 音乐' : '登录网易云音乐',
+      title: isQq ? '登录 QQ 音乐' : isKugou ? '登录酷狗概念版' : '登录网易云音乐',
       backgroundColor: '#ffffff',
       webPreferences: {
         nodeIntegration: false,
@@ -828,6 +888,12 @@ ipcMain.handle('login-via-window', async (_event, platform: 'netease' | 'qq' = '
         // Load the QQ Music portal; the user clicks the login button which
         // opens a QQ ptlogin2 iframe inside the page.
         loginWin.loadURL('https://y.qq.com/');
+      } else if (isKugou) {
+        // The legacy official login page writes the KuGoo account cookie on
+        // the kugou.com parent domain. HTTP is intentional: the page still
+        // loads its own login resources over HTTP and HTTPS blocks them as
+        // mixed active content.
+        loginWin.loadURL('http://www.kugou.com/newuc/login/weblogin');
       } else {
         loginWin.loadURL('https://music.163.com/#/login');
       }
@@ -870,6 +936,33 @@ ipcMain.handle('login-via-window', async (_event, platform: 'netease' | 'qq' = '
               .join('; ');
             loginWin.close();
             resolve(cookieStr);
+          }
+        } else if (isKugou) {
+          const allCookies = await loginWin.webContents.session.cookies.get({});
+          const cookies = allCookies.filter((cookie) => /(^|\.)kugou\.com$/i.test(cookie.domain || ''));
+          const webSession = cookies.find((cookie) => cookie.name.toLowerCase() === 'kugoo');
+          if (webSession?.value) {
+            const fields = new Map<string, string>();
+            for (const field of webSession.value.split('&')) {
+              const separator = field.indexOf('=');
+              if (separator > 0) fields.set(field.slice(0, separator), field.slice(separator + 1));
+            }
+            const userId = fields.get('KugooID') || fields.get('userid') || '';
+            const token = fields.get('t') || fields.get('token') || '';
+            if (userId && token) {
+              const cookieMap = new Map<string, string>();
+              for (const cookie of cookies) cookieMap.set(cookie.name, cookie.value);
+              // KuGouMusicApi's Android endpoints expect token/userid as
+              // top-level cookie keys, while the web page nests them inside
+              // the KuGoo cookie. Keep both representations.
+              cookieMap.set('token', token);
+              cookieMap.set('userid', userId);
+              const cookieString = Array.from(cookieMap.entries())
+                .map(([name, value]) => `${name}=${value}`)
+                .join('; ');
+              loginWin.close();
+              resolve(cookieString);
+            }
           }
         } else {
           const cookies = await loginWin.webContents.session.cookies.get({ url: 'https://music.163.com' });
@@ -921,4 +1014,27 @@ ipcMain.handle('read-audio-file', async (_event, filePath: unknown) => {
   }
   const data = await fs.promises.readFile(filePath);
   return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+});
+
+// Fetch an artwork image in the main process (Node net has no CORS/Origin
+// restrictions) and return it as a data URL. The renderer can then load it
+// same-origin and sample its palette — fixes cover-colour sampling for
+// KuGou CDNs that reject crossOrigin='Anonymous' image reads.
+ipcMain.handle('fetch-cover-as-data-url', async (_event, url: unknown) => {
+  if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return null;
+  try {
+    const response = await net.fetch(url, {
+      headers: {
+        Referer: 'https://www.kugou.com/',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      },
+    });
+    if (!response.ok) return null;
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    return `data:${contentType};base64,${buffer.toString('base64')}`;
+  } catch {
+    return null;
+  }
 });

@@ -104,55 +104,96 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
       return;
     }
 
-    const image = new Image();
-    image.crossOrigin = 'Anonymous';
-    image.src = sampleUrl;
-    let cancelled = false;
-    const fallbackTimer = window.setTimeout(resetToDefaultPalette, 1400);
+    // Sample the palette from an image URL (either a data URL from the main
+    // process, or the raw artwork URL). Data URLs are same-origin so they
+    // never hit CORS; raw URLs use crossOrigin and fall back to the proxy.
+    const fallbackTimer = window.setTimeout(resetToDefaultPalette, 1800);
+    const sampleFromImageUrl = (imageUrl: string) => {
+      const image = new Image();
+      if (!imageUrl.startsWith('data:')) image.crossOrigin = 'Anonymous';
+      image.src = imageUrl;
+      let cancelled = false;
 
-    image.onload = () => {
-      if (cancelled) return;
-      try {
-        const sampleCanvas = document.createElement('canvas');
-        const context = sampleCanvas.getContext('2d');
-        if (!context) {
+      const trySample = () => {
+        if (cancelled) return;
+        try {
+          const sampleCanvas = document.createElement('canvas');
+          const context = sampleCanvas.getContext('2d');
+          if (!context) {
+            resetToDefaultPalette();
+            return;
+          }
+
+          sampleCanvas.width = 48;
+          sampleCanvas.height = 48;
+          context.drawImage(image, 0, 0, 48, 48);
+          const pixels = context.getImageData(0, 0, 48, 48).data;
+          const positions = [
+            (10 * 48 + 10) * 4,
+            (10 * 48 + 38) * 4,
+            (38 * 48 + 10) * 4,
+            (38 * 48 + 38) * 4,
+          ];
+
+          const sampledColors = positions.map((position) =>
+            desaturate([pixels[position], pixels[position + 1], pixels[position + 2]] as Rgb)
+          );
+
+          paletteCache.set(sampleUrl, sampledColors);
+          colorsRef.current = sampledColors.map((color) => [...color] as Rgb);
+          setPalette(sampledColors.map((color) => toRgba(color, 0.5)));
+          // Sampling succeeded — cancel the fallback so it does not reset the
+          // correct palette back to the default colours a moment later.
+          window.clearTimeout(fallbackTimer);
+        } catch {
           resetToDefaultPalette();
-          return;
         }
+      };
 
-        sampleCanvas.width = 48;
-        sampleCanvas.height = 48;
-        context.drawImage(image, 0, 0, 48, 48);
-        const pixels = context.getImageData(0, 0, 48, 48).data;
-        const positions = [
-          (10 * 48 + 10) * 4,
-          (10 * 48 + 38) * 4,
-          (38 * 48 + 10) * 4,
-          (38 * 48 + 38) * 4,
-        ];
+      image.onload = trySample;
+      image.onerror = () => {
+        if (cancelled) return;
+        if (!imageUrl.startsWith('data:')) {
+          // Cross-origin read rejected (KuGou CDN): retry through the main
+          // process, which has no CORS restrictions.
+          window.electronAPI?.fetchCoverAsDataUrl?.(sampleUrl).then((dataUrl) => {
+            if (cancelled) return;
+            if (!dataUrl) {
+              resetToDefaultPalette();
+              return;
+            }
+            sampleFromImageUrl(dataUrl);
+          });
+        } else {
+          resetToDefaultPalette();
+        }
+      };
 
-        const sampledColors = positions.map((position) =>
-          desaturate([pixels[position], pixels[position + 1], pixels[position + 2]] as Rgb)
-        );
-
-        paletteCache.set(sampleUrl, sampledColors);
-        colorsRef.current = sampledColors.map((color) => [...color] as Rgb);
-        setPalette(sampledColors.map((color) => toRgba(color, 0.5)));
-      } catch {
-        resetToDefaultPalette();
-      }
+      return () => {
+        cancelled = true;
+        image.onload = null;
+        image.onerror = null;
+      };
     };
 
-    image.onerror = () => {
-      if (cancelled) return;
-      resetToDefaultPalette();
-    };
+    // Prefer the main-process proxy (no CORS at all) — most reliable for
+    // KuGou CDNs. Fall back to the direct crossOrigin image otherwise.
+    let cancelSampling: (() => void) | undefined;
+    if (window.electronAPI?.fetchCoverAsDataUrl) {
+      window.electronAPI.fetchCoverAsDataUrl(sampleUrl).then((dataUrl) => {
+        if (dataUrl) {
+          cancelSampling = sampleFromImageUrl(dataUrl);
+        } else {
+          cancelSampling = sampleFromImageUrl(sampleUrl);
+        }
+      });
+    } else {
+      cancelSampling = sampleFromImageUrl(sampleUrl);
+    }
 
     return () => {
-      cancelled = true;
+      cancelSampling?.();
       window.clearTimeout(fallbackTimer);
-      image.onload = null;
-      image.onerror = null;
     };
   }, [coverUrl, isFullLyricsMode]);
 
