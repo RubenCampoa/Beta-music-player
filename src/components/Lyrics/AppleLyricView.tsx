@@ -68,6 +68,7 @@ interface KaraokeLineProps {
   enableGlow: boolean;
   enableAnimation: boolean;
   enableKaraoke: boolean;
+  offsetMs: number;
 }
 
 // --- Active lyric line: "ocean wave" cover reveal ---
@@ -125,7 +126,7 @@ const WaveWord = React.memo(({ text, p, glowEnabled }: { text: string; p: number
   );
 });
 
-const WaveLine: React.FC<{ line: LyricLine; glow: string }> = ({ line, glow }) => {
+const WaveLine: React.FC<{ line: LyricLine; glow: string; offsetMs: number }> = ({ line, glow, offsetMs }) => {
   const words = line.words || [];
   const [cursor, setCursor] = useState(0); // seconds relative to line start
 
@@ -141,7 +142,9 @@ const WaveLine: React.FC<{ line: LyricLine; glow: string }> = ({ line, glow }) =
       const state = usePlayerStore.getState();
       const audioEl = state.audioElement;
       const raw = audioEl && !Number.isNaN(audioEl.currentTime) ? audioEl.currentTime : state.currentTime;
-      const target = raw - line.time;
+      // offsetMs allows global adjustments (like KuGou's latency or user preference) 
+      // to apply directly to the high-refresh word-by-word animation loop.
+      const target = raw + offsetMs / 1000 - line.time;
       if (prev === null) {
         prev = target;
         setCursor(target);
@@ -187,6 +190,7 @@ const KaraokeLine: React.FC<KaraokeLineProps> = ({
   enableGlow,
   enableAnimation,
   enableKaraoke,
+  offsetMs,
 }) => {
   const cleanText = cleanTitle(line.text);
 
@@ -235,7 +239,7 @@ const KaraokeLine: React.FC<KaraokeLineProps> = ({
         }}
       >
         {words ? (
-          <WaveLine line={line} glow={sungWordGlow} />
+          <WaveLine line={line} glow={sungWordGlow} offsetMs={offsetMs} />
         ) : (
           cleanText
         )}
@@ -353,8 +357,14 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
     shallow,
   );
   const lyrics = usePlayerStore((state) => state.lyrics);
+  const isLyricsLoading = usePlayerStore((state) => state.isLyricsLoading);
   const currentTime = usePlayerStore((state) => state.currentTime);
-  const activeIndex = getActiveLyricIndex(currentTime, lyrics, lyricSwitchOffsetMs);
+  
+  // KuGou KRC lyrics often inherently lag (are "slow") compared to the audio stream.
+  // To make them faster (appear earlier), we ADD a positive offset to the clock.
+  const platformOffsetMs = currentSong?.source === 'kugou' ? 400 : 0;
+  const effectiveLyricOffsetMs = lyricSwitchOffsetMs + platformOffsetMs;
+  const activeIndex = getActiveLyricIndex(currentTime, lyrics, effectiveLyricOffsetMs);
 
   // Pre-chorus state: lyrics exist but the first line hasn't started yet —
   // show the streaming-app style "about to start" dots.
@@ -367,7 +377,7 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
   // has a +0.15s lookahead (lyrics activate slightly early), so isPreChorus
   // flips false before the first lyric time — gate the dots on the raw lyric
   // time instead, keeping them up for a beat past the first line.
-  const showPreChorusDots = firstLyricTime > 0 && currentTime < firstLyricTime + lyricSwitchOffsetMs / 1000 + 0.2;
+  const showPreChorusDots = firstLyricTime > 0 && currentTime < firstLyricTime + effectiveLyricOffsetMs / 1000 + 0.2;
 
   const [isWindowFullScreen, setIsWindowFullScreen] = useState(false);
   const [isUserScrolling, setIsUserScrolling] = useState(false);
@@ -379,6 +389,7 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
   const userScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   // Deterministic RAF scroll — no spring tail crawl.
   const scrollRafRef = useRef<number | null>(null);
+  const scrollVelocityRef = useRef(0);
   // Current scroll offset in pixels. Scrolling is driven by a transform on
   // the inner content wrapper (GPU-composited) instead of scrollTop: writing
   // scrollTop every frame relayouts and repaints the whole large lyric list,
@@ -393,16 +404,17 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
   // Focal index for scrolling & blur gradient (defaults to line 0 during prelude)
   const focalIndex = activeIndex >= 0 ? activeIndex : 0;
 
-  // Streaming-app-like lyric emphasis: scale and y overshoot and settle.
-  // y keyframes are padded with a duplicate 0 at the end + `times` mapping
-  // so the bounce completes at ~72% of the duration and the last 28% holds
-  // at exactly y:0 — no ease-out tail crawl, no sub-pixel drift.
+  // Apple Music-style lyric emphasis: active lines gently scale up with a
+  // soft overshoot ease, adjacent lines shrink back.
+  // We use single continuous target values (not array keyframes) with a true 
+  // physics spring, perfectly satisfying the requirement for "非线性" (non-linear)
+  // motion, providing an organic feel that seamlessly reacts to interruption.
   const jellyTransition = enableLyricAnimation
     ? {
-        scale: { duration: 0.62, ease: [0.34, 1.56, 0.64, 1] as const },
-        y: { duration: 0.68, ease: [0.22, 1, 0.36, 1] as const, times: [0, 0.12, 0.45, 0.72, 1] },
-        opacity: { duration: 0.48, ease: [0.22, 1, 0.36, 1] as const },
-        filter: { duration: 0.52, ease: [0.22, 1, 0.36, 1] as const },
+        type: 'spring',
+        stiffness: 120,
+        damping: 15,
+        mass: 1,
       }
     : { duration: 0 };
 
@@ -525,8 +537,9 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
     }, 0);
   };
 
-  // Deterministic RAF scroll — uses a quartic ease-out curve and lands on an
-  // exact integer pixel. No spring, no tail crawl, no sub-pixel drift.
+  // True Spring physics for scroll — highly non-linear, completely fluid,
+  // naturally reacts to interruptions by preserving velocity.
+  // Final application is rounded to prevent sub-pixel blur tail-crawl.
   const animateContainerScroll = (container: HTMLElement, targetTop: number, smooth: boolean = true) => {
     // Cancel any in-flight scroll first.
     if (scrollRafRef.current !== null) {
@@ -535,26 +548,37 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
     }
 
     const finalTarget = Math.round(targetTop);
-    const start = scrollYRef.current;
-    const delta = finalTarget - start;
+    let position = scrollYRef.current;
+    let velocity = scrollVelocityRef.current;
 
-    if (!smooth || Math.abs(delta) < 2) {
+    if (!smooth || Math.abs(finalTarget - position) < 2) {
+      scrollVelocityRef.current = 0;
       applyScroll(finalTarget);
       return;
     }
 
-    const duration = 420;
-    const t0 = performance.now();
-    const step = (now: number) => {
-      const p = Math.min(1, (now - t0) / duration);
-      // Quartic ease-out: smooth deceleration, more non-linear feel
-      const eased = 1 - Math.pow(1 - p, 4);
-      applyScroll(start + delta * eased);
-      if (p < 1) {
-        scrollRafRef.current = requestAnimationFrame(step);
-      } else {
+    // Spring configuration (similar to Apple Music's soft scroll)
+    const stiffness = 0.06;
+    const damping = 0.82;
+
+    const step = () => {
+      const delta = finalTarget - position;
+      velocity += delta * stiffness;
+      velocity *= damping;
+      position += velocity;
+      scrollVelocityRef.current = velocity;
+
+      // Stop condition: very close to target and moving very slowly
+      if (Math.abs(delta) < 0.8 && Math.abs(velocity) < 0.8) {
+        scrollVelocityRef.current = 0;
+        // Only round on the final resting frame to prevent static text blur
         applyScroll(finalTarget);
         scrollRafRef.current = null;
+      } else {
+        // Do NOT round during animation! Sub-pixel transforms are essential
+        // for maintaining a smooth 60/120fps motion. Rounding here causes jitter.
+        applyScroll(position);
+        scrollRafRef.current = requestAnimationFrame(step);
       }
     };
     scrollRafRef.current = requestAnimationFrame(step);
@@ -941,7 +965,7 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
               >
                 {lyrics.length === 0 ? (
                   <div className="text-white/40 text-lg font-medium italic my-auto self-center">
-                    暂无歌词
+                    {isLyricsLoading ? '歌词加载中...' : '暂无歌词'}
                   </div>
                 ) : (
                   <div
@@ -987,19 +1011,11 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                           onClick={() => handleLyricClick(line.time)}
                           animate={{
                             scale: isActive
-                              ? enableLyricAnimation
-                                ? [0.985, 1.042, 1.018]
-                                : 1.018
+                              ? enableLyricAnimation ? 1.035 : 1
                               : distance === 1
-                              ? enableLyricAnimation
-                                ? [1.015, 0.99]
-                                : 0.99
-                              : 0.982,
-                            y: isActive
-                              ? enableLyricAnimation
-                                ? [0, 8, -3, 0, 0]
-                                : 0
-                              : 0,
+                              ? enableLyricAnimation ? 0.98 : 1
+                              : enableLyricAnimation ? 0.96 : 1,
+                            y: 0,
                             opacity: targetOpacity,
                             filter: `blur(${targetBlur}px)`,
                           }}
@@ -1018,6 +1034,7 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                             enableGlow={enableLyricGlow}
                             enableAnimation={enableLyricAnimation}
                             enableKaraoke={enableKaraoke}
+                            offsetMs={effectiveLyricOffsetMs}
                           />
                         </motion.div>
                       );
@@ -1058,7 +1075,7 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
             >
               {lyrics.length === 0 ? (
                 <div className="text-white/40 text-xl font-medium italic my-auto">
-                  暂无歌词
+                  {isLyricsLoading ? '歌词加载中...' : '暂无歌词'}
                 </div>
               ) : (
                 <div
@@ -1100,19 +1117,11 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                         onClick={() => handleLyricClick(line.time)}
                         animate={{
                           scale: isActive
-                            ? enableLyricAnimation
-                              ? [0.985, 1.048, 1.025]
-                              : 1.025
+                            ? enableLyricAnimation ? 1.045 : 1
                             : distance === 1
-                            ? enableLyricAnimation
-                              ? [1.022, 0.992]
-                              : 0.992
-                            : 0.978,
-                          y: isActive
-                            ? enableLyricAnimation
-                              ? [0, 10, -4, 0, 0]
-                              : 0
-                            : 0,
+                            ? enableLyricAnimation ? 0.99 : 1
+                            : enableLyricAnimation ? 0.978 : 1,
+                          y: 0,
                           opacity: targetOpacity,
                           filter: `blur(${targetBlur}px)`,
                         }}
@@ -1129,6 +1138,7 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                           enableGlow={enableLyricGlow}
                           enableAnimation={enableLyricAnimation}
                           enableKaraoke={enableKaraoke}
+                          offsetMs={effectiveLyricOffsetMs}
                         />
                       </motion.div>
                     );

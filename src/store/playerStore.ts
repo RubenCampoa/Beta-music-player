@@ -3,7 +3,9 @@ import { Song, LyricLine, UserProfile, Playlist, Platform } from '../types/music
 import { neteaseApi } from '../services/neteaseApi';
 import { musicApiAdapter } from '../services/musicApiAdapter';
 import { qqMusicApi } from '../services/qqMusicApi';
+import { kugouMusicApi } from '../services/kugouMusicApi';
 import { StorageKeys, loadJSON, saveJSON, getItem, setItem, removeItem } from '../utils/storage';
+import { getPlatformName } from '../utils/platform';
 
 interface PlayerState {
   // Audio & Playback state
@@ -28,7 +30,7 @@ interface PlayerState {
   // Multi-Platform & User Accounts
   activePlatform: Platform;
   searchPlatform: Platform;
-  accounts: { netease: UserProfile | null; qq: UserProfile | null };
+  accounts: Record<Platform, UserProfile | null>;
   user: UserProfile | null;
   playlists: Playlist[];
   isLoginModalOpen: boolean;
@@ -37,13 +39,14 @@ interface PlayerState {
   // Search State
   searchQuery: string;
   searchResults: Song[];
-  searchPlatformResults: { netease: Song[]; qq: Song[] };
+  searchPlatformResults: Record<Platform, Song[]>;
   searchHistory: string[];
   isSearching: boolean;
 
   // Lyrics & UI State
   isFullLyricsMode: boolean;
   lyrics: LyricLine[];
+  isLyricsLoading: boolean;
   activeTab: 'listen-now' | 'browse' | 'local' | 'playlist' | 'search' | 'changelog' | 'settings' | 'notice' | 'about';
   selectedPlaylist: Playlist | null;
   toastMessage: string | null;
@@ -62,8 +65,8 @@ interface PlayerState {
   // Per-song lyric line switch offset in milliseconds (positive = earlier,
   // negative = later). Resets to 0 (default) whenever a new song plays.
   lyricSwitchOffsetMs: number;
-  // Word-by-word (karaoke) lyric rendering. Off by default: per-word lines
-  // render cramped for English lyrics; the user opts in per session.
+  // Word-by-word (karaoke) lyric rendering for NetEase YRC and QQ QRC.
+  // Enabled by default when timing data is available.
   enableKaraoke: boolean;
   enableLyricAnimation: boolean;
   enableLyricGlow: boolean;
@@ -142,6 +145,12 @@ const initialAutoCheck = (() => {
 
 const initialPlatform: Platform = (getItem(StorageKeys.activePlatform) as Platform) || 'netease';
 
+// A user can click another song or submit another search while the previous
+// provider request is still pending. Keep a monotonic request token so an old
+// response can never roll the UI back to stale playback/search data.
+let playbackRequestId = 0;
+let searchRequestId = 0;
+
 export const usePlayerStore = create<PlayerState>((set, get) => ({
   // Playback & Queue
   currentSong: null,
@@ -163,6 +172,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   accounts: {
     netease: null,
     qq: qqMusicApi.getCookie() ? { userId: 'qq_user', nickname: 'QQ 音乐用户', avatarUrl: '', isLoggedIn: true, platform: 'qq' } : null,
+    kugou: kugouMusicApi.getCookie() ? { userId: 'kugou_user', nickname: '酷狗概念版用户', avatarUrl: '', isLoggedIn: true, platform: 'kugou' } : null,
   },
   user: null,
   playlists: [],
@@ -172,13 +182,14 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   // Search State
   searchQuery: '',
   searchResults: [],
-  searchPlatformResults: { netease: [], qq: [] },
+  searchPlatformResults: { netease: [], qq: [], kugou: [] },
   searchHistory: initialHistory,
   isSearching: false,
 
   // Lyrics & UI State
   isFullLyricsMode: false,
   lyrics: [],
+  isLyricsLoading: false,
   activeTab: 'listen-now',
   selectedPlaylist: null,
   toastMessage: null,
@@ -196,7 +207,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   // Motion Settings
   isFluidBgEnabled: true,
   lyricSwitchOffsetMs: 0,
-  enableKaraoke: false,
+  enableKaraoke: true,
   enableLyricAnimation: true,
   enableLyricGlow: true,
   enableLyricBlur: true,
@@ -214,6 +225,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     set((state) => (state.currentSong ? { currentSong: { ...state.currentSong, audioUrl } } : {})),
 
   playSong: async (song, newQueue) => {
+    const requestId = ++playbackRequestId;
     const { queue } = get();
     const finalQueue = newQueue || (queue.length > 0 ? queue : [song]);
     const index = finalQueue.findIndex((s) => s.id === song.id);
@@ -228,6 +240,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       } catch {}
     }
 
+    // Ignore a slow response from a song that the user has already replaced.
+    if (requestId !== playbackRequestId) return;
+
     const playTarget: Song = { ...song, audioUrl: resolvedAudioUrl };
 
     set({
@@ -238,23 +253,42 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       queue: finalQueue,
       queueIndex: index >= 0 ? index : 0,
       lyrics: [],
+      isLyricsLoading: true,
       // Per-song lyric switch offset: next song starts from the 0ms default.
       lyricSwitchOffsetMs: 0,
     });
 
+    // Favorites and queues saved by older builds can carry a stale KuGou
+    // `isVip: false`. Re-check in the background so playback startup is not
+    // delayed, then update both the current item and its queue copy.
+    if (song.source === 'kugou' || song.kugouHash) {
+      void musicApiAdapter.resolveSongMetadata(playTarget).then((resolvedSong) => {
+        if (requestId !== playbackRequestId) return;
+        set((state) => ({
+          currentSong: state.currentSong?.id === song.id
+            ? { ...resolvedSong, audioUrl: state.currentSong.audioUrl || resolvedSong.audioUrl }
+            : state.currentSong,
+          queue: state.queue.map((queuedSong) => queuedSong.id === song.id ? { ...queuedSong, ...resolvedSong } : queuedSong),
+        }));
+      }).catch(() => {
+        // The list endpoint's metadata remains available when the optional
+        // privilege refresh is temporarily unavailable.
+      });
+    }
+
     if (!resolvedAudioUrl && song.source !== 'local') {
       set({ isPlaying: false });
-      const platformName = song.source === 'qq' ? 'QQ 音乐' : '网易云音乐';
+      const platformName = getPlatformName(song.source);
       get().setToastMessage(`无法获取《${song.name}》音源，该歌曲可能需要登录 ${platformName} VIP 账号`);
       return;
     }
 
     // Resolve Lyrics asynchronously in background without blocking audio player startup
     setTimeout(async () => {
-      if (get().currentSong?.id !== song.id) return;
+      if (requestId !== playbackRequestId || get().currentSong?.id !== song.id) return;
       try {
         const lyrics = await musicApiAdapter.getSongLyrics(song);
-        if (get().currentSong?.id === song.id && lyrics.length > 0) {
+        if (requestId === playbackRequestId && get().currentSong?.id === song.id && lyrics.length > 0) {
           set({ lyrics });
         }
       } catch {}
@@ -323,7 +357,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       // if the user was viewing a playlist at the time of the switch.
       activeTab: 'listen-now',
     });
-    get().setToastMessage(`已切换为 ${activePlatform === 'qq' ? 'QQ 音乐' : '网易云音乐'} 平台`);
+    get().setToastMessage(`已切换为 ${getPlatformName(activePlatform)} 平台`);
     // Reload user playlists for the newly active platform
     get().refreshPlaylistsForPlatform(activePlatform);
   },
@@ -337,6 +371,15 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         }
         const userPlaylists = await qqMusicApi.getUserPlaylists();
         if (get().activePlatform === 'qq') {
+          set({ playlists: userPlaylists });
+        }
+      } else if (platform === 'kugou') {
+        if (!kugouMusicApi.getCookie()) {
+          if (get().activePlatform === 'kugou') set({ playlists: [] });
+          return;
+        }
+        const userPlaylists = await kugouMusicApi.getUserPlaylists();
+        if (get().activePlatform === 'kugou') {
           set({ playlists: userPlaylists });
         }
       } else {
@@ -378,6 +421,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   setSearchQuery: (searchQuery) => set({ searchQuery }),
 
   performSearch: async (query, searchPlatformOverride) => {
+    const requestId = ++searchRequestId;
     const trimmed = query.trim();
     if (!trimmed) return;
 
@@ -401,6 +445,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     try {
       const results = await musicApiAdapter.search(targetPlatform, trimmed);
+      if (requestId !== searchRequestId) return;
       set((state) => ({
         searchResults: results,
         searchPlatformResults: {
@@ -410,6 +455,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         isSearching: false,
       }));
     } catch {
+      if (requestId !== searchRequestId) return;
       set({ searchResults: [], isSearching: false });
     }
   },
