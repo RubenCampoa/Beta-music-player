@@ -262,7 +262,10 @@ div[style*="--desktop-lyric-distance"] .desktop-lyric-marquee-text {
 
 .full-lyrics-fluid-kugou .full-lyrics-fluid-glow {
   opacity: 1;
-  filter: blur(28px) saturate(170%);
+  /* Keep the sampled palette muted (same 110% as the default glow) — the old
+     saturate(170%) re-intensified the desaturated colours and re-flooded
+     the backdrop on KuGou covers. */
+  filter: blur(28px) saturate(110%);
   transform: translate3d(0, 0, 0) scale(1.04);
 }
 
@@ -278,7 +281,7 @@ div[style*="--desktop-lyric-distance"] .desktop-lyric-marquee-text {
     radial-gradient(ellipse 42% 50% at 21% 76%, var(--fluid-color-d) 0%, transparent 70%);
   background-size: 170% 165%, 165% 175%, 180% 160%, 160% 185%;
   background-position: 8% 10%, 88% 4%, 78% 92%, 12% 86%;
-  filter: blur(18px) saturate(170%);
+  filter: blur(18px) saturate(110%);
   mix-blend-mode: screen;
   animation: full-lyrics-fluid-flow 9s cubic-bezier(0.37, 0, 0.63, 1) infinite alternate;
   will-change: background-position, transform;
