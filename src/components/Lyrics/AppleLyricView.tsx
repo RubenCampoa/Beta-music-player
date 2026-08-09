@@ -415,6 +415,11 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
         stiffness: 120,
         damping: 15,
         mass: 1,
+        // DOF blur is per-pixel and expensive on large lyric fonts: snap it
+        // to its target instantly instead of easing every frame (scale and
+        // opacity stay springy on the GPU compositor). This removes the
+        // switch-time frame drops.
+        filter: { duration: 0 },
       }
     : { duration: 0 };
 
