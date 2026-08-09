@@ -286,12 +286,23 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     // Resolve Lyrics asynchronously in background without blocking audio player startup
     setTimeout(async () => {
       if (requestId !== playbackRequestId || get().currentSong?.id !== song.id) return;
+      set({ isLyricsLoading: true });
       try {
         const lyrics = await musicApiAdapter.getSongLyrics(song);
-        if (requestId === playbackRequestId && get().currentSong?.id === song.id && lyrics.length > 0) {
-          set({ lyrics });
+        if (requestId === playbackRequestId && get().currentSong?.id === song.id) {
+          if (lyrics.length > 0) {
+            set({ lyrics, isLyricsLoading: false });
+          } else {
+            // Transient empty response: never wipe already-shown lyrics with
+            // a misleading 暂无歌词 — just end the loading state.
+            set({ isLyricsLoading: false });
+          }
         }
-      } catch {}
+      } catch {
+        if (requestId === playbackRequestId && get().currentSong?.id === song.id) {
+          set({ isLyricsLoading: false });
+        }
+      }
     }, 30);
   },
 
