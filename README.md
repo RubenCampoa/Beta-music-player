@@ -26,8 +26,8 @@
 
 ### 🎨 极致视觉与全景歌词体验
 - **动态流体背景**：基于 HTML5 Canvas 提取专辑封面主色调，呈现高品质的响应式流体光斑渐变与毛玻璃（Glassmorphism）高斯模糊面板。
-- **逐字歌词（YRC）**：支持网易云逐字歌词的歌曲全屏歌词自动逐字点亮，海浪式非线性果冻动效，直连媒体时钟精准同步、慢歌不抖动。
-- **全景歌词与前奏倒计时**：双平台（网易云 / QQ 音乐）双语歌词同步显示，平滑行间平移、发光渐变、阶梯式景深模糊；前奏阶段三个圆点依次点亮倒计时（主流音乐 App 风格）。
+- **逐字歌词（YRC / QRC / KRC）**：支持网易云、QQ 音乐与酷狗概念版逐字歌词，全屏歌词自动逐字点亮，海浪式非线性果冻动效，直连媒体时钟精准同步、慢歌不抖动。
+- **全景歌词与前奏倒计时**：三平台歌词同步显示，平滑行间平移、发光渐变、阶梯式景深模糊；前奏阶段三个圆点依次点亮倒计时（主流音乐 App 风格）。
 - **歌词切换时间微调**：全屏歌词音量条下方可对每首歌独立调整歌词行切换偏移（-2000ms ~ +2000ms），换歌自动恢复默认。
 - **桌面歌词**：独立置顶透明小窗，双行歌词 + 翻译，支持锁定穿透、拖动、配色与字号调节；性能优化后仅在歌词切换时重绘。
 - **灵活的动效开关**：提供完整的性能调节选项，在设置中可自由切换流体背景、歌词平移、发光与景深模糊；「注意事项」页提供一键性能预设，完美兼容各种硬件配置。
@@ -36,11 +36,12 @@
 - **ID3 标签与专辑封面解析**：拖拽或导入本地 `MP3` / `FLAC` / `WAV` / `AAC` 音频文件时，自动提取文件内置的真实歌名、歌手、专辑及封面图片（支持转换为 DataURL），告别“未知歌手”与占位图。
 - **IndexedDB 持久化资料库**：基于 Dexie.js 实现本地资料库高效缓存与全量管理。
 
-### 🎵 深入的双平台音乐生态（网易云 + QQ 音乐）
+### 🎵 深入的三平台音乐生态（网易云 + QQ 音乐 + 酷狗概念版）
 - **网易云扫码登录**：支持通过网易云音乐 App 扫码快捷安全登录；登录后自动同步云端"我喜欢的音乐"全量列表，播放器内红心收藏实时双向同步。
 - **QQ 音乐扫码登录**：独立 Web 窗口登录，登录后支持 VIP 音源播放与歌词翻译（外文歌双语显示）。
-- **全网全局音乐搜索**：双平台关键词极速搜索单曲，展示专属搜索视图、专辑封面与 VIP 标识。
-- **权威音乐排行榜与分类探索**：网易云热歌榜、飙升榜、新歌榜、原创榜、ACG 榜、欧美金曲榜；QQ 音乐巅峰热歌榜、飙升榜、新歌榜及热门曲风分类。
+- **酷狗概念版双登录方式**：支持酷狗概念版二维码登录与微信扫码登录；微信登录完成后通过 KuGouMusicApi 换取并验证 API 凭据。
+- **全网全局音乐搜索**：三平台关键词极速搜索单曲，展示专属搜索视图、专辑封面与 VIP 标识。
+- **权威音乐排行榜与分类探索**：网易云与 QQ 音乐权威榜单，并接入酷狗热门歌单与 TOP 曲库。
 
 ### 💻 纯正的 Windows 桌面级体验
 - **零配置开箱即用**：打包后的 `.exe` 程序内置后台静默 Api 引擎，他人无需配置 Node.js 开发环境，解压双击即可独立运行。
@@ -55,15 +56,16 @@
 
 ### 🖥️ 桌面端与核心基础架构 (Desktop & Core Framework)
 - **[React](https://github.com/facebook/react) 18.3.1** 与 **[react-dom](https://www.npmjs.com/package/react-dom)** — 声明式 UI 核心框架，负责现代化单页 Web 界面渲染。
-- **[TypeScript](https://github.com/microsoft/TypeScript) 5.5.4** — 强类型语言，保障前端及双平台 API 的类型安全与编译校验。
+- **[TypeScript](https://github.com/microsoft/TypeScript) 5.5.4** — 强类型语言，保障前端及三平台 API 的类型安全与编译校验。
 - **[Electron](https://github.com/electron/electron) 31.3.1** — 跨平台桌面端原生容器，支持系统托盘常驻、无边框毛玻璃窗口与全局硬件按键播控。
 - **[Vite](https://github.com/vitejs/vite) 5.4.1** — 极速构建与热重载工具，配合 [vite-plugin-electron](https://github.com/electron-vite/vite-plugin-electron) (0.28) 与 [vite-plugin-electron-renderer](https://www.npmjs.com/package/vite-plugin-electron-renderer) 实现主/渲染进程无缝开发与编译。
 - **[electron-builder](https://github.com/electron-userland/electron-builder) 24.13.3** — 桌面应用打包分发工具，支持生成 Portable 免安装绿色版与 NSIS 标准 Windows 安装包。
 
-### 🎶 双平台音乐 API 引擎与后端中间件 (Music APIs & Backend)
+### 🎶 三平台音乐 API 引擎与后端中间件 (Music APIs & Backend)
 - [@neteasecloudmusicapienhanced/api](https://github.com/Binaryify/NeteaseCloudMusicApi) — 增强版网易云音乐接口引擎，提供搜索、权威榜单、VIP 音源解析及二维码扫码登录。
 - [@sansenjian/qq-music-api](https://www.npmjs.com/package/@sansenjian/qq-music-api) (v2.4.0) — QQ 音乐核心服务引擎，提供 QQ 音乐榜单、搜索、凭证绑定及音频流地址解析。
-- [Express](https://expressjs.com/) (v4.19.2) 与 [CORS](https://github.com/expressjs/cors) (v2.8.5) — 内置轻量 Node.js 服务器（[server.js](server.js)），无感知拉起双平台 API 本地跨域代理（监听 3000 / 3200 端口）。
+- [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi) (v1.6.0) — 酷狗概念版搜索、歌单、扫码登录、音频流与 KRC 逐字歌词服务，依赖固定到可复现提交。
+- [Express](https://expressjs.com/) (v4.19.2) 与 [CORS](https://github.com/expressjs/cors) (v2.8.5) — 内置轻量 Node.js 服务，无感知拉起三平台 API 本地代理（监听 3000 / 3200 / 3400 端口）。
 
 ### 🎨 UI 美学系统与流畅动效 (UI, Design & Animations)
 - [Lucide React](https://lucide.dev/) (v0.428.0) — Apple 风格矢量 Icon 图标库，提供播控、红心收藏、歌单及系统设置图标。
@@ -109,7 +111,7 @@ npm run build
 
 ## ⚠️ 注意事项
 
-> **QQ 音乐测试模式**：目前 QQ 音乐属于测试模式，可能会存在一系列问题，例如无法正常获取歌词翻译等。若遇到问题，欢迎前往 [GitHub Issues](https://github.com/RubenCampoa/Beta-music-player/issues) 提交 Issue；若并非 API 问题，后续会着手修复。
+> **酷狗音乐概念版测试模式**：目前酷狗音乐概念版属于测试模式，可能会存在一系列问题，例如无法正常获取歌词翻译、音源需要验证（20028）等。若遇到问题，欢迎前往 [GitHub Issues](https://github.com/RubenCampoa/Beta-music-player/issues) 提交 Issue；若并非 API 问题，后续会着手修复。
 
 ## 📋 版本更新历史 (Changelog)
 
