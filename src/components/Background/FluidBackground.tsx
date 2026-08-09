@@ -248,9 +248,12 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
     const resize = () => {
       // The canvas is intentionally much smaller than the window. It is
       // enlarged by CSS, so the liquid stays organic without spending most of
-      // the frame budget on a full-size per-pixel simulation.
-      canvas.width = Math.min(280, Math.max(180, Math.floor(window.innerWidth / 5)));
-      canvas.height = Math.min(188, Math.max(120, Math.floor(window.innerHeight / 5)));
+      // the frame budget on a full-size per-pixel simulation. Sized for the
+      // low-frequency metaball field: a 30% smaller buffer than before cuts
+      // the per-pixel cost roughly in half with no visible difference once
+      // upscaled and blended.
+      canvas.width = Math.min(210, Math.max(140, Math.floor(window.innerWidth / 6)));
+      canvas.height = Math.min(140, Math.max(94, Math.floor(window.innerHeight / 6)));
       normalizedX = new Float32Array(canvas.width);
       normalizedY = new Float32Array(canvas.height);
       rowWarpX = new Float32Array(canvas.height);
@@ -372,9 +375,11 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
         return;
       }
 
-      // 30fps is enough for this low-frequency liquid motion and leaves the
-      // high-priority lyric spring animation on the browser's main thread.
-      if (timestamp - lastDrawTimestamp >= 33) {
+      // 24fps is enough for this low-frequency liquid motion and leaves the
+      // high-priority lyric spring animation on the browser's main thread
+      // (dropped from 30fps — imperceptible on the organic field, ~20% less
+      // per-second pixel work).
+      if (timestamp - lastDrawTimestamp >= 42) {
         drawFrame(timestamp);
         lastDrawTimestamp = timestamp;
       }

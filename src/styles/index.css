@@ -210,8 +210,10 @@ div[style*="--desktop-lyric-distance"] .desktop-lyric-marquee-text {
   overflow: hidden;
   opacity: 0.9;
   /* Keep the sampled palette muted: a strong saturate() would re-intensify
-     the desaturated artwork colours and flood the background again. */
-  filter: blur(42px) saturate(110%);
+     the desaturated artwork colours and flood the background again.
+     blur(32px) instead of 42px meaningfully cheapens per-frame repaints of
+     these huge gradient blobs with a barely visible difference. */
+  filter: blur(32px) saturate(110%);
   transform: translate3d(0, 0, 0) scale(1.08);
   will-change: transform, opacity;
 }
