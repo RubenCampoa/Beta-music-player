@@ -95,8 +95,12 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
 
     const cachedColors = paletteCache.get(sampleUrl);
     if (cachedColors) {
-      colorsRef.current = cachedColors.map((color) => [...color] as Rgb);
-      setPalette(cachedColors.map((color) => toRgba(color, 0.5)));
+      // Cache entries from older builds hold raw (unmuted) sampled colours —
+      // mute them again on the hit path so a saturated cover still cannot
+      // flood the background.
+      const muted = cachedColors.map((color) => desaturate([...color] as Rgb));
+      colorsRef.current = muted.map((color) => [...color] as Rgb);
+      setPalette(muted.map((color) => toRgba(color, 0.5)));
       return;
     }
 
@@ -281,7 +285,11 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
           pixels[pixelIndex] = clamp(mixedRed * (0.82 + liquidBody * 0.12) + 255 * highlight);
           pixels[pixelIndex + 1] = clamp(mixedGreen * (0.82 + liquidBody * 0.12) + 255 * highlight);
           pixels[pixelIndex + 2] = clamp(mixedBlue * (0.82 + liquidBody * 0.12) + 255 * highlight);
-          pixels[pixelIndex + 3] = clamp((softEdge * 0.84 + liquidBody * 0.1) * 255, 0, 255);
+          // Semi-transparent liquid body: even if Chromium fails to apply
+          // mix-blend-mode: screen (a known quirk with <canvas> + scale),
+          // the fluid stays translucent over the dark base instead of
+          // painting an opaque colour rectangle over the whole backdrop.
+          pixels[pixelIndex + 3] = clamp((softEdge * 0.42 + liquidBody * 0.06) * 255, 0, 255);
         }
       }
 
