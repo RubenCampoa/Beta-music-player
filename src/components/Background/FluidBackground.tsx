@@ -108,6 +108,11 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
     // process, or the raw artwork URL). Data URLs are same-origin so they
     // never hit CORS; raw URLs use crossOrigin and fall back to the proxy.
     const fallbackTimer = window.setTimeout(resetToDefaultPalette, 1800);
+    // Effect-lifetime guard: every async callback checks `disposed` so a
+    // stale sample from the PREVIOUS song can never overwrite the palette
+    // after a track switch (which made the fluid colours unrelated to the
+    // current cover).
+    let disposed = false;
     const sampleFromImageUrl = (imageUrl: string) => {
       const image = new Image();
       if (!imageUrl.startsWith('data:')) image.crossOrigin = 'Anonymous';
@@ -115,7 +120,7 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
       let cancelled = false;
 
       const trySample = () => {
-        if (cancelled) return;
+        if (cancelled || disposed) return;
         try {
           const sampleCanvas = document.createElement('canvas');
           const context = sampleCanvas.getContext('2d');
@@ -173,12 +178,12 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
 
       image.onload = trySample;
       image.onerror = () => {
-        if (cancelled) return;
+        if (cancelled || disposed) return;
         if (!imageUrl.startsWith('data:')) {
           // Cross-origin read rejected (KuGou CDN): retry through the main
           // process, which has no CORS restrictions.
           window.electronAPI?.fetchCoverAsDataUrl?.(sampleUrl).then((dataUrl) => {
-            if (cancelled) return;
+            if (cancelled || disposed) return;
             if (!dataUrl) {
               resetToDefaultPalette();
               return;
@@ -202,6 +207,7 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
     let cancelSampling: (() => void) | undefined;
     if (window.electronAPI?.fetchCoverAsDataUrl) {
       window.electronAPI.fetchCoverAsDataUrl(sampleUrl).then((dataUrl) => {
+        if (disposed) return;
         if (dataUrl) {
           cancelSampling = sampleFromImageUrl(dataUrl);
         } else {
@@ -213,6 +219,7 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
     }
 
     return () => {
+      disposed = true;
       cancelSampling?.();
       window.clearTimeout(fallbackTimer);
     };
