@@ -383,7 +383,11 @@ export const DesktopLyricView: React.FC = () => {
       <div className="desktop-lyric-content flex-1 flex flex-col justify-center items-center text-center px-4 z-10 w-full overflow-hidden">
         <motion.div
           key={`desktop-lyric-${activeIndex}-${line1Text}`}
-          initial={{ opacity: 0, y: 22, scale: 0.96 }}
+          // Start fully visible: if the entrance animation never fires (e.g.
+          // a transparent always-on-top window where framer-motion's RAF is
+          // throttled), the lyric must NOT be stuck at opacity 0 — which
+          // would look like a completely empty window.
+          initial={{ opacity: 1, y: 0, scale: 1 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{
             y: { type: 'spring', stiffness: 220, damping: 23, mass: 0.68 },
