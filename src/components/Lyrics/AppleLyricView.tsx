@@ -412,13 +412,14 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
   const jellyTransition = enableLyricAnimation
     ? {
         type: 'spring',
-        stiffness: 120,
-        damping: 15,
-        mass: 1,
+        stiffness: 130,
+        damping: 22,
+        mass: 0.9,
+        // More convergent than the old stiffness 120 / damping 15 spring:
+        // fewer overshoot oscillations means the animation settles faster
+        // and the compositor is not kept busy for a second on every switch.
         // DOF blur is per-pixel and expensive on large lyric fonts: snap it
-        // to its target instantly instead of easing every frame (scale and
-        // opacity stay springy on the GPU compositor). This removes the
-        // switch-time frame drops.
+        // to its target instantly instead of easing every frame.
         filter: { duration: 0 },
       }
     : { duration: 0 };
@@ -1024,7 +1025,7 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                             opacity: targetOpacity,
                             filter: `blur(${targetBlur}px)`,
                           }}
-                          transition={jellyTransition}
+                          transition={distance > 2 ? { duration: 0 } : jellyTransition}
                           className="full-lyrics-line cursor-pointer text-left origin-left space-y-1 py-1 px-2 -mx-2 hover:opacity-100 max-w-full break-words"
                         >
                           {/* Main Lyric Line — always rendered; the pre-chorus
@@ -1130,7 +1131,7 @@ export const AppleLyricView: React.FC<AppleLyricViewProps> = ({ isVisible }) => 
                           opacity: targetOpacity,
                           filter: `blur(${targetBlur}px)`,
                         }}
-                        transition={jellyTransition}
+                        transition={distance > 2 ? { duration: 0 } : jellyTransition}
                         className="full-lyrics-line cursor-pointer text-center origin-center space-y-2 py-1 px-2 -mx-2 hover:opacity-100 max-w-3xl break-words"
                       >
                         {/* Giant Centered Main Line */}
