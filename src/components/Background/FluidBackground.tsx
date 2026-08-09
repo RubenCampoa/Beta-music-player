@@ -128,16 +128,43 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
           sampleCanvas.height = 48;
           context.drawImage(image, 0, 0, 48, 48);
           const pixels = context.getImageData(0, 0, 48, 48).data;
-          const positions = [
-            (10 * 48 + 10) * 4,
-            (10 * 48 + 38) * 4,
-            (38 * 48 + 10) * 4,
-            (38 * 48 + 38) * 4,
-          ];
 
-          const sampledColors = positions.map((position) =>
-            desaturate([pixels[position], pixels[position + 1], pixels[position + 2]] as Rgb)
-          );
+          // Weighted-average the whole downsampled cover, weighting the
+          // centre higher than the edges: corners are often background or
+          // letterbox white, which is why fixed corner sampling picked the
+          // wrong colour for centred artwork.
+          let redSum = 0;
+          let greenSum = 0;
+          let blueSum = 0;
+          let weightSum = 0;
+          for (let y = 0; y < 48; y += 1) {
+            for (let x = 0; x < 48; x += 1) {
+              const offset = (y * 48 + x) * 4;
+              const cx = (x - 23.5) / 24;
+              const cy = (y - 23.5) / 24;
+              const weight = 1 / (1 + (cx * cx + cy * cy) * 1.4);
+              redSum += pixels[offset] * weight;
+              greenSum += pixels[offset + 1] * weight;
+              blueSum += pixels[offset + 2] * weight;
+              weightSum += weight;
+            }
+          }
+          const base: Rgb = [redSum / weightSum, greenSum / weightSum, blueSum / weightSum];
+
+          // Derive four palette variants from the dominant colour so the
+          // fluid reads as one cohesive hue with subtle depth instead of
+          // four unrelated corner colours.
+          const [r, g, b] = base;
+          const sampledColors = [
+            base as Rgb,
+            [Math.min(255, r + 26), Math.min(255, g + 12), Math.max(0, b - 20)] as Rgb,
+            [Math.max(0, r - 34), Math.max(0, g - 14), Math.min(255, b + 18)] as Rgb,
+            [
+              Math.min(255, (r + g) / 2 + 26),
+              Math.min(255, (g + b) / 2 + 8),
+              Math.max(0, (r + b) / 2 - 12),
+            ] as Rgb,
+          ].map(desaturate);
 
           paletteCache.set(sampleUrl, sampledColors);
           colorsRef.current = sampledColors.map((color) => [...color] as Rgb);
