@@ -129,42 +129,36 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
           context.drawImage(image, 0, 0, 48, 48);
           const pixels = context.getImageData(0, 0, 48, 48).data;
 
-          // Weighted-average the whole downsampled cover, weighting the
-          // centre higher than the edges: corners are often background or
-          // letterbox white, which is why fixed corner sampling picked the
-          // wrong colour for centred artwork.
-          let redSum = 0;
-          let greenSum = 0;
-          let blueSum = 0;
-          let weightSum = 0;
-          for (let y = 0; y < 48; y += 1) {
-            for (let x = 0; x < 48; x += 1) {
-              const offset = (y * 48 + x) * 4;
-              const cx = (x - 23.5) / 24;
-              const cy = (y - 23.5) / 24;
-              const weight = 1 / (1 + (cx * cx + cy * cy) * 1.4);
-              redSum += pixels[offset] * weight;
-              greenSum += pixels[offset + 1] * weight;
-              blueSum += pixels[offset + 2] * weight;
-              weightSum += weight;
-            }
-          }
-          const base: Rgb = [redSum / weightSum, greenSum / weightSum, blueSum / weightSum];
-
-          // Derive four palette variants from the dominant colour so the
-          // fluid reads as one cohesive hue with subtle depth instead of
-          // four unrelated corner colours.
-          const [r, g, b] = base;
-          const sampledColors = [
-            base as Rgb,
-            [Math.min(255, r + 26), Math.min(255, g + 12), Math.max(0, b - 20)] as Rgb,
-            [Math.max(0, r - 34), Math.max(0, g - 14), Math.min(255, b + 18)] as Rgb,
-            [
-              Math.min(255, (r + g) / 2 + 26),
-              Math.min(255, (g + b) / 2 + 8),
-              Math.max(0, (r + b) / 2 - 12),
-            ] as Rgb,
-          ].map(desaturate);
+          // Region-average instead of one global average: a red/black cover
+          // would blend into a muddy brown globally, while per-region means
+          // keep the actual cover blocks (dark corners, vivid centre) so the
+          // fluid reads as the artwork's real colours. The centre region is
+          // included so the subject of the cover stays dominant.
+          const regions: [number, number, number, number][] = [
+            [0, 0, 24, 24],
+            [24, 0, 24, 24],
+            [0, 24, 24, 24],
+            [24, 24, 24, 24],
+            [12, 12, 24, 24],
+          ];
+          const sampledColors = regions
+            .map(([x0, y0, w, h]) => {
+              let rSum = 0;
+              let gSum = 0;
+              let bSum = 0;
+              let count = 0;
+              for (let y = y0; y < y0 + h; y += 1) {
+                for (let x = x0; x < x0 + w; x += 1) {
+                  const offset = (y * 48 + x) * 4;
+                  rSum += pixels[offset];
+                  gSum += pixels[offset + 1];
+                  bSum += pixels[offset + 2];
+                  count += 1;
+                }
+              }
+              return [rSum / count, gSum / count, bSum / count] as Rgb;
+            })
+            .map(desaturate);
 
           paletteCache.set(sampleUrl, sampledColors);
           colorsRef.current = sampledColors.map((color) => [...color] as Rgb);
