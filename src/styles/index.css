@@ -195,14 +195,132 @@ div[style*="--desktop-lyric-distance"] .desktop-lyric-marquee-text {
 /* Fullscreen lyrics fluid ambience. The cover is only sampled for its palette;
    the visible background is a GPU-friendly, animated metaball field. */
 .full-lyrics-fluid {
-  contain: strict;
+  /* `strict` containment can make a fixed canvas disappear in some Electron
+     Chromium builds. Layout/paint containment keeps the animation isolated
+     without changing the fixed positioning context. */
+  contain: layout paint;
   background:
     radial-gradient(circle at 50% 42%, rgba(20, 30, 54, 0.72), rgba(5, 7, 15, 0.98) 78%),
     #070912;
   isolation: isolate;
 }
 
+.full-lyrics-fluid-glow {
+  z-index: 0;
+  overflow: hidden;
+  opacity: 0.9;
+  /* Keep the sampled palette muted: a strong saturate() would re-intensify
+     the desaturated artwork colours and flood the background again. */
+  filter: blur(42px) saturate(110%);
+  transform: translate3d(0, 0, 0) scale(1.08);
+  will-change: transform, opacity;
+}
+
+.full-lyrics-fluid-blob {
+  position: absolute;
+  width: 58vw;
+  height: 62vh;
+  border-radius: 48% 52% 58% 42% / 46% 44% 56% 54%;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  will-change: transform, border-radius;
+}
+
+.full-lyrics-fluid-blob-a {
+  top: -18%;
+  left: -14%;
+  background: radial-gradient(ellipse at center, var(--fluid-color-a) 0%, transparent 70%);
+  animation: full-lyrics-fluid-drift-a 17s cubic-bezier(0.37, 0, 0.63, 1) infinite alternate;
+}
+
+.full-lyrics-fluid-blob-b {
+  top: -12%;
+  right: -18%;
+  width: 64vw;
+  height: 68vh;
+  background: radial-gradient(ellipse at center, var(--fluid-color-b) 0%, transparent 70%);
+  animation: full-lyrics-fluid-drift-b 21s cubic-bezier(0.37, 0, 0.63, 1) infinite alternate;
+}
+
+.full-lyrics-fluid-blob-c {
+  right: -12%;
+  bottom: -22%;
+  width: 62vw;
+  height: 70vh;
+  background: radial-gradient(ellipse at center, var(--fluid-color-c) 0%, transparent 70%);
+  animation: full-lyrics-fluid-drift-c 19s cubic-bezier(0.37, 0, 0.63, 1) infinite alternate;
+}
+
+.full-lyrics-fluid-blob-d {
+  bottom: -24%;
+  left: -16%;
+  width: 60vw;
+  height: 66vh;
+  background: radial-gradient(ellipse at center, var(--fluid-color-d) 0%, transparent 70%);
+  animation: full-lyrics-fluid-drift-d 23s cubic-bezier(0.37, 0, 0.63, 1) infinite alternate;
+}
+
+.full-lyrics-fluid-kugou .full-lyrics-fluid-glow {
+  opacity: 1;
+  filter: blur(28px) saturate(170%);
+  transform: translate3d(0, 0, 0) scale(1.04);
+}
+
+/* A separate moving refraction layer keeps the flow perceptible even where
+   Canvas is throttled by an Electron window or integrated GPU driver. */
+.full-lyrics-fluid-flow {
+  z-index: 1;
+  opacity: 0.56;
+  background:
+    radial-gradient(ellipse 44% 52% at 16% 22%, var(--fluid-color-a) 0%, transparent 68%),
+    radial-gradient(ellipse 42% 48% at 83% 22%, var(--fluid-color-b) 0%, transparent 70%),
+    radial-gradient(ellipse 48% 42% at 68% 80%, var(--fluid-color-c) 0%, transparent 72%),
+    radial-gradient(ellipse 42% 50% at 21% 76%, var(--fluid-color-d) 0%, transparent 70%);
+  background-size: 170% 165%, 165% 175%, 180% 160%, 160% 185%;
+  background-position: 8% 10%, 88% 4%, 78% 92%, 12% 86%;
+  filter: blur(18px) saturate(170%);
+  mix-blend-mode: screen;
+  animation: full-lyrics-fluid-flow 9s cubic-bezier(0.37, 0, 0.63, 1) infinite alternate;
+  will-change: background-position, transform;
+}
+
+@keyframes full-lyrics-fluid-flow {
+  0% {
+    background-position: 8% 10%, 88% 4%, 78% 92%, 12% 86%;
+    transform: scale(1.04) rotate(-1deg);
+  }
+  100% {
+    background-position: 34% 30%, 54% 25%, 48% 64%, 35% 56%;
+    transform: scale(1.12) rotate(1deg);
+  }
+}
+
+@keyframes full-lyrics-fluid-drift-a {
+  0% { transform: translate3d(-4%, 2%, 0) rotate(-8deg) scale(0.92, 1.04); border-radius: 48% 52% 58% 42% / 46% 44% 56% 54%; }
+  50% { transform: translate3d(15%, 12%, 0) rotate(10deg) scale(1.1, 0.9); border-radius: 63% 37% 44% 56% / 54% 58% 42% 46%; }
+  100% { transform: translate3d(4%, 26%, 0) rotate(22deg) scale(0.98, 1.12); border-radius: 38% 62% 54% 46% / 62% 40% 60% 38%; }
+}
+
+@keyframes full-lyrics-fluid-drift-b {
+  0% { transform: translate3d(5%, -4%, 0) rotate(12deg) scale(1.04, 0.92); border-radius: 58% 42% 52% 48% / 42% 60% 40% 58%; }
+  50% { transform: translate3d(-16%, 16%, 0) rotate(-12deg) scale(0.9, 1.12); border-radius: 42% 58% 38% 62% / 56% 42% 58% 44%; }
+  100% { transform: translate3d(-4%, 28%, 0) rotate(-22deg) scale(1.12, 0.98); border-radius: 66% 34% 54% 46% / 48% 64% 36% 52%; }
+}
+
+@keyframes full-lyrics-fluid-drift-c {
+  0% { transform: translate3d(8%, 8%, 0) rotate(-14deg) scale(0.94, 1.1); border-radius: 44% 56% 62% 38% / 58% 42% 58% 42%; }
+  50% { transform: translate3d(-14%, -14%, 0) rotate(8deg) scale(1.1, 0.9); border-radius: 58% 42% 40% 60% / 38% 60% 40% 62%; }
+  100% { transform: translate3d(-26%, -4%, 0) rotate(18deg) scale(1.02, 1.08); border-radius: 36% 64% 52% 48% / 62% 46% 54% 38%; }
+}
+
+@keyframes full-lyrics-fluid-drift-d {
+  0% { transform: translate3d(-4%, 12%, 0) rotate(9deg) scale(1.08, 0.94); border-radius: 62% 38% 48% 52% / 44% 56% 44% 56%; }
+  50% { transform: translate3d(18%, -12%, 0) rotate(-16deg) scale(0.9, 1.12); border-radius: 42% 58% 60% 40% / 58% 42% 62% 38%; }
+  100% { transform: translate3d(30%, -2%, 0) rotate(-24deg) scale(1.12, 1); border-radius: 54% 46% 36% 64% / 38% 62% 42% 58%; }
+}
+
 .full-lyrics-fluid-canvas {
+  z-index: 2;
   transform: scale(1.02);
   mix-blend-mode: screen;
   image-rendering: auto;
@@ -210,6 +328,7 @@ div[style*="--desktop-lyric-distance"] .desktop-lyric-marquee-text {
 }
 
 .full-lyrics-fluid-scrim {
+  z-index: 3;
   background:
     radial-gradient(ellipse at 50% 50%, rgba(5, 8, 18, 0.02) 0%, rgba(5, 8, 18, 0.2) 65%, rgba(3, 5, 12, 0.72) 100%),
     linear-gradient(110deg, rgba(3, 5, 12, 0.34), rgba(8, 11, 24, 0.04) 44%, rgba(3, 5, 12, 0.36));

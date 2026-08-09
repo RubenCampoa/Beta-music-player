@@ -1,9 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { usePlayerStore } from '../../store/playerStore';
+import { getOptimizedCoverUrl } from '../../utils/format';
+import { SongSource } from '../../types/music';
 
 interface FluidBackgroundProps {
   coverUrl?: string;
   isFullLyricsMode?: boolean;
+  source?: SongSource;
 }
 
 type Rgb = [number, number, number];
@@ -30,9 +33,26 @@ const smoothStep = (edge0: number, edge1: number, value: number) => {
   return t * t * (3 - 2 * t);
 };
 
+// Mute a sampled artwork colour so a saturated album cover (pure red/yellow
+// blocks) cannot flood the whole background. 55% grey keeps the hue while
+// removing the intensity that made the fluid read as a flat colour field.
+const desaturate = ([red, green, blue]: Rgb): Rgb => {
+  const gray = red * 0.299 + green * 0.587 + blue * 0.114;
+  const mix = 0.45;
+  return [
+    Math.round(gray + (red - gray) * mix),
+    Math.round(gray + (green - gray) * mix),
+    Math.round(gray + (blue - gray) * mix),
+  ];
+};
+
+const toRgba = ([red, green, blue]: Rgb, alpha: number) =>
+  `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+
 export const FluidBackground: React.FC<FluidBackgroundProps> = ({
   coverUrl,
   isFullLyricsMode = false,
+  source,
 }) => {
   const isFluidBgEnabled = usePlayerStore((state) => state.isFluidBgEnabled);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -40,8 +60,6 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
   const [palette, setPalette] = useState<string[]>(DEFAULT_COLORS);
   const shouldShow = isFluidBgEnabled && isFullLyricsMode;
   const [isMounted, setIsMounted] = useState(shouldShow);
-  const [paletteReadyFor, setPaletteReadyFor] = useState<string | null>(coverUrl ? null : '');
-  const isPaletteReady = !coverUrl || paletteReadyFor === coverUrl;
 
   useEffect(() => {
     if (shouldShow) {
@@ -57,30 +75,46 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
   // rendered as a blurred full-screen image: the visible ambience below is a
   // procedurally animated liquid field.
   useEffect(() => {
+    // Never make the fluid canvas wait for a remote artwork request. Some
+    // KuGou CDN responses do not complete a CORS-enabled image read, which
+    // would otherwise leave the whole background transparent indefinitely.
+    const resetToDefaultPalette = () => {
+      colorsRef.current = DEFAULT_COLORS.map(parseColor);
+      setPalette(DEFAULT_COLORS);
+    };
+
     if (!coverUrl || !isFullLyricsMode) {
-      if (!coverUrl) setPaletteReadyFor('');
+      resetToDefaultPalette();
       return;
     }
 
-    const cachedColors = paletteCache.get(coverUrl);
+    // Match the URL used by the visible cover image so providers such as
+    // KuGou get the same normalized/thumbnail URL when possible.
+    const sampleUrl = getOptimizedCoverUrl(coverUrl, 300);
+    resetToDefaultPalette();
+
+    const cachedColors = paletteCache.get(sampleUrl);
     if (cachedColors) {
       colorsRef.current = cachedColors.map((color) => [...color] as Rgb);
-      setPalette(cachedColors.map(([red, green, blue]) => `rgba(${red}, ${green}, ${blue}, 0.72)`));
-      setPaletteReadyFor(coverUrl);
+      setPalette(cachedColors.map((color) => toRgba(color, 0.5)));
       return;
     }
 
     const image = new Image();
     image.crossOrigin = 'Anonymous';
-    image.src = coverUrl;
+    image.src = sampleUrl;
     let cancelled = false;
+    const fallbackTimer = window.setTimeout(resetToDefaultPalette, 1400);
 
     image.onload = () => {
       if (cancelled) return;
       try {
         const sampleCanvas = document.createElement('canvas');
         const context = sampleCanvas.getContext('2d');
-        if (!context) return;
+        if (!context) {
+          resetToDefaultPalette();
+          return;
+        }
 
         sampleCanvas.width = 48;
         sampleCanvas.height = 48;
@@ -93,45 +127,40 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
           (38 * 48 + 38) * 4,
         ];
 
-        const sampledColors = positions.map((position) => {
-          const red = pixels[position];
-          const green = pixels[position + 1];
-          const blue = pixels[position + 2];
-          return [red, green, blue] as Rgb;
-        });
+        const sampledColors = positions.map((position) =>
+          desaturate([pixels[position], pixels[position + 1], pixels[position + 2]] as Rgb)
+        );
 
-        paletteCache.set(coverUrl, sampledColors);
-        // The canvas is hidden until this assignment completes, so the first
-        // visible frame already uses the correct artwork palette.
+        paletteCache.set(sampleUrl, sampledColors);
         colorsRef.current = sampledColors.map((color) => [...color] as Rgb);
-        setPalette(sampledColors.map(([red, green, blue]) => `rgba(${red}, ${green}, ${blue}, 0.72)`));
-        setPaletteReadyFor(coverUrl);
+        setPalette(sampledColors.map((color) => toRgba(color, 0.5)));
       } catch {
-        colorsRef.current = DEFAULT_COLORS.map(parseColor);
-        setPalette(DEFAULT_COLORS);
-        setPaletteReadyFor(coverUrl);
+        resetToDefaultPalette();
       }
     };
 
     image.onerror = () => {
       if (cancelled) return;
-      colorsRef.current = DEFAULT_COLORS.map(parseColor);
-      setPalette(DEFAULT_COLORS);
-      setPaletteReadyFor(coverUrl);
+      resetToDefaultPalette();
     };
 
     return () => {
       cancelled = true;
+      window.clearTimeout(fallbackTimer);
       image.onload = null;
       image.onerror = null;
     };
   }, [coverUrl, isFullLyricsMode]);
 
   useEffect(() => {
-    if (!isFluidBgEnabled || !isFullLyricsMode) return;
+    // When the setting is enabled while the lyric view is already open, the
+    // first effect pass happens before the delayed canvas is mounted. Observe
+    // `isMounted` as well so the animation loop starts on the next commit.
+    if (!shouldShow || !isMounted) return;
 
     const canvas = canvasRef.current;
-    const context = canvas?.getContext('2d', { alpha: true, desynchronized: true });
+    const context = canvas?.getContext('2d', { alpha: true, desynchronized: true })
+      || canvas?.getContext('2d');
     if (!canvas || !context) return;
 
     let frameId: number | null = null;
@@ -163,7 +192,7 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
       previousTimestamp = timestamp;
       // One full shape cycle takes roughly 18–30 seconds, so the motion reads
       // as liquid drift instead of a quickly looping screensaver.
-      time += delta * 0.00062;
+      time += delta * 0.0009;
 
       const width = canvas.width;
       const height = canvas.height;
@@ -296,7 +325,7 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
       window.removeEventListener('resize', resize);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [isFluidBgEnabled, isFullLyricsMode]);
+  }, [shouldShow, isMounted]);
 
   if (!isMounted) return null;
 
@@ -311,16 +340,34 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
 
   return (
     <div
-      className={`full-lyrics-fluid fixed inset-0 z-0 pointer-events-none overflow-hidden transition-opacity duration-500 ease-out ${
+      className={`full-lyrics-fluid absolute inset-0 z-0 pointer-events-none overflow-hidden transition-opacity duration-500 ease-out ${
+        source === 'kugou' ? 'full-lyrics-fluid-kugou ' : ''
+      }${
         shouldShow ? 'opacity-100' : 'opacity-0'
       }`}
       style={fluidStyle}
       aria-hidden="true"
     >
+      {/* CSS blobs are an intentional fallback layer. They keep the liquid
+          ambience visible when a Chromium build declines a Canvas context or
+          the artwork palette cannot be sampled because of CDN CORS headers. */}
+      <div className="full-lyrics-fluid-glow absolute inset-0" aria-hidden="true">
+        <span className="full-lyrics-fluid-blob full-lyrics-fluid-blob-a" />
+        <span className="full-lyrics-fluid-blob full-lyrics-fluid-blob-b" />
+        <span className="full-lyrics-fluid-blob full-lyrics-fluid-blob-c" />
+        <span className="full-lyrics-fluid-blob full-lyrics-fluid-blob-d" />
+      </div>
+      {/* KuGou CDN/Chromium combinations can starve the sampled Canvas. Keep
+          the extra fallback provider-scoped so it never tints the established
+          NetEase/QQ fluid treatment. */}
+      {source === 'kugou' && <div className="full-lyrics-fluid-flow absolute inset-0" aria-hidden="true" />}
       <canvas
         ref={canvasRef}
         className="full-lyrics-fluid-canvas absolute inset-0 w-full h-full transition-opacity duration-700 ease-out"
-        style={{ opacity: isPaletteReady ? 0.94 : 0 }}
+        // The procedural field must be visible even when a provider blocks
+        // cross-origin palette sampling. The palette is an enhancement, not a
+        // prerequisite for rendering the fluid background.
+        style={{ opacity: source === 'kugou' ? 0.72 : 0.94 }}
       />
       <div className="full-lyrics-fluid-scrim absolute inset-0" />
     </div>
