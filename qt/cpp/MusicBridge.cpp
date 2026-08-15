@@ -708,8 +708,7 @@ int MusicBridge::activeIndex() const
     // 支持与原版一致的每首歌歌词快慢偏移（正 = 提前）。
     const double platformOffsetMs = m_current.value(QStringLiteral("source")).toString() == QStringLiteral("kugou")
         ? 400.0 : 0.0;
-    const double offsetSeconds = (m_settings.value("lyricSwitchOffsetMs").toDouble()
-                                  + platformOffsetMs) / 1000.0;
+    const double offsetSeconds = (m_lyricOffset + platformOffsetMs) / 1000.0;
     const double seconds = m_player.position() / 1000.0 + offsetSeconds;
     int active = -1;
     for (int i = 0; i < m_lyrics.size(); ++i) {
@@ -1546,6 +1545,7 @@ void MusicBridge::play_queue_index(int index) { setCurrentIndex(index); }
 void MusicBridge::setCurrentIndex(int index, bool autoplay)
 {
     if (index < 0 || index >= m_queue.size()) return;
+    set_lyric_offset(0);
     m_playRecoveryAttempted = false;
     m_currentIndex = index; m_current = m_queue.at(index).toObject();
     if (songIsFavorite(m_current))
@@ -2381,11 +2381,9 @@ void MusicBridge::set_audio_quality(const QString &quality) { m_settings.insert(
 void MusicBridge::set_lyric_offset(int milliseconds)
 {
     const int clamped = std::clamp(milliseconds, -2000, 2000);
-    if (m_settings.value(QStringLiteral("lyricSwitchOffsetMs")).toInt(0) == clamped) return;
-    m_settings.insert(QStringLiteral("lyricSwitchOffsetMs"), clamped);
-    saveSettings();
-    emit lyricOffsetChanged(clamped);
-    emit settingsChanged();
+    if (m_lyricOffset == clamped) return;
+    m_lyricOffset = clamped;
+    emit lyricOffsetChanged(m_lyricOffset);
     // 立即重算 activeIndex，让全屏/桌面歌词行随偏移即时跳动。
     emit positionChanged(positionMs());
 }

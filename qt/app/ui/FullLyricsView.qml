@@ -137,7 +137,7 @@ Item {
                     spacing: 0
 
                     readonly property real availableH: leftPane.height
-                    readonly property real dynamicCoverSize: Math.max(160, Math.min(width, availableH - 240, 380))
+                    readonly property real dynamicCoverSize: Math.max(140, Math.min(width, availableH - 270, 360))
 
                     // 1. 唱片封面（大圆角、细腻微光边框与柔和弥散阴影）
                     Item {
@@ -382,32 +382,52 @@ Item {
                         Layout.topMargin: Math.max(4, Math.min(8, (leftColumn.availableH - 480) * 0.08))
                         spacing: 8
                         AppIcon {
-                            Layout.preferredWidth: 14
-                            Layout.preferredHeight: 14
+                            Layout.preferredWidth: 13
+                            Layout.preferredHeight: 13
                             name: "clock"
                             color: "#ffffff"
-                            opacity: 0.60
+                            opacity: 0.65
+                        }
+                        Text {
+                            text: "歌词微调"
+                            color: "#d7dbe2"
+                            font.pixelSize: 11
+                            font.weight: Font.Medium
                         }
                         Rectangle {
                             id: offsetTrack
                             Layout.fillWidth: true
                             Layout.preferredHeight: 5
-                            radius: 3; color: "#38ffffff"
+                            radius: 3
+                            color: "#38ffffff"
+
+                            // 中间 0ms 基准线
                             Rectangle {
                                 anchors.horizontalCenter: parent.horizontalCenter
-                                width: 1; height: 7
+                                width: 1.5; height: 7
                                 anchors.verticalCenter: parent.verticalCenter
-                                color: "#55ffffff"
+                                color: "#60ffffff"
                             }
+
                             Rectangle {
                                 id: offsetThumb
-                                width: 10; height: 10; radius: 5
+                                width: 11; height: 11; radius: 5.5
                                 anchors.verticalCenter: parent.verticalCenter
-                                color: "#fb7185"
+                                color: bridge.lyricOffset !== 0 ? "#fb7185" : "#ffffff"
                                 x: Math.max(0, Math.min(parent.width - width, (bridge.lyricOffset + 2000) / 4000 * (parent.width - width)))
+                                layer.enabled: true
+                                layer.effect: MultiEffect {
+                                    shadowEnabled: true
+                                    shadowColor: "#60000000"
+                                    shadowBlur: 0.35
+                                    blurMax: 6
+                                }
                             }
+
                             MouseArea {
                                 anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onDoubleClicked: bridge.set_lyric_offset(0)
                                 onPressed: update(mouseX)
                                 onPositionChanged: if (pressed) update(mouseX)
                                 function update(xValue) {
@@ -416,10 +436,28 @@ Item {
                                 }
                             }
                         }
-                        Text {
-                            text: (bridge.lyricOffset > 0 ? "+" : "") + bridge.lyricOffset + "ms"
-                            color: "#aeb4c0"; font.pixelSize: 10; font.family: "Consolas"
-                            Layout.preferredWidth: 48; horizontalAlignment: Text.AlignRight
+                        Rectangle {
+                            Layout.preferredWidth: 52
+                            Layout.preferredHeight: 20
+                            radius: 10
+                            color: bridge.lyricOffset !== 0 ? "#33fb7185" : "#18ffffff"
+                            border.width: 1
+                            border.color: bridge.lyricOffset !== 0 ? "#55fb7185" : "#20ffffff"
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: (bridge.lyricOffset > 0 ? "+" : "") + bridge.lyricOffset + "ms"
+                                color: bridge.lyricOffset !== 0 ? "#fb7185" : "#d1d5db"
+                                font.pixelSize: 10
+                                font.family: "Consolas"
+                                font.bold: bridge.lyricOffset !== 0
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: bridge.set_lyric_offset(0)
+                            }
                         }
                     }
 
@@ -470,7 +508,7 @@ Item {
                 lyricAnimation: root.preferences.lyricAnimation !== false
                 enableKaraoke: root.preferences.enableKaraoke !== false
                 karaokeAnimation: root.preferences.karaokeAnimation === "float" ? "float" : "slide"
-                lyricOffsetMs: bridge.lyricOffset + (root.song.source === "kugou" ? 400 : 0)
+                lyricOffsetMs: bridge.lyricOffset
                 fontSize: root.preferences.lyricFontSize === "large" ? "large" : "normal"
             }
         }

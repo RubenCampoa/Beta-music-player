@@ -112,7 +112,7 @@ public:
     QString searchQuery() const;
     QStringList searchHistory() const;
     QVariantMap settings() const;
-    int lyricOffset() const { return m_settings.value(QStringLiteral("lyricSwitchOffsetMs")).toInt(0); }
+    int lyricOffset() const { return m_lyricOffset; }
     QString loginPlatform() const;
     QString loginStatus() const;
     QString loginQrImage() const;
@@ -379,4 +379,5 @@ private:
     QTimer m_loginTimer;
     QTimer m_storageSaveTimer;
     bool m_storageDirty = false;
+    int m_lyricOffset = 0;
 };
