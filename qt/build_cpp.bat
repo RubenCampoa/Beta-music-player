@@ -42,6 +42,10 @@ if errorlevel 1 goto :failed
 cmake --build cpp\build-nmake
 if errorlevel 1 goto :failed
 
+if exist "webview2\build\native\x64\WebView2Loader.dll" (
+    copy /y "webview2\build\native\x64\WebView2Loader.dll" "cpp\build-nmake\WebView2Loader.dll" >nul
+)
+
 "%QT_ROOT%\bin\windeployqt.exe" --release --qmldir app\ui cpp\build-nmake\BetaMusicPlayerCpp.exe
 if errorlevel 1 goto :failed
 

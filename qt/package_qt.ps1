@@ -38,6 +38,9 @@ Copy-Item -LiteralPath (Join-Path $qtDir 'app') -Destination $stageDir -Recurse
 Copy-Item -LiteralPath (Join-Path $qtDir 'netease_server.js') -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $repoDir 'public\icon.png') -Destination (Join-Path $stageDir 'app-icon.png')
 Copy-Item -LiteralPath (Join-Path $qtDir 'app.ico') -Destination (Join-Path $stageDir 'app.ico')
+if (Test-Path -LiteralPath (Join-Path $qtDir 'webview2\build\native\x64\WebView2Loader.dll')) {
+    Copy-Item -LiteralPath (Join-Path $qtDir 'webview2\build\native\x64\WebView2Loader.dll') -Destination (Join-Path $stageDir 'WebView2Loader.dll')
+}
 
 $nodeExe = (Get-Command node.exe -ErrorAction Stop).Source
 Copy-Item -LiteralPath $nodeExe -Destination (Join-Path $stageDir 'node\node.exe')

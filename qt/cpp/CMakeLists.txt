@@ -20,12 +20,19 @@ qt_add_executable(BetaMusicPlayerCpp
     MusicBridge.h
     WindowsFrame.cpp
     WindowsFrame.h
+    WebLoginWindow.cpp
+    WebLoginWindow.h
 )
 
 if (WIN32)
     configure_file(version.rc.in version.rc @ONLY)
     target_sources(BetaMusicPlayerCpp PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/version.rc)
 endif()
+
+target_include_directories(BetaMusicPlayerCpp PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../webview2/build/native/include
+)
 
 target_link_libraries(BetaMusicPlayerCpp PRIVATE
     Qt6::Core
@@ -43,7 +50,14 @@ target_compile_definitions(BetaMusicPlayerCpp PRIVATE
 
 if (WIN32)
     set_target_properties(BetaMusicPlayerCpp PROPERTIES WIN32_EXECUTABLE TRUE)
-    target_link_libraries(BetaMusicPlayerCpp PRIVATE dwmapi user32 crypt32)
+    target_link_libraries(BetaMusicPlayerCpp PRIVATE
+        dwmapi
+        user32
+        crypt32
+        ole32
+        oleaut32
+        "${CMAKE_CURRENT_SOURCE_DIR}/../webview2/build/native/x64/WebView2Loader.dll.lib"
+    )
 endif()
 
 # 单元测试：覆盖歌词解析纯函数（parseLrc/parseYrc/parseKrc/filterQqLyricLines）。

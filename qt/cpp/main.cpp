@@ -1,3 +1,7 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include <QApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -27,6 +31,7 @@
 
 #include "MusicBridge.h"
 #include "WindowsFrame.h"
+#include "WebLoginWindow.h"
 
 namespace {
 void traceMain(const QByteArray &message)
@@ -162,16 +167,10 @@ int main(int argc, char *argv[])
     traceMain("main:before-bridge");
     MusicBridge bridge;
     traceMain("main:bridge-ready");
-    QObject::connect(&bridge, &MusicBridge::webLoginRequested, &bridge, [](const QString &platform) {
-        QUrl url;
-        if (platform == QStringLiteral("qq")) {
-            url = QUrl(QStringLiteral("https://y.qq.com/"));
-        } else if (platform == QStringLiteral("kugou")) {
-            url = QUrl(QStringLiteral("https://www.kugou.com/newuc/login/weblogin"));
-        } else {
-            url = QUrl(QStringLiteral("https://music.163.com/"));
-        }
-        QDesktopServices::openUrl(url);
+    QObject::connect(&bridge, &MusicBridge::webLoginRequested, &bridge, [&bridge](const QString &platform) {
+        WebLoginWindow *loginWin = new WebLoginWindow(platform, &bridge);
+        loginWin->setAttribute(Qt::WA_DeleteOnClose);
+        loginWin->show();
     });
     WindowsFrame nativeFrame;
     app.installNativeEventFilter(&nativeFrame);
