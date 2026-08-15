@@ -22,9 +22,11 @@
 #include <QLocalSocket>
 #include <algorithm>
 
+#include <QDesktopServices>
+#include <QUrl>
+
 #include "MusicBridge.h"
 #include "WindowsFrame.h"
-#include "WebLoginWindow.h"
 
 namespace {
 void traceMain(const QByteArray &message)
@@ -160,10 +162,17 @@ int main(int argc, char *argv[])
     traceMain("main:before-bridge");
     MusicBridge bridge;
     traceMain("main:bridge-ready");
-    WebLoginWindow webLogin;
-    QObject::connect(&bridge, &MusicBridge::webLoginRequested, &webLogin, &WebLoginWindow::begin);
-    QObject::connect(&webLogin, &WebLoginWindow::loginCompleted,
-                     &bridge, &MusicBridge::complete_web_login);
+    QObject::connect(&bridge, &MusicBridge::webLoginRequested, &bridge, [](const QString &platform) {
+        QUrl url;
+        if (platform == QStringLiteral("qq")) {
+            url = QUrl(QStringLiteral("https://y.qq.com/"));
+        } else if (platform == QStringLiteral("kugou")) {
+            url = QUrl(QStringLiteral("https://www.kugou.com/newuc/login/weblogin"));
+        } else {
+            url = QUrl(QStringLiteral("https://music.163.com/"));
+        }
+        QDesktopServices::openUrl(url);
+    });
     WindowsFrame nativeFrame;
     app.installNativeEventFilter(&nativeFrame);
     QQmlApplicationEngine engine;

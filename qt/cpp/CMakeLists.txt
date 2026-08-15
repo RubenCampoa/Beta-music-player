@@ -8,7 +8,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Qml Quick QuickControls2 Multimedia Network WebEngineWidgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Qml Quick QuickControls2 Multimedia Network)
 
 qt_add_executable(BetaMusicPlayerCpp
     main.cpp
@@ -20,8 +20,6 @@ qt_add_executable(BetaMusicPlayerCpp
     MusicBridge.h
     WindowsFrame.cpp
     WindowsFrame.h
-    WebLoginWindow.cpp
-    WebLoginWindow.h
 )
 
 if (WIN32)
@@ -38,7 +36,6 @@ target_link_libraries(BetaMusicPlayerCpp PRIVATE
     Qt6::QuickControls2
     Qt6::Multimedia
     Qt6::Network
-    Qt6::WebEngineWidgets
 )
 target_compile_definitions(BetaMusicPlayerCpp PRIVATE
     BETA_APP_VERSION="1.0.8-Beta"

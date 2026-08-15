@@ -42,16 +42,39 @@ Copy-Item -LiteralPath (Join-Path $qtDir 'app.ico') -Destination (Join-Path $sta
 $nodeExe = (Get-Command node.exe -ErrorAction Stop).Source
 Copy-Item -LiteralPath $nodeExe -Destination (Join-Path $stageDir 'node\node.exe')
 
-Copy-Item -LiteralPath (Join-Path $repoDir 'package.json') -Destination $runtimeWork
-Copy-Item -LiteralPath (Join-Path $repoDir 'package-lock.json') -Destination $runtimeWork
+# Dedicated production-only sidecar manifest to avoid bundling React / Vite / Lucide frontend bloat
+$sidecarManifest = @{
+    name = "beta-music-player-sidecar"
+    version = "1.0.8"
+    private = $true
+    dependencies = @{
+        "@neteasecloudmusicapienhanced/api" = "4.38.0"
+        "@sansenjian/qq-music-api" = "^2.4.0"
+        "kugoumusicapi" = "git+https://github.com/MakcRe/KuGouMusicApi.git#7a60b706002526914644e50c90f1310c0dc32182"
+        "axios" = "^1.7.2"
+        "cors" = "^2.8.5"
+        "crypto-js" = "^4.2.0"
+        "express" = "^4.19.2"
+        "pako" = "^2.1.0"
+        "qrc-decoder" = "^1.0.2"
+        "xml2js" = "^0.6.2"
+    }
+} | ConvertTo-Json -Depth 5
+Set-Content -LiteralPath (Join-Path $runtimeWork 'package.json') -Value $sidecarManifest -Encoding UTF8
+
 Copy-Item -LiteralPath (Join-Path $repoDir 'scripts') -Destination $runtimeWork -Recurse
 Push-Location $runtimeWork
 try {
-    & npm.cmd ci --omit=dev --ignore-scripts --no-audit --no-fund
+    Write-Host "[sidecar] Installing lean backend dependencies..."
+    & npm.cmd install --omit=dev --no-audit --no-fund --ignore-scripts
     if ($LASTEXITCODE -ne 0) { throw 'Production sidecar dependency install failed.' }
     & node.exe (Join-Path $runtimeWork 'scripts\patch-ncm-lyric.js')
     & node.exe (Join-Path $runtimeWork 'scripts\patch-qmusic-lyric.js')
     & node.exe (Join-Path $runtimeWork 'scripts\patch-qmusic-cookie.js')
+    
+    # Strip unnecessary documentation, tests, maps and type definitions to slim down the bundle
+    Get-ChildItem -Path (Join-Path $runtimeWork 'node_modules') -Recurse -Directory -Include 'test', 'tests', 'docs', 'doc', 'examples', 'example', '.github', 'coverage', 'benchmark' -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -Path (Join-Path $runtimeWork 'node_modules') -Recurse -File -Include '*.md', '*.ts', '*.map', '*.flow', '*.yml', '*.yaml' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
 } finally {
     Pop-Location
 }
@@ -63,7 +86,7 @@ foreach ($required in @(
     (Join-Path $stageDir 'node_modules\@neteasecloudmusicapienhanced\api'),
     (Join-Path $stageDir 'node_modules\@sansenjian\qq-music-api'),
     (Join-Path $stageDir 'node_modules\kugoumusicapi'),
-      (Join-Path $stageDir 'node_modules\qrc-decoder')
+    (Join-Path $stageDir 'node_modules\qrc-decoder')
 )) {
     if (-not (Test-Path -LiteralPath $required)) { throw "Staged sidecar component is missing: $required" }
 }
@@ -111,8 +134,23 @@ try {
     $env:BETA_KUGOU_PORT = $oldKugouPort
 }
 
-& "$qtRoot\bin\windeployqt.exe" --release --qmldir (Join-Path $qtDir 'app\ui') (Join-Path $stageDir 'BetaMusicPlayer.exe')
+Write-Host "[windeployqt] Deploying Qt runtime without unused WebEngine/OpenGL fallback..."
+& "$qtRoot\bin\windeployqt.exe" --release --no-translations --no-opengl-sw --no-compiler-runtime --qmldir (Join-Path $qtDir 'app\ui') (Join-Path $stageDir 'BetaMusicPlayer.exe')
 if ($LASTEXITCODE -ne 0) { throw 'Qt runtime deployment failed.' }
+
+# Remove optional software OpenGL renderer (20MB) to save package size
+$openglSw = Join-Path $stageDir 'opengl32sw.dll'
+if (Test-Path -LiteralPath $openglSw) { Remove-Item -LiteralPath $openglSw -Force }
+
+# Deploy only essential Chinese/English translations (saves ~30MB of global locale files)
+$transDir = Join-Path $stageDir 'translations'
+New-Item -ItemType Directory -Path $transDir -Force | Out-Null
+foreach ($lang in @('qt_zh_CN.qm', 'qt_en.qm')) {
+    $src = Join-Path $qtRoot "translations\$lang"
+    if (Test-Path -LiteralPath $src) {
+        Copy-Item -LiteralPath $src -Destination $transDir -Force
+    }
+}
 
 # Portable packages need an app-local MSVC runtime. windeployqt may only add
 # the redistributable installer, which is insufficient on a clean machine.
@@ -166,10 +204,12 @@ $notice = @(
 )
 Set-Content -LiteralPath (Join-Path $stageDir 'THIRD_PARTY_NOTICES.txt') -Value $notice -Encoding UTF8
 
+Write-Host "[package] Creating portable zip archive..."
 $zipPath = Join-Path $distDir "Beta Music Player $version Portable.zip"
 if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
 Compress-Archive -Path (Join-Path $stageDir '*') -DestinationPath $zipPath -CompressionLevel Optimal
 
+Write-Host "[package] Compiling NSIS installer with LZMA solid compression..."
 $makensis = Get-ChildItem "$env:LOCALAPPDATA\electron-builder\Cache\nsis" -Recurse -Filter makensis.exe -ErrorAction SilentlyContinue |
     Where-Object { $_.DirectoryName -notmatch '\\Bin$' } | Select-Object -First 1
 if (-not $makensis) { $makensis = Get-Command makensis.exe -ErrorAction SilentlyContinue }

@@ -12,15 +12,20 @@
 const fs = require('fs');
 const path = require('path');
 
-const targetFile = path.join(
+const distDir = path.join(
   __dirname,
   '..',
   'node_modules',
   '@sansenjian',
   'qq-music-api',
-  'dist',
-  'server-CdzMPnXx.cjs'
+  'dist'
 );
+
+let targetFile = path.join(distDir, 'server-CdzMPnXx.cjs');
+if (!fs.existsSync(targetFile) && fs.existsSync(distDir)) {
+  const match = fs.readdirSync(distDir).find(f => f.startsWith('server-') && f.endsWith('.cjs'));
+  if (match) targetFile = path.join(distDir, match);
+}
 
 try {
   const source = fs.readFileSync(targetFile, 'utf-8');
