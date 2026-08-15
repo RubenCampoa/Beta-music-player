@@ -1,4 +1,4 @@
-Unicode True
+﻿Unicode true
 RequestExecutionLevel user
 
 !include "MUI2.nsh"
@@ -36,15 +36,37 @@ Section "Beta Music Player" SecMain
   File /r "${SOURCE_DIR}\*.*"
   WriteRegStr HKCU "Software\BetaMusicPlayerQt" "InstallDir" "$INSTDIR"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
+  
+  ; Create Start Menu Shortcuts
   CreateDirectory "$SMPROGRAMS\Beta Music Player"
-  CreateShortcut "$SMPROGRAMS\Beta Music Player\Beta Music Player.lnk" "$INSTDIR\BetaMusicPlayer.exe"
-  CreateShortcut "$SMPROGRAMS\Beta Music Player\卸载.lnk" "$INSTDIR\Uninstall.exe"
+  CreateShortcut "$SMPROGRAMS\Beta Music Player\Beta Music Player.lnk" "$INSTDIR\BetaMusicPlayer.exe" "" "$INSTDIR\BetaMusicPlayer.exe" 0
+  CreateShortcut "$SMPROGRAMS\Beta Music Player\Uninstall.lnk" "$INSTDIR\Uninstall.exe" "" "$INSTDIR\Uninstall.exe" 0
+  
+  ; Create Desktop Shortcut
+  CreateShortcut "$DESKTOP\Beta Music Player.lnk" "$INSTDIR\BetaMusicPlayer.exe" "" "$INSTDIR\BetaMusicPlayer.exe" 0
+
+  ; Register in Windows Control Panel Apps
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BetaMusicPlayerQt" "DisplayName" "Beta Music Player"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BetaMusicPlayerQt" "DisplayVersion" "${VERSION}"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BetaMusicPlayerQt" "DisplayIcon" "$INSTDIR\BetaMusicPlayer.exe,0"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BetaMusicPlayerQt" "Publisher" "Beta Music Player"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BetaMusicPlayerQt" "UninstallString" "$\"$INSTDIR\Uninstall.exe$\""
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BetaMusicPlayerQt" "InstallLocation" "$INSTDIR"
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BetaMusicPlayerQt" "NoModify" 1
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BetaMusicPlayerQt" "NoRepair" 1
 SectionEnd
 
 Section "Uninstall"
+  ; Delete Shortcuts
+  Delete "$DESKTOP\Beta Music Player.lnk"
   Delete "$SMPROGRAMS\Beta Music Player\Beta Music Player.lnk"
-  Delete "$SMPROGRAMS\Beta Music Player\卸载.lnk"
+  Delete "$SMPROGRAMS\Beta Music Player\Uninstall.lnk"
   RMDir "$SMPROGRAMS\Beta Music Player"
+  
+  ; Delete Program Files
   RMDir /r "$INSTDIR"
+  
+  ; Delete Registry Keys
   DeleteRegKey HKCU "Software\BetaMusicPlayerQt"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BetaMusicPlayerQt"
 SectionEnd
