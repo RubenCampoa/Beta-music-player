@@ -389,8 +389,8 @@ Item {
                     // Cookie 输入面板
                     Rectangle {
                         anchors.horizontalCenter: parent.horizontalCenter
-                        width: 290
-                        height: 168
+                        width: 300
+                        height: 172
                         radius: 16
                         color: "#25000000"
                         border.width: 1
@@ -403,17 +403,17 @@ Item {
                             spacing: 8
 
                             Text {
-                                text: "粘贴 QQ 音乐 Cookie / Key 凭证"
+                                text: "粘贴 " + root.platformName(bridge.loginPlatform) + " Cookie 凭证"
                                 color: "#f1f5f9"
                                 font.pixelSize: 11
                                 font.weight: Font.DemiBold
                             }
                             Rectangle {
                                 width: parent.width
-                                height: 80
+                                height: 76
                                 radius: 8
                                 color: "#40000000"
-                                border.color: qqCookieInput.activeFocus ? root.accent("qq") : "#24ffffff"
+                                border.color: qqCookieInput.activeFocus ? root.accent(bridge.loginPlatform) : "#24ffffff"
                                 TextInput {
                                     id: qqCookieInput
                                     anchors.fill: parent
@@ -436,12 +436,12 @@ Item {
                                 GlassAction {
                                     label: "确认绑定"
                                     filled: true
-                                    actionColor: root.accent("qq")
+                                    actionColor: root.accent(bridge.loginPlatform)
                                     preferredWidth: 84
                                     height: 30
                                     onClicked: {
                                         if (qqCookieInput.text.trim().length > 0) {
-                                            bridge.set_qq_cookie(qqCookieInput.text.trim())
+                                            bridge.complete_web_login(bridge.loginPlatform, qqCookieInput.text.trim())
                                             qqCookieInput.text = ""
                                             root.showCredentialInput = false
                                         }
@@ -511,26 +511,29 @@ Item {
                         GlassAction {
                             label: "刷新"
                             iconName: "refresh-cw"
-                            preferredWidth: bridge.loginPlatform === "qq" ? 74 : 84
+                            preferredWidth: 70
                             onClicked: bridge.refresh_login_qr()
                         }
 
                         GlassAction {
                             label: "Cookie 绑定"
                             iconName: "music"
-                            preferredWidth: 88
-                            visible: bridge.loginPlatform === "qq"
+                            preferredWidth: 92
+                            visible: true
                             onClicked: root.showCredentialInput = !root.showCredentialInput
                         }
 
                         GlassAction {
-                            label: "官方网页登录"
+                            label: "网页端登录"
                             iconName: "globe"
                             filled: true
                             actionColor: root.accent(bridge.loginPlatform)
-                            preferredWidth: bridge.loginPlatform === "qq" ? 122 : 132
+                            preferredWidth: 100
                             visible: true
-                            onClicked: bridge.login_via_web(bridge.loginPlatform)
+                            onClicked: {
+                                bridge.login_via_web(bridge.loginPlatform)
+                                root.showCredentialInput = true
+                            }
                         }
                     }
                 }
