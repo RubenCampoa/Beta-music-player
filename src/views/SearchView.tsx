@@ -3,7 +3,8 @@ import { Search, Play, Music, Sparkles } from 'lucide-react';
 import { usePlayerStore } from '../store/playerStore';
 import { shallow } from 'zustand/shallow';
 import { Song, Platform } from '../types/music';
-import { getOptimizedCoverUrl, cleanTitle, DEFAULT_COVER_PLACEHOLDER } from '../utils/format';
+import { getOptimizedCoverUrl, cleanTitle, handleImageError } from '../utils/format';
+import { getPlatformName } from '../utils/platform';
 
 export const SearchView: React.FC = () => {
   const {
@@ -51,11 +52,11 @@ export const SearchView: React.FC = () => {
         <div className="space-y-1">
           <div className="flex items-center space-x-2 text-apple-red text-xs font-bold uppercase tracking-wider">
             <Search className="w-4 h-4" />
-            <span>{searchPlatform === 'qq' ? 'QQ 音乐全网搜索' : '网易云音乐搜索'}</span>
+            <span>{getPlatformName(searchPlatform)}全网搜索</span>
           </div>
           <h1 className="text-2xl font-extrabold text-white tracking-tight flex items-center space-x-2">
             <span>搜索结果：</span>
-            <span className={searchPlatform === 'qq' ? 'text-emerald-400 font-mono' : 'text-apple-red font-mono'}>
+            <span className={`${searchPlatform === 'qq' ? 'text-emerald-400' : searchPlatform === 'kugou' ? 'text-sky-400' : 'text-apple-red'} font-mono`}>
               “{searchQuery}”
             </span>
           </h1>
@@ -88,6 +89,18 @@ export const SearchView: React.FC = () => {
               <div className="w-2 h-2 rounded-full bg-emerald-300" />
               <span>QQ 音乐</span>
             </button>
+
+            <button
+              onClick={() => handlePlatformChange('kugou')}
+              className={`flex items-center space-x-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                searchPlatform === 'kugou'
+                  ? 'bg-sky-500 text-white shadow-md'
+                  : 'text-white/60 hover:text-white'
+              }`}
+            >
+              <div className="w-2 h-2 rounded-full bg-sky-300" />
+              <span>酷狗概念版</span>
+            </button>
           </div>
 
           {searchResults.length > 0 && (
@@ -96,7 +109,9 @@ export const SearchView: React.FC = () => {
               className={`flex items-center space-x-2 font-semibold text-xs px-5 py-2.5 rounded-full transition-all shadow-lg text-white cursor-pointer ${
                 searchPlatform === 'qq'
                   ? 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/20'
-                  : 'bg-apple-red hover:bg-apple-red/90 shadow-apple-red/20'
+                  : searchPlatform === 'kugou'
+                    ? 'bg-sky-500 hover:bg-sky-600 shadow-sky-500/20'
+                    : 'bg-apple-red hover:bg-apple-red/90 shadow-apple-red/20'
               }`}
             >
               <Play className="w-4 h-4 fill-current ml-0.5" />
@@ -112,11 +127,11 @@ export const SearchView: React.FC = () => {
           <div className="py-20 text-center text-white/40 space-y-3">
             <Sparkles
               className={`w-8 h-8 mx-auto animate-spin ${
-                searchPlatform === 'qq' ? 'text-emerald-400' : 'text-apple-red'
+                searchPlatform === 'qq' ? 'text-emerald-400' : searchPlatform === 'kugou' ? 'text-sky-400' : 'text-apple-red'
               }`}
             />
             <p className="text-sm font-medium">
-              正在 {searchPlatform === 'qq' ? 'QQ 音乐' : '网易云音乐'} 全网搜索...
+              正在 {getPlatformName(searchPlatform)}全网搜索...
             </p>
           </div>
         ) : searchResults.length === 0 ? (
@@ -161,12 +176,7 @@ export const SearchView: React.FC = () => {
                         loading="lazy"
                         decoding="async"
                         className="w-9 h-9 rounded-md object-cover border border-white/10 shrink-0"
-                        onError={(e) => {
-                          const img = e.currentTarget;
-                          if (img.src !== DEFAULT_COVER_PLACEHOLDER) {
-                            img.src = DEFAULT_COVER_PLACEHOLDER;
-                          }
-                        }}
+                        onError={handleImageError}
                       />
                       <span className="truncate max-w-[220px] text-white font-medium flex items-center space-x-1.5">
                         <span className="truncate">{cleanTitle(song.name)}</span>
@@ -191,10 +201,12 @@ export const SearchView: React.FC = () => {
                         className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap inline-block shrink-0 ${
                           song.source === 'qq'
                             ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                            : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                            : song.source === 'kugou'
+                              ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                              : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
                         }`}
                       >
-                        {song.source === 'qq' ? 'QQ 音乐' : '网易云'}
+                        {getPlatformName(song.source, true)}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-right text-white/50 font-mono whitespace-nowrap">

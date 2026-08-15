@@ -385,6 +385,9 @@ div[style*="--desktop-lyric-distance"] .desktop-lyric-marquee-text {
 .full-lyrics-line {
   backface-visibility: hidden;
   transform: translateZ(0);
+}
+
+.full-lyrics-line-active-zone {
   will-change: transform, opacity;
 }
 

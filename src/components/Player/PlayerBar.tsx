@@ -184,8 +184,13 @@ export const PlayerBar: React.FC = React.memo(() => {
                 </div>
               </div>
               <div className="flex flex-col truncate">
-                <span className="text-sm font-semibold text-[#263246] truncate group-hover:text-apple-red transition-colors">
-                  {neteaseApi.cleanTitle(currentSong.name)}
+                <span className="flex items-center gap-1.5 min-w-0 text-sm font-semibold text-[#263246] group-hover:text-apple-red transition-colors">
+                  <span className="truncate">{neteaseApi.cleanTitle(currentSong.name)}</span>
+                  {currentSong.isVip && (
+                    <span className="shrink-0 rounded bg-gradient-to-r from-amber-400 to-orange-500 px-1 py-0.5 text-[8px] font-black leading-none text-white">
+                      VIP
+                    </span>
+                  )}
                 </span>
                 <span className="text-xs text-[#8a94a3] truncate group-hover:text-[#4b586d] transition-colors">
                   {neteaseApi.cleanTitle(currentSong.artist)}

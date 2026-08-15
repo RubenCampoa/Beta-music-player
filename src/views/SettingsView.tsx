@@ -21,6 +21,7 @@ import { usePlayerStore } from '../store/playerStore';
 import { APP_VERSION, checkForUpdate } from '../utils/version';
 import { neteaseApi } from '../services/neteaseApi';
 import { qqMusicApi } from '../services/qqMusicApi';
+import { kugouMusicApi } from '../services/kugouMusicApi';
 import { localMusicService } from '../services/localMusicService';
 
 export const SettingsView: React.FC = () => {
@@ -129,12 +130,12 @@ export const SettingsView: React.FC = () => {
           <span className="text-xs text-white/50">
             当前主平台：
             <strong className="text-white font-bold ms-1">
-              {activePlatform === 'qq' ? '🟢 QQ 音乐' : '🔴 网易云音乐'}
+              {activePlatform === 'qq' ? '🟢 QQ 音乐' : activePlatform === 'kugou' ? '🔵 酷狗概念版' : '🔴 网易云音乐'}
             </strong>
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* NetEase Account Card */}
           <div
             className={`p-5 rounded-2xl border transition-all ${
@@ -270,6 +271,70 @@ export const SettingsView: React.FC = () => {
                   className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
                 >
                   登录 QQ 音乐
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* KuGou Music Account Card */}
+          <div
+            className={`p-5 rounded-2xl border transition-all ${
+              activePlatform === 'kugou' ? 'bg-sky-500/10 border-sky-500/30' : 'bg-white/5 border-white/10'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center space-x-2">
+                <div className="w-2.5 h-2.5 rounded-full bg-sky-500" />
+                <span className="font-bold text-white text-sm">酷狗概念版</span>
+              </div>
+              {activePlatform === 'kugou' ? (
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-sky-500 text-white">当前主平台</span>
+              ) : (
+                <button
+                  onClick={() => switchAccountPlatform('kugou')}
+                  className="text-xs font-semibold px-2.5 py-1 rounded-full bg-white/10 hover:bg-white/20 text-white transition-all cursor-pointer"
+                >
+                  设为当前平台
+                </button>
+              )}
+            </div>
+
+            {accounts.kugou?.isLoggedIn ? (
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3 min-w-0">
+                  {accounts.kugou.avatarUrl ? (
+                    <img src={accounts.kugou.avatarUrl} alt={accounts.kugou.nickname} className="w-10 h-10 rounded-full object-cover border border-white/20" />
+                  ) : (
+                    <div className="w-10 h-10 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center font-bold text-xs">KG</div>
+                  )}
+                  <div className="min-w-0">
+                    <h4 className="text-sm font-bold text-white truncate">{accounts.kugou.nickname}</h4>
+                    <span className="text-[11px] text-white/60">{accounts.kugou.vipType ? '酷狗概念版会员' : '普通用户'}</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    kugouMusicApi.clearCookie();
+                    setAccount('kugou', null);
+                    setToastMessage('已退出酷狗概念版账号');
+                  }}
+                  className="text-xs text-white/60 hover:text-sky-400 transition-colors p-2"
+                  title="退出酷狗概念版账号"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-xs text-white/50">未绑定酷狗概念版账号</span>
+                <button
+                  onClick={() => {
+                    setLoginModalPlatform('kugou');
+                    setIsLoginModalOpen(true);
+                  }}
+                  className="px-4 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
+                >
+                  登录酷狗概念版
                 </button>
               </div>
             )}

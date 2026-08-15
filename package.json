@@ -34,7 +34,8 @@
     ],
     "asarUnpack": [
       "**/node_modules/@neteasecloudmusicapienhanced/**",
-      "**/node_modules/@sansenjian/qq-music-api/**"
+      "**/node_modules/@sansenjian/qq-music-api/**",
+      "**/node_modules/kugoumusicapi/**"
     ],
     "win": {
       "icon": "public/icon.png",
@@ -59,7 +60,9 @@
     "express": "^4.19.2",
     "framer-motion": "^11.3.24",
     "jsmediatags": "^3.9.7",
+    "kugoumusicapi": "git+https://github.com/MakcRe/KuGouMusicApi.git#7a60b706002526914644e50c90f1310c0dc32182",
     "lucide-react": "^0.428.0",
+    "qrc-decoder": "^1.0.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^4.5.4"

@@ -3,6 +3,7 @@ import { PlayCircle, Compass, HardDrive, ListMusic, Heart, Settings, Info, Alert
 import { usePlayerStore } from '../../store/playerStore';
 import { shallow } from 'zustand/shallow';
 import { APP_VERSION } from '../../utils/version';
+import { getPlatformName } from '../../utils/platform';
 
 export const Sidebar: React.FC = () => {
   const { activeTab, setActiveTab, playlists, setSelectedPlaylist, selectedPlaylist, activePlatform } = usePlayerStore(
@@ -64,14 +65,14 @@ export const Sidebar: React.FC = () => {
         {/* User Playlists */}
         <div className="space-y-1">
           <div className="nav-section-label px-3 text-xs font-semibold uppercase tracking-wider mb-2 flex items-center justify-between">
-            <span>{activePlatform === 'qq' ? 'QQ 音乐歌单' : '网易云歌单'}</span>
+            <span>{getPlatformName(activePlatform)}歌单</span>
             <ListMusic className="w-3.5 h-3.5 opacity-60" />
           </div>
 
           <div className="playlist-list space-y-0.5 max-h-56 overflow-y-auto pr-1">
             {playlists.length === 0 ? (
               <div className="px-3 py-2 text-xs text-[#a3aab5] italic">
-                登录{activePlatform === 'qq' ? 'QQ音乐' : '网易云'}同步歌单
+                登录{getPlatformName(activePlatform, true)}同步歌单
               </div>
             ) : (
               playlists.map((pl) => (

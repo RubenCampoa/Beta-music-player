@@ -1,6 +1,6 @@
-export type SongSource = 'netease' | 'qq' | 'local';
+export type SongSource = 'netease' | 'qq' | 'kugou' | 'local';
 
-export type Platform = 'netease' | 'qq';
+export type Platform = 'netease' | 'qq' | 'kugou';
 
 export interface LyricWord {
   text: string;
@@ -29,6 +29,9 @@ export interface Song {
   neteaseId?: number;
   songmid?: string;
   mediaMid?: string;
+  kugouHash?: string;
+  kugouAlbumId?: number | string;
+  kugouAlbumAudioId?: number | string;
   isVip?: boolean;
   fee?: number;
 }
@@ -52,4 +55,5 @@ export interface Playlist {
   description?: string;
   isUserPlaylist?: boolean;
   platform?: Platform;
+  kugouGlobalCollectionId?: string;
 }

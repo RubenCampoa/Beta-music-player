@@ -31,3 +31,30 @@ try {
 } catch (err) {
   console.error('Failed to start QQ Music API server:', err);
 }
+
+// --- KuGou Music API (local HTTP service on port 3400) ---
+(async () => {
+  const previousPort = process.env.PORT;
+  const previousHost = process.env.HOST;
+  process.env.PORT = '3400';
+  process.env.HOST = '127.0.0.1';
+  // This app is branded as KuGou Concept Edition. The upstream API uses the
+  // `lite` platform to select the concept-edition WeChat app credentials and
+  // the matching VIP/audio endpoints.
+  process.env.platform = 'lite';
+  try {
+    const { startService } = require('kugoumusicapi/server.js');
+    const kugouApp = await startService();
+    kugouApp?.service?.on?.('error', (err) => {
+      console.error('[KuGou Music API] Server error:', err);
+    });
+    console.log('[KuGou Music API] Ready on http://127.0.0.1:3400');
+  } catch (err) {
+    console.error('Failed to start KuGou Music API server:', err);
+  } finally {
+    if (previousPort === undefined) delete process.env.PORT;
+    else process.env.PORT = previousPort;
+    if (previousHost === undefined) delete process.env.HOST;
+    else process.env.HOST = previousHost;
+  }
+})();

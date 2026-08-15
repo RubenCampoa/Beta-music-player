@@ -3,8 +3,9 @@ import { Play, Music, ListMusic } from 'lucide-react';
 import { Song } from '../types/music';
 import { usePlayerStore } from '../store/playerStore';
 import { shallow } from 'zustand/shallow';
-import { getOptimizedCoverUrl, cleanTitle } from '../utils/format';
+import { getOptimizedCoverUrl, cleanTitle, handleImageError } from '../utils/format';
 import { musicApiAdapter } from '../services/musicApiAdapter';
+import { getPlatformName } from '../utils/platform';
 
 export const PlaylistView: React.FC = () => {
   const { selectedPlaylist, playSong, currentSong, isPlaying, activePlatform } = usePlayerStore(
@@ -19,10 +20,19 @@ export const PlaylistView: React.FC = () => {
   );
   const [songs, setSongs] = useState<Song[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [playlistCoverFallback, setPlaylistCoverFallback] = useState('');
 
   useEffect(() => {
-    if (!selectedPlaylist) return;
+    if (!selectedPlaylist) {
+      setSongs([]);
+      setPlaylistCoverFallback('');
+      setIsLoading(false);
+      return;
+    }
 
+    let cancelled = false;
+    setSongs([]);
+    setPlaylistCoverFallback('');
     const fetchSongs = async () => {
       setIsLoading(true);
       try {
@@ -34,7 +44,11 @@ export const PlaylistView: React.FC = () => {
           platform,
           selectedPlaylist.id
         );
+        if (cancelled) return;
         setSongs(trackList);
+        if (!selectedPlaylist.coverImgUrl) {
+          setPlaylistCoverFallback(trackList.find((song) => song.coverUrl)?.coverUrl || '');
+        }
 
         // If this is a user favorite playlist or user playlist on QQ Music,
         // sync song mids to store so heart icons light up in red instantly
@@ -55,18 +69,36 @@ export const PlaylistView: React.FC = () => {
         }
       } catch (error) {
         console.warn('Failed to load playlist songs:', error);
-        setSongs([]);
+        if (!cancelled) setSongs([]);
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
 
     fetchSongs();
-  }, [selectedPlaylist]);
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPlaylist, activePlatform]);
 
   if (!selectedPlaylist) return null;
 
   const isQqPlaylist = selectedPlaylist.platform === 'qq' || String(selectedPlaylist.id).startsWith('qq_');
+  const isKugouPlaylist = selectedPlaylist.platform === 'kugou' || String(selectedPlaylist.id).startsWith('kg_');
+  const playlistPlatform = isQqPlaylist ? 'qq' : isKugouPlaylist ? 'kugou' : 'netease';
+  const playlistCoverUrl = selectedPlaylist.coverImgUrl || playlistCoverFallback || songs.find((song) => song.coverUrl)?.coverUrl || '';
+
+  const handlePlaylistCoverError = (event: React.SyntheticEvent<HTMLImageElement, Event>) => {
+    // KuGou's private/favourite lists occasionally return a stale cover URL
+    // even though their track artwork is valid. Show the first real track art
+    // before falling back to the generic placeholder.
+    const firstTrackCover = songs.find((song) => song.coverUrl)?.coverUrl || '';
+    if (selectedPlaylist.coverImgUrl && firstTrackCover && playlistCoverFallback !== firstTrackCover) {
+      setPlaylistCoverFallback(firstTrackCover);
+      return;
+    }
+    handleImageError(event);
+  };
 
   const formatDuration = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -80,20 +112,21 @@ export const PlaylistView: React.FC = () => {
       <div className="flex items-end space-x-6 glass-panel rounded-2xl p-6 border border-white/10">
         <div className="relative w-40 h-40 rounded-xl overflow-hidden shadow-2xl border border-white/15 shrink-0">
           <img
-            src={getOptimizedCoverUrl(selectedPlaylist.coverImgUrl, 400)}
+            src={getOptimizedCoverUrl(playlistCoverUrl, 400)}
             alt={selectedPlaylist.name}
             className="w-full h-full object-cover"
+            onError={handlePlaylistCoverError}
           />
         </div>
 
         <div className="flex flex-col space-y-3">
           <div
             className={`flex items-center space-x-2 text-xs font-bold uppercase tracking-wider ${
-              isQqPlaylist ? 'text-emerald-400' : 'text-apple-red'
+              isQqPlaylist ? 'text-emerald-400' : isKugouPlaylist ? 'text-sky-400' : 'text-apple-red'
             }`}
           >
             <ListMusic className="w-4 h-4" />
-            <span>{isQqPlaylist ? 'QQ 音乐歌单' : '网易云歌单'}</span>
+            <span>{getPlatformName(playlistPlatform)}歌单</span>
           </div>
 
           <h1 className="text-3xl font-extrabold text-white tracking-tight">{selectedPlaylist.name}</h1>
@@ -109,7 +142,9 @@ export const PlaylistView: React.FC = () => {
               className={`flex items-center space-x-2 text-white font-semibold text-xs px-5 py-2.5 rounded-full transition-all shadow-lg cursor-pointer ${
                 isQqPlaylist
                   ? 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/30'
-                  : 'bg-apple-red hover:bg-apple-red/90 shadow-apple-red/30'
+                  : isKugouPlaylist
+                    ? 'bg-sky-500 hover:bg-sky-600 shadow-sky-500/30'
+                    : 'bg-apple-red hover:bg-apple-red/90 shadow-apple-red/30'
               }`}
             >
               <Play className="w-4 h-4 fill-current ml-0.5" />
@@ -124,9 +159,9 @@ export const PlaylistView: React.FC = () => {
         {isLoading ? (
           <div className="py-16 text-center text-white/40 space-y-2">
             <Music
-              className={`w-8 h-8 mx-auto animate-spin ${isQqPlaylist ? 'text-emerald-400' : 'text-apple-red'}`}
+              className={`w-8 h-8 mx-auto animate-spin ${isQqPlaylist ? 'text-emerald-400' : isKugouPlaylist ? 'text-sky-400' : 'text-apple-red'}`}
             />
-            <p className="text-sm">获取 {isQqPlaylist ? 'QQ 音乐' : '网易云'} 歌曲列表中...</p>
+            <p className="text-sm">获取 {getPlatformName(playlistPlatform)}歌曲列表中...</p>
           </div>
         ) : songs.length === 0 ? (
           <div className="py-16 text-center text-white/40 space-y-2">
@@ -169,6 +204,7 @@ export const PlaylistView: React.FC = () => {
                         loading="lazy"
                         decoding="async"
                         className="w-9 h-9 rounded-md object-cover border border-white/10 shrink-0"
+                        onError={handleImageError}
                       />
                       <span className="truncate max-w-[220px] text-white font-medium flex items-center space-x-1.5">
                         <span className="truncate">{cleanTitle(song.name)}</span>

@@ -21,8 +21,10 @@ import { NoticeView } from './views/NoticeView';
 
 import { usePlayerStore } from './store/playerStore';
 import { checkForUpdate } from './utils/version';
+import { DEFAULT_COVER_PLACEHOLDER } from './utils/format';
 import { neteaseApi } from './services/neteaseApi';
 import { qqMusicApi } from './services/qqMusicApi';
+import { kugouMusicApi } from './services/kugouMusicApi';
 import { AlertCircle, Crown, Heart, CheckCircle2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -192,7 +194,7 @@ export const App: React.FC = () => {
     }
   };
 
-  // Restore user sessions on startup for both platforms (NetEase & QQ Music)
+  // Restore user sessions on startup for all online platforms.
   useEffect(() => {
     const initSession = async () => {
       // NetEase account, playlists & likelist
@@ -231,9 +233,14 @@ export const App: React.FC = () => {
         }
       }
 
+      const kugouAccount = await kugouMusicApi.getUserAccount();
+      if (kugouAccount) {
+        setAccount('kugou', kugouAccount);
+      }
+
       // Load user playlists for whichever platform is currently active
       const platform = usePlayerStore.getState().activePlatform;
-      if (!neteaseAccount && !qqAccount) {
+      if (!neteaseAccount && !qqAccount && !kugouAccount) {
         setUser(null);
         setPlaylists([]);
         return;
@@ -273,6 +280,25 @@ export const App: React.FC = () => {
       return cleanup;
     }
   }, [togglePlayPause, nextSong, prevSong]);
+
+  // Online cover/avatar CDNs occasionally return expired URLs or block a
+  // renderer request. Catch failures at the app boundary so every image
+  // surface gets the same local, offline-safe fallback. Data/blob images
+  // (local audio artwork and QR codes) are deliberately left untouched.
+  useEffect(() => {
+    const handleQqImageError = (event: Event) => {
+      const image = event.target;
+      if (!(image instanceof HTMLImageElement)) return;
+      const source = image.currentSrc || image.src;
+      if (!source || /^(?:data:|blob:)/i.test(source)) return;
+      if (image.dataset.coverFallbackApplied === '1') return;
+      image.dataset.coverFallbackApplied = '1';
+      image.src = DEFAULT_COVER_PLACEHOLDER;
+    };
+
+    document.addEventListener('error', handleQqImageError, true);
+    return () => document.removeEventListener('error', handleQqImageError, true);
+  }, []);
 
   // Global Keyboard Shortcut: Spacebar for Play / Pause Toggle
   useEffect(() => {

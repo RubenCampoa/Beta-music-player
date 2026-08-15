@@ -52,6 +52,16 @@
 
 ---
 
+
+### 💻 纯正的 Windows 桌面级体验
+- **零配置开箱即用**：打包后的 `.exe` 程序内置后台静默 Api 引擎，他人无需配置 Node.js 开发环境，解压双击即可独立运行。
+- **系统托盘与常驻播放**：支持最小化至 Windows 任务栏右下角系统托盘，后台续播无间断；提供快捷托盘右键菜单（显示、播放/暂停、上一首、下一首、退出）。
+- **全局硬件媒体按键**：支持键盘物理媒体按键（播放/暂停、切歌）全局响应。
+- **搜索栏历史记录**：自动保存历史搜索词，提供下拉历史快捷标签、单条删除与一键清空。
+- **智能 GPU 性能调度**：窗口最小化或后台运行时自动挂起 Canvas 动画渲染循环，降低 GPU/CPU 占用。
+
+---
+
 ## 🛠️ 技术栈
 
 ### 🖥️ 桌面端与核心基础架构 (Desktop & Core Framework)
@@ -66,6 +76,35 @@
 - [@sansenjian/qq-music-api](https://www.npmjs.com/package/@sansenjian/qq-music-api) (v2.4.0) — QQ 音乐核心服务引擎，提供 QQ 音乐榜单、搜索、凭证绑定及音频流地址解析。
 - [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi) (v1.6.0) — 酷狗概念版搜索、歌单、扫码登录、音频流与 KRC 逐字歌词服务，依赖固定到可复现提交。
 - [Express](https://expressjs.com/) (v4.19.2) 与 [CORS](https://github.com/expressjs/cors) (v2.8.5) — 内置轻量 Node.js 服务，无感知拉起三平台 API 本地代理（监听 3000 / 3200 / 3400 端口）。
+
+---
+
+## 🚀 本地开发与打包构建
+
+### 准备条件
+确保安装了 [Node.js](https://nodejs.org/) (建议 v18+) 与 npm。
+
+```bash
+# 1. 克隆项目仓库
+git clone https://github.com/YourUsername/musicplayer.git
+cd musicplayer
+
+# 2. 安装项目依赖
+npm install
+
+# 3. 启动开发模式 (同时启动前端与后台 Api)
+npm run dev
+
+# 4. 构建 Windows 可执行程序 (.exe)
+npm run build
+```
+
+打包成功后，可在 `release/` 目录下找到生成的可执行程序：
+- `Beta Music Player Setup 1.0.1.exe`（安装包）
+- `Beta Music Player 1.0.1.exe`（免安装便携版）
+
+---
+
 
 ### 🎨 UI 美学系统与流畅动效 (UI, Design & Animations)
 - [Lucide React](https://lucide.dev/) (v0.428.0) — Apple 风格矢量 Icon 图标库，提供播控、红心收藏、歌单及系统设置图标。
@@ -113,16 +152,6 @@ npm run build
 
 > **酷狗音乐概念版测试模式**：目前酷狗音乐概念版属于测试模式，可能会存在一系列问题，例如无法正常获取歌词翻译、音源需要验证（20028）等。若遇到问题，欢迎前往 [GitHub Issues](https://github.com/RubenCampoa/Beta-music-player/issues) 提交 Issue；若并非 API 问题，后续会着手修复。
 
-## 📋 版本更新历史 (Changelog)
-
-### v1.0.8 (2026-08-07)
-
-**逐字歌词与全屏歌词动效**
-- 新增网易云逐字歌词（YRC）支持：支持逐字歌词的歌曲全屏歌词自动逐字点亮，采用行级联动的海浪式非线性果冻动画，快歌不闪现。
-- 逐字波浪性能优化：逐字组件 memo 化，慢歌长句每帧仅更新正在唱的一个字，消除逐字卡顿。
-- 歌词时间轴改读实时媒体时钟（直连 `<audio>.currentTime` + 指数平滑），消除慢歌逐字抖动与墙钟外推漂移。
-- 高亮歌词光晕增强：逐字与非逐字激活行白光/玫红光更亮一档，随点亮进度平滑淡入。
-- 逐字与逐行亮度统一：未点亮字/非激活行同为 60% 白，点亮后同为纯白，两模式视觉亮度一致。
 - 前奏三点倒计时（主流音乐 App 风格）改进：仅网易云模式显示；消失时机锚定真实开唱时间（不再受歌词行提前激活影响）。
 - 新增「歌词切换时间微调」：位于全屏歌词音量条下方，按每首歌独立调整歌词行切换偏移（-2000ms ~ +2000ms，正值提前、负值延后），播放下一首自动恢复默认 0ms。
 

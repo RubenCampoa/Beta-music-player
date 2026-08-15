@@ -1,28 +1,89 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowRight, Clock3, Heart, Play, Sparkles } from 'lucide-react';
-import { Song, Playlist } from '../types/music';
+import { Platform, Song, Playlist } from '../types/music';
 import { usePlayerStore } from '../store/playerStore';
 import { neteaseApi } from '../services/neteaseApi';
-import { getOptimizedCoverUrl } from '../utils/format';
+import { DEFAULT_COVER_PLACEHOLDER, getOptimizedCoverUrl, handleImageError } from '../utils/format';
 import { musicApiAdapter } from '../services/musicApiAdapter';
+import { getPlatformName } from '../utils/platform';
 import { shallow } from 'zustand/shallow';
 
 const fallbackPlaylists: Playlist[] = [
   {
     id: 3778678,
     name: '私人漫游',
-    coverImgUrl: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=400&h=400&fit=crop',
+    // Do not use a third-party demo image here. Once recommendations arrive,
+    // the real song artwork is used as the card cover instead.
+    coverImgUrl: '',
     trackCount: 50,
     description: 'Roaming FM · 随心而行的电台',
   },
   {
     id: 3779629,
     name: '私人雷达',
-    coverImgUrl: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400&h=400&fit=crop',
+    coverImgUrl: '',
     trackCount: 30,
     description: 'Private Radar · 捕捉你错过的好歌',
   },
 ];
+
+const createFallbackPlaylists = (platform: Platform): Playlist[] => {
+  const platformName = getPlatformName(platform);
+  const ids = platform === 'netease'
+    ? [3778678, 3779629]
+    : platform === 'qq'
+      ? ['qq_daily', 'qq_personal']
+      : ['kg_daily', 'kg_personal'];
+
+  // Loading cards must carry their source: a delayed QQ response must never
+  // survive a switch to KuGou and be shown as a KuGou collection.
+  return [
+    { id: ids[0], name: `${platformName} 每日推荐`, coverImgUrl: '', trackCount: 0, description: `${platformName} 个性化推荐`, platform },
+    { id: ids[1], name: `${platformName} 私人电台`, coverImgUrl: '', trackCount: 0, description: `${platformName} 为你发现好音乐`, platform },
+  ];
+};
+
+const belongsToPlatform = (playlist: Playlist, platform: Platform) => {
+  if (playlist.platform) return playlist.platform === platform;
+  const id = String(playlist.id);
+  // Persisted data from earlier versions may lack `platform`. Only retain the
+  // legacy NetEase IDs in NetEase mode; do not guess for QQ/KuGou.
+  return platform === 'netease' && !id.startsWith('qq_') && !id.startsWith('kg_');
+};
+
+// The NetEase recommendation adapter historically used Unsplash images as
+// placeholders. They are unreliable in the packaged app and trigger the
+// generic music-note icon. Prefer artwork returned by the active provider for
+// these synthetic home cards, while keeping real user-playlist covers intact.
+const isSyntheticCover = (url?: string) =>
+  !url ||
+  /images\.unsplash\.com/i.test(url) ||
+  /(?:^|[\\/])(?:icon|app-icon)\.png(?:$|\?)/i.test(url);
+
+const getPlaylistDisplayCover = (playlist: Playlist, fallbackSong: Song | undefined, size: number) => {
+  const source = isSyntheticCover(playlist.coverImgUrl) ? fallbackSong?.coverUrl || playlist.coverImgUrl : playlist.coverImgUrl;
+  return getOptimizedCoverUrl(source, size);
+};
+
+const createCoverErrorHandler = (fallbackUrl?: string) => (event: React.SyntheticEvent<HTMLImageElement, Event>) => {
+  const image = event.currentTarget;
+  const fallback = fallbackUrl ? getOptimizedCoverUrl(fallbackUrl) : DEFAULT_COVER_PLACEHOLDER;
+
+  // If a playlist cover is unavailable, retry once with a real recommendation
+  // cover before falling back to the app icon. This avoids showing the icon for
+  // the home cards just because one CDN host is unreachable.
+  if (
+    fallback !== DEFAULT_COVER_PLACEHOLDER &&
+    fallback !== image.src &&
+    image.dataset.recommendCoverFallback !== '1'
+  ) {
+    image.dataset.recommendCoverFallback = '1';
+    image.src = fallback;
+    return;
+  }
+
+  handleImageError(event);
+};
 
 const formatTrackDuration = (song: Song, index: number) => {
   const duration = Number(song.duration || 0);
@@ -48,33 +109,37 @@ export const ListenNowView: React.FC = () => {
   );
   const [recommendSongs, setRecommendSongs] = useState<Song[]>([]);
   const [isRecommendationsLoading, setIsRecommendationsLoading] = useState(true);
-  const [personalPlaylists, setPersonalPlaylists] = useState<Playlist[]>(fallbackPlaylists);
+  const [personalPlaylists, setPersonalPlaylists] = useState<Playlist[]>(() => createFallbackPlaylists(activePlatform));
 
   useEffect(() => {
-    if (playlists?.length > 0) {
-      setPersonalPlaylists(playlists.slice(0, 4));
-    }
-  }, [playlists]);
+    const providerPlaylists = (playlists || []).filter((playlist) => belongsToPlatform(playlist, activePlatform));
+    setPersonalPlaylists(providerPlaylists.length > 0 ? providerPlaylists.slice(0, 4) : createFallbackPlaylists(activePlatform));
+  }, [playlists, activePlatform]);
 
   useEffect(() => {
     let isMounted = true;
+    const requestedPlatform = activePlatform;
 
     const loadRecommendations = async () => {
+      // Do not leave the previous platform's songs/covers visible while the
+      // new platform is being fetched.
+      setRecommendSongs([]);
+      setPersonalPlaylists(createFallbackPlaylists(requestedPlatform));
       setIsRecommendationsLoading(true);
       try {
         const songs = await musicApiAdapter.getRecommendSongs(activePlatform);
-        if (isMounted) {
+        if (isMounted && usePlayerStore.getState().activePlatform === requestedPlatform) {
           setRecommendSongs(songs.slice(0, 8));
         }
-        const recPlaylists = await musicApiAdapter.getRecommendPlaylists(activePlatform);
-        if (isMounted && recPlaylists.length > 0) {
+        const recPlaylists = await musicApiAdapter.getRecommendPlaylists(requestedPlatform);
+        if (isMounted && usePlayerStore.getState().activePlatform === requestedPlatform && recPlaylists.length > 0) {
           setPersonalPlaylists(recPlaylists.slice(0, 4));
         }
       } catch (error) {
         console.warn('Network load for recommend songs failed:', error);
-        if (isMounted) setRecommendSongs([]);
+        if (isMounted && usePlayerStore.getState().activePlatform === requestedPlatform) setRecommendSongs([]);
       } finally {
-        if (isMounted) setIsRecommendationsLoading(false);
+        if (isMounted && usePlayerStore.getState().activePlatform === requestedPlatform) setIsRecommendationsLoading(false);
       }
     };
 
@@ -87,11 +152,11 @@ export const ListenNowView: React.FC = () => {
   const firstSong = recommendSongs[0];
   const coverStack = recommendSongs.slice(0, 3);
   const dailyPlaylist: Playlist = {
-    id: activePlatform === 'qq' ? 'qq_daily' : 3778678,
-    name: activePlatform === 'qq' ? 'QQ 音乐 · 每日推荐' : '每日推荐',
-    coverImgUrl: firstSong?.coverUrl || fallbackPlaylists[0].coverImgUrl,
+    id: activePlatform === 'qq' ? 'qq_daily' : activePlatform === 'kugou' ? 'kg_daily' : 3778678,
+    name: activePlatform === 'netease' ? '每日推荐' : `${getPlatformName(activePlatform)} · 每日推荐`,
+    coverImgUrl: firstSong?.coverUrl || createFallbackPlaylists(activePlatform)[0].coverImgUrl,
     trackCount: recommendSongs.length,
-    description: `从你的 ${activePlatform === 'qq' ? 'QQ 音乐' : '网易云音乐'} 听歌轨迹中精选的每日推荐歌曲`,
+    description: `从你的 ${getPlatformName(activePlatform)} 听歌轨迹中精选的每日推荐歌曲`,
     platform: activePlatform,
   };
 
@@ -111,14 +176,16 @@ export const ListenNowView: React.FC = () => {
               className={`text-xs px-2.5 py-0.5 rounded-full font-bold border ${
                 activePlatform === 'qq'
                   ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                  : 'bg-rose-50 text-rose-700 border-rose-200'
+                  : activePlatform === 'kugou'
+                    ? 'bg-sky-50 text-sky-700 border-sky-200'
+                    : 'bg-rose-50 text-rose-700 border-rose-200'
               }`}
             >
-              {activePlatform === 'qq' ? '🟢 QQ 音乐' : '🔴 网易云'}
+              {activePlatform === 'qq' ? '🟢 QQ 音乐' : activePlatform === 'kugou' ? '🔵 酷狗概念版' : '🔴 网易云'}
             </span>
           </h1>
           <p className="home-subtitle">
-            精选 {activePlatform === 'qq' ? 'QQ 音乐' : '网易云音乐'} 推荐，陪你度过每一个当下。
+            精选 {getPlatformName(activePlatform)}推荐，陪你度过每一个当下。
           </p>
         </div>
         <div className="home-date-chip">
@@ -162,7 +229,7 @@ export const ListenNowView: React.FC = () => {
               className={`daily-art daily-art-button daily-art-${index}`}
               aria-label={`播放 ${neteaseApi.cleanTitle(song.name)} - ${neteaseApi.cleanTitle(song.artist)}`}
             >
-              <img src={getOptimizedCoverUrl(song.coverUrl, 420)} alt="" draggable={false} decoding="async" />
+              <img src={getOptimizedCoverUrl(song.coverUrl, 420)} alt="" draggable={false} decoding="async" onError={handleImageError} />
               <span className="daily-art-play" aria-hidden="true">
                 <Play className="h-5 w-5 fill-current" />
               </span>
@@ -180,13 +247,20 @@ export const ListenNowView: React.FC = () => {
             className="quick-mix-card"
           >
             <div className={`quick-mix-art quick-mix-art-${index}`}>
-              <img src={getOptimizedCoverUrl(playlist.coverImgUrl, 180)} alt="" loading="lazy" decoding="async" />
+              <img
+                src={getPlaylistDisplayCover(playlist, coverStack[index] || coverStack[0], 180)}
+                alt=""
+                loading="lazy"
+                decoding="async"
+                onError={createCoverErrorHandler(coverStack[index]?.coverUrl || coverStack[0]?.coverUrl)}
+              />
             </div>
             <div className="min-w-0 text-left">
-              <h3>{index === 0 ? '私人漫游' : '私人雷达'}</h3>
+              <h3>{playlist.name}</h3>
               <p>
                 {playlist.description ||
-                  (index === 0 ? 'Roaming FM · 随心而行的电台' : 'Private Radar · 捕捉你错过的好歌')}
+                  playlist.creatorName ||
+                  `${getPlatformName(activePlatform)} 歌单`}
               </p>
             </div>
             <span className="quick-mix-arrow">
@@ -218,6 +292,7 @@ export const ListenNowView: React.FC = () => {
                   loading="lazy"
                   decoding="async"
                   className="track-cover"
+                  onError={handleImageError}
                 />
                 <span className="track-play">
                   <Play className="h-3.5 w-3.5 fill-current" />
@@ -249,9 +324,17 @@ export const ListenNowView: React.FC = () => {
           <Sparkles className="h-4 w-4 text-[#9aa3b4]" />
         </div>
         <div className="playlist-grid">
-          {personalPlaylists.slice(0, 4).map((playlist) => (
+          {personalPlaylists.slice(0, 4).map((playlist, index) => (
             <button key={playlist.id} onClick={() => setSelectedPlaylist(playlist)} className="playlist-card">
-              <img src={getOptimizedCoverUrl(playlist.coverImgUrl, 320)} alt="" loading="lazy" decoding="async" />
+              <img
+                src={getPlaylistDisplayCover(playlist, coverStack[index] || coverStack[0], 320)}
+                alt=""
+                loading="lazy"
+                decoding="async"
+                onError={createCoverErrorHandler(
+                  coverStack[index]?.coverUrl || coverStack[0]?.coverUrl,
+                )}
+              />
               <div className="playlist-card-overlay" />
               <span className="playlist-card-play">
                 <Play className="h-4 w-4 fill-current" />
@@ -259,7 +342,7 @@ export const ListenNowView: React.FC = () => {
               <div className="playlist-card-copy">
                 <strong>{playlist.name}</strong>
                 <span>
-                  {playlist.trackCount > 0 ? `${playlist.trackCount} 首歌曲` : playlist.description || 'QQ音乐歌单'}
+                  {playlist.trackCount > 0 ? `${playlist.trackCount} 首歌曲` : playlist.description || `${getPlatformName(activePlatform)} 歌单`}
                 </span>
               </div>
             </button>

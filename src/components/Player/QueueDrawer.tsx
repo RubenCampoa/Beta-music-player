@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { usePlayerStore } from '../../store/playerStore';
 import { shallow } from 'zustand/shallow';
 import { neteaseApi } from '../../services/neteaseApi';
-import { getOptimizedCoverUrl } from '../../utils/format';
+import { getOptimizedCoverUrl, handleImageError } from '../../utils/format';
 
 export const QueueDrawer: React.FC = () => {
   const {
@@ -111,6 +111,7 @@ export const QueueDrawer: React.FC = () => {
                           alt={song.name}
                           loading="lazy"
                           decoding="async"
+                          onError={handleImageError}
                           className="w-full h-full object-cover"
                         />
                         {isCurrent && (

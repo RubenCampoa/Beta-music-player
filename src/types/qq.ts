@@ -6,14 +6,15 @@
 
 export interface QQPay {
   // web style (search / getLyric paths)
-  payplay?: number;
+  payplay?: number | string;
+  payPlay?: number | string;
   paytrackmouth?: number;
   payalbum?: number;
   paydownload?: number;
   payinfo?: number;
   paytrackprice?: number;
   // musicu style (song detail / playlist paths)
-  pay_play?: number;
+  pay_play?: number | string;
   pay_month?: number;
   pay_status?: number;
   price_track?: number;
@@ -22,12 +23,15 @@ export interface QQPay {
 export interface QQSongSinger {
   mid?: string;
   name?: string;
+  title?: string;
 }
 
 export interface QQSongAlbum {
+  id?: number | string;
   mid?: string;
   pmid?: string;
   name?: string;
+  title?: string;
   pic?: string;
   cover?: string;
   img?: string;
@@ -36,6 +40,7 @@ export interface QQSongAlbum {
 // A raw song item from search / rank / playlist / song-detail responses.
 export interface QQSongItem {
   // ids
+  id?: number | string;
   songmid?: string;
   mid?: string;
   songId?: number;
@@ -56,12 +61,15 @@ export interface QQSongItem {
   album_mid?: string;
   albumMid?: string;
   albumname?: string;
+  albumid?: number | string;
+  albumId?: number | string;
   // timing / media
   interval?: number;
   duration?: number;
   strMediaMid?: string;
   media_mid?: string;
   mediamid?: string;
+  file?: { media_mid?: string; mediaMid?: string };
   // covers (three conventions)
   cover?: string;
   pic?: string;
@@ -116,7 +124,13 @@ export interface QQPlayUrlResponse {
 
 // /getLyric
 export interface QQLyricResponse {
-  response?: { lyric?: string; trans?: string };
+  response?: {
+    lyric?: string;
+    trans?: string;
+    qrc?: number;
+    crypt?: number;
+    qrc_t?: number;
+  };
 }
 
 export interface QQPlaylistItem {

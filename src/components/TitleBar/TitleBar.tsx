@@ -4,6 +4,8 @@ import { usePlayerStore } from '../../store/playerStore';
 import { shallow } from 'zustand/shallow';
 import { neteaseApi } from '../../services/neteaseApi';
 import { qqMusicApi } from '../../services/qqMusicApi';
+import { kugouMusicApi } from '../../services/kugouMusicApi';
+import { getNextPlatform, getPlatformName, PLATFORM_META } from '../../utils/platform';
 
 export const TitleBar: React.FC = () => {
   const {
@@ -51,6 +53,8 @@ export const TitleBar: React.FC = () => {
   const handleLogout = () => {
     if (activePlatform === 'qq') {
       qqMusicApi.clearCookie();
+    } else if (activePlatform === 'kugou') {
+      kugouMusicApi.clearCookie();
     } else {
       neteaseApi.clearCookie();
     }
@@ -222,16 +226,18 @@ export const TitleBar: React.FC = () => {
         <div className="no-drag flex items-center space-x-2 shrink-0">
           {/* Quick Platform Switcher Pill */}
           <button
-            onClick={() => setActivePlatform(activePlatform === 'netease' ? 'qq' : 'netease')}
+            onClick={() => setActivePlatform(getNextPlatform(activePlatform))}
             className={`flex items-center space-x-1 px-2.5 py-1 rounded-full text-[11px] font-bold border transition-all cursor-pointer shadow-sm ${
               activePlatform === 'qq'
                 ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                : activePlatform === 'kugou'
+                  ? 'bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100'
+                  : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
             }`}
-            title="点击一键切换音乐源平台 (网易云音乐 / QQ 音乐)"
+            title="点击切换音乐源平台（网易云 / QQ / 酷狗）"
           >
-            <div className={`w-2 h-2 rounded-full ${activePlatform === 'qq' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-            <span>{activePlatform === 'qq' ? 'QQ 音乐' : '网易云'}</span>
+            <div className={`w-2 h-2 rounded-full ${PLATFORM_META[activePlatform].dotClass}`} />
+            <span>{getPlatformName(activePlatform, true)}</span>
           </button>
 
           {user && user.isLoggedIn ? (
@@ -265,7 +271,7 @@ export const TitleBar: React.FC = () => {
               className="flex items-center space-x-1.5 bg-[#202837] hover:bg-[#111827] text-white text-xs px-3 py-1.5 rounded-full font-medium transition-all shadow-sm cursor-pointer"
             >
               <User className="w-3.5 h-3.5" />
-              <span>登录{activePlatform === 'qq' ? 'QQ音乐' : '网易云'}</span>
+              <span>登录{getPlatformName(activePlatform, true)}</span>
             </button>
           )}
         </div>

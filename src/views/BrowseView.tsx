@@ -1,11 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Compass, Flame, Award, Disc, Play } from 'lucide-react';
 import { Song, Playlist } from '../types/music';
 import { usePlayerStore } from '../store/playerStore';
 import { shallow } from 'zustand/shallow';
-import { getOptimizedCoverUrl } from '../utils/format';
+import { getOptimizedCoverUrl, handleImageError } from '../utils/format';
 import { neteaseApi } from '../services/neteaseApi';
 import { musicApiAdapter } from '../services/musicApiAdapter';
+import { getPlatformName } from '../utils/platform';
 
 export const BrowseView: React.FC = () => {
   const { playSong, setSelectedPlaylist, activePlatform } = usePlayerStore(
@@ -20,6 +21,7 @@ export const BrowseView: React.FC = () => {
   const [hotSongs, setHotSongs] = useState<Song[]>([]);
   const [activeCategory, setActiveCategory] = useState<string>('all');
   const [isCategoryLoading, setIsCategoryLoading] = useState<boolean>(false);
+  const categoryRequestRef = useRef(0);
 
   const categories = [
     { id: 'all', name: '全部探索' },
@@ -55,23 +57,29 @@ export const BrowseView: React.FC = () => {
   }, [activePlatform]);
 
   const handleCategoryClick = async (catId: string, catName: string) => {
+    const requestId = ++categoryRequestRef.current;
     setActiveCategory(catId);
     if (catId === 'all') {
-      const songs = await musicApiAdapter.getRecommendSongs(activePlatform);
-      setHotSongs(songs);
+      setIsCategoryLoading(false);
+      try {
+        const songs = await musicApiAdapter.getRecommendSongs(activePlatform);
+        if (requestId === categoryRequestRef.current) setHotSongs(songs);
+      } catch {
+        // Keep the current list when the recommendation endpoint is offline.
+      }
       return;
     }
 
     setIsCategoryLoading(true);
     try {
       const categorySongs = await musicApiAdapter.search(activePlatform, catName);
-      if (categorySongs.length > 0) {
+      if (requestId === categoryRequestRef.current && categorySongs.length > 0) {
         setHotSongs(categorySongs.slice(0, 10));
       }
     } catch {
       // Keep current
     } finally {
-      setIsCategoryLoading(false);
+      if (requestId === categoryRequestRef.current) setIsCategoryLoading(false);
     }
   };
 
@@ -82,13 +90,13 @@ export const BrowseView: React.FC = () => {
         <div className="relative z-10 max-w-xl space-y-3">
           <div className="flex items-center space-x-2 text-rose-400 text-xs font-extrabold uppercase tracking-wider">
             <Compass className="w-4 h-4 animate-spin" style={{ animationDuration: '15s' }} />
-            <span>探索流行趋势与权威榜单 ({activePlatform === 'qq' ? 'QQ 音乐' : '网易云音乐'})</span>
+            <span>探索流行趋势与权威榜单（{getPlatformName(activePlatform)}）</span>
           </div>
           <h1 className="text-3xl font-black text-white tracking-tight drop-shadow-md">
             浏览 · 发现全新音乐风向
           </h1>
           <p className="text-sm text-white/80 font-medium leading-relaxed">
-            实时同步{activePlatform === 'qq' ? 'QQ 音乐巅峰榜、飙升榜' : '网易云热歌榜、新歌榜'}及多样化曲风分类，探索音乐无限可能。
+            实时同步{activePlatform === 'qq' ? 'QQ 音乐巅峰榜、飙升榜' : activePlatform === 'kugou' ? '酷狗概念版 TOP500 与热门歌单' : '网易云热歌榜、新歌榜'}及多样化曲风分类，探索音乐无限可能。
           </p>
         </div>
         <div className="absolute right-8 top-1/2 -translate-y-1/2 opacity-20 pointer-events-none">
@@ -121,7 +129,7 @@ export const BrowseView: React.FC = () => {
       <div className="space-y-4">
         <h2 className="text-xl font-bold text-white tracking-tight flex items-center space-x-2">
           <Award className="w-5 h-5 text-amber-400" />
-          <span>{activePlatform === 'qq' ? 'QQ 音乐热门榜单' : '网易云权威榜单'}</span>
+          <span>{getPlatformName(activePlatform)}热门榜单</span>
         </h2>
 
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -137,6 +145,7 @@ export const BrowseView: React.FC = () => {
                   alt={pl.name}
                   loading="lazy"
                   decoding="async"
+                  onError={handleImageError}
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                 />
                 <div className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
@@ -187,6 +196,7 @@ export const BrowseView: React.FC = () => {
                       alt={song.name}
                       loading="lazy"
                       decoding="async"
+                      onError={handleImageError}
                       className="w-full h-full object-cover"
                     />
                     <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">

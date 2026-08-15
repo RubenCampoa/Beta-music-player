@@ -18,7 +18,7 @@ const CSP_DEV = [
   "style-src 'self' 'unsafe-inline'", // framer-motion injects keyframes into <style>
   "img-src 'self' data: blob: https: http:",
   "media-src 'self' blob: https: http: app-audio:",
-  "connect-src 'self' ws://localhost:5173 http://127.0.0.1:3000 http://127.0.0.1:3200 https:",
+  "connect-src 'self' ws://localhost:5173 http://127.0.0.1:3000 http://127.0.0.1:3200 http://127.0.0.1:3400 http://mobilecdn.kugou.com http://m.kugou.com https:",
   "font-src 'self' data:",
   "object-src 'none'",
   "base-uri 'self'",
@@ -33,7 +33,7 @@ const CSP_PROD = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https: http:",
   "media-src 'self' blob: https: http: app-audio:",
-  "connect-src 'self' http://127.0.0.1:3000 http://127.0.0.1:3200 https:",
+  "connect-src 'self' http://127.0.0.1:3000 http://127.0.0.1:3200 http://127.0.0.1:3400 http://mobilecdn.kugou.com http://m.kugou.com https:",
   "font-src 'self' data:",
   "object-src 'none'",
   "base-uri 'self'",

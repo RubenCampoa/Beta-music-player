@@ -9,6 +9,9 @@ export const StorageKeys = {
   activePlatform: 'active_platform',
   neteaseCookie: 'netease_cookie',
   qqMusicCookie: 'qq_music_cookie',
+  kugouMusicCookie: 'kugou_music_cookie',
+  // Concept Edition and standard KuGou sessions are not interchangeable.
+  kugouMusicPlatform: 'kugou_music_platform',
   desktopLyricColorPreset: 'desktop_lyric_color_preset',
 } as const;
 

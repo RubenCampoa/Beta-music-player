@@ -1,6 +1,6 @@
 import { LyricLine } from '../types/music';
 
-export const DEFAULT_COVER_PLACEHOLDER = 'https://y.gtimg.cn/mediaplayer/player/img/cover_default.png';
+export const DEFAULT_COVER_PLACEHOLDER = './icon.png';
 
 /**
  * Common Formatting Utilities for Music Player
@@ -51,7 +51,9 @@ export function getOptimizedCoverUrl(url?: string, size: number = 200): string {
     return DEFAULT_COVER_PLACEHOLDER;
   }
 
-  let processed = url
+  let processed = url.trim()
+    .replace(/&amp;/g, '&')
+    .replace(/^\/\//, 'https://')
     .replace(/^http:/, 'https:')
     .replace('y.qq.com/music/photo_new/', 'y.gtimg.cn/music/photo_new/');
 
@@ -75,9 +77,10 @@ export function getOptimizedCoverUrl(url?: string, size: number = 200): string {
  * Image onError event handler fallback to prevent broken UI icons.
  */
 export function handleImageError(e: React.SyntheticEvent<HTMLImageElement, Event>) {
-  if (e.currentTarget.src !== DEFAULT_COVER_PLACEHOLDER) {
-    e.currentTarget.src = DEFAULT_COVER_PLACEHOLDER;
-  }
+  const image = e.currentTarget;
+  if (image.dataset.coverFallbackApplied === '1') return;
+  image.dataset.coverFallbackApplied = '1';
+  image.src = DEFAULT_COVER_PLACEHOLDER;
 }
 
 /**

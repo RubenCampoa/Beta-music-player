@@ -3,6 +3,7 @@ import { usePlayerStore } from '../../store/playerStore';
 import { shallow } from 'zustand/shallow';
 import { musicApiAdapter } from '../../services/musicApiAdapter';
 import { onAudioSeek } from '../../utils/events';
+import { getPlatformName } from '../../utils/platform';
 
 export const AudioController: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -280,7 +281,7 @@ export const AudioController: React.FC = () => {
                 state.updateCurrentSongAudioUrl(freshUrl);
               } else {
                 state.setIsPlaying(false);
-                const platformName = failedSong.source === 'qq' ? 'QQ 音乐' : '网易云音乐';
+                const platformName = getPlatformName(failedSong.source);
                 state.setToastMessage(`音源播放失败，请检查网络连接或重新登录 ${platformName} 账号后重试`);
               }
             })
@@ -288,7 +289,7 @@ export const AudioController: React.FC = () => {
               const state = usePlayerStore.getState();
               if (state.currentSong?.id !== failedSong.id) return;
               state.setIsPlaying(false);
-              const platformName = failedSong.source === 'qq' ? 'QQ 音乐' : '网易云音乐';
+              const platformName = getPlatformName(failedSong.source);
               state.setToastMessage(`音源播放失败，请检查网络连接或重新登录 ${platformName} 账号后重试`);
             });
           return;
@@ -296,7 +297,7 @@ export const AudioController: React.FC = () => {
 
         if (currentSong && isPlaying) {
           setIsPlaying(false);
-          const platformName = currentSong.source === 'qq' ? 'QQ 音乐' : '网易云音乐';
+          const platformName = getPlatformName(currentSong.source);
           usePlayerStore
             .getState()
             .setToastMessage(`音源播放失败，请检查网络连接或重新登录 ${platformName} 账号后重试`);

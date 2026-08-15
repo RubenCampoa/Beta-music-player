@@ -26,8 +26,15 @@ class NeteaseApiService {
   private audioUrlCache = new Map<string, { url: string; expiresAt: number }>();
 
   public setCookie(cookie: string) {
-    this.cookie = cookie;
-    setItem(StorageKeys.neteaseCookie, cookie);
+    const nextCookie = cookie.trim();
+    if (nextCookie !== this.cookie) {
+      // Signed playback URLs may have been resolved under a different
+      // account. Never reuse them after login, logout, or account switching.
+      this.audioUrlCache.clear();
+    }
+    this.cookie = nextCookie;
+    if (nextCookie) setItem(StorageKeys.neteaseCookie, nextCookie);
+    else removeItem(StorageKeys.neteaseCookie);
   }
 
   public getCookie(): string {

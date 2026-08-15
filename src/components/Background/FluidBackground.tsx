@@ -244,6 +244,7 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
     let normalizedY = new Float32Array(0);
     let rowWarpX = new Float32Array(0);
     let columnWarpY = new Float32Array(0);
+    let frameBuffer: ImageData | null = null;
 
     const resize = () => {
       // The canvas is intentionally much smaller than the window. It is
@@ -258,6 +259,7 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
       normalizedY = new Float32Array(canvas.height);
       rowWarpX = new Float32Array(canvas.height);
       columnWarpY = new Float32Array(canvas.width);
+      frameBuffer = context.createImageData(canvas.width, canvas.height);
       for (let x = 0; x < canvas.width; x += 1) normalizedX[x] = x / canvas.width;
       for (let y = 0; y < canvas.height; y += 1) normalizedY[y] = y / canvas.height;
       context.imageSmoothingEnabled = true;
@@ -272,8 +274,14 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
 
       const width = canvas.width;
       const height = canvas.height;
-      const imageData = context.createImageData(width, height);
-      const pixels = imageData.data;
+      if (!frameBuffer || frameBuffer.width !== width || frameBuffer.height !== height) {
+        frameBuffer = context.createImageData(width, height);
+      }
+      const pixels = frameBuffer.data;
+      // The reusable buffer retains the previous frame. Clear alpha/RGB once
+      // before writing the sparse liquid field instead of allocating a new
+      // ImageData object on every tick.
+      pixels.fill(0);
       const colors = colorsRef.current;
 
       // These are moving metaballs, not DOM circles. Their fields merge into
@@ -365,7 +373,7 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
         }
       }
 
-      context.putImageData(imageData, 0, 0);
+      context.putImageData(frameBuffer, 0, 0);
     };
 
     const render = (timestamp: number) => {
@@ -375,11 +383,10 @@ export const FluidBackground: React.FC<FluidBackgroundProps> = ({
         return;
       }
 
-      // 24fps is enough for this low-frequency liquid motion and leaves the
-      // high-priority lyric spring animation on the browser's main thread
-      // (dropped from 30fps — imperceptible on the organic field, ~20% less
-      // per-second pixel work).
-      if (timestamp - lastDrawTimestamp >= 42) {
+      // CSS metaballs continue at display refresh rate; the low-frequency
+      // procedural detail only needs 20fps. This keeps the background fluid
+      // while reserving the main-thread frame budget for rapid lyric changes.
+      if (timestamp - lastDrawTimestamp >= 50) {
         drawFrame(timestamp);
         lastDrawTimestamp = timestamp;
       }

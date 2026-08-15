@@ -14,6 +14,14 @@ lerna-debug.log*
 node_modules/
 jspm_packages/
 
+# Qt C++ build outputs & toolchain artifacts
+qt/cpp/build/
+qt/cpp/build-*/
+qt/cpp/*.log
+qt/cpp/vs-installer.pid
+qt/cpp/vs_BuildTools.exe
+qt/cpp/vc_redist*.exe
+
 # Production & Build outputs
 dist/
 dist-electron/
@@ -56,3 +64,10 @@ npm
 # Debug / temp scripts & tool state
 temp-*.js
 .workbuddy/
+_*.txt
+analyze_screenshot.py
+qt/dist/
+qt/cpp/app.ico
+qt/crash_log*
+
+

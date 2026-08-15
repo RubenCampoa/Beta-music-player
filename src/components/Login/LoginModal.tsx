@@ -3,7 +3,9 @@ import { X, QrCode, CheckCircle2, RefreshCw, AlertCircle, Globe, ShieldCheck, Mu
 import { usePlayerStore } from '../../store/playerStore';
 import { neteaseApi } from '../../services/neteaseApi';
 import { qqMusicApi } from '../../services/qqMusicApi';
+import { kugouMusicApi } from '../../services/kugouMusicApi';
 import { Platform } from '../../types/music';
+import { getPlatformName } from '../../utils/platform';
 import { AnimatePresence, motion } from 'framer-motion';
 
 export const LoginModal: React.FC = () => {
@@ -42,7 +44,7 @@ export const LoginModal: React.FC = () => {
         usePlayerStore.getState().setNeteaseLikeIds(likeIds);
         setToastMessage(`网易云账号已登录：${account.nickname}`);
       }
-    } else {
+    } else if (platform === 'qq') {
       const account = await qqMusicApi.getUserAccount();
       if (account) {
         setAccount('qq', account);
@@ -71,6 +73,13 @@ export const LoginModal: React.FC = () => {
         }
         setToastMessage(`QQ 音乐账号已登录：${account.nickname}`);
       }
+    } else {
+      const account = await kugouMusicApi.getUserAccount();
+      if (account) {
+        setAccount('kugou', account);
+        setActivePlatform('kugou');
+        setToastMessage(`酷狗概念版账号已登录：${account.nickname}`);
+      }
     }
   };
 
@@ -79,13 +88,27 @@ export const LoginModal: React.FC = () => {
       setToastMessage('当前环境不支持窗口登录，请使用 App 扫码登录');
       return;
     }
-    setQrStatus(`正在打开 ${platformTab === 'qq' ? 'QQ 音乐' : '网易云'} 网页官方登录窗口...`);
+    setQrStatus(`正在打开 ${getPlatformName(platformTab)}网页官方登录窗口...`);
     const cookie = await window.electronAPI.loginViaWindow(platformTab);
     if (cookie) {
       if (platformTab === 'netease') {
         neteaseApi.setCookie(cookie);
-      } else {
+      } else if (platformTab === 'qq') {
         qqMusicApi.setCookie(cookie);
+      } else {
+        kugouMusicApi.setCookie(cookie);
+        await kugouMusicApi.refreshLogin();
+      }
+      const account = await (platformTab === 'netease'
+        ? neteaseApi.getUserAccount()
+        : platformTab === 'qq'
+          ? qqMusicApi.getUserAccount()
+          : kugouMusicApi.getUserAccount());
+      if (!account) {
+        if (platformTab === 'kugou') kugouMusicApi.clearCookie();
+        setIsSuccess(false);
+        setQrStatus('网页登录态无法用于音乐 API，请改用扫码登录');
+        return;
       }
       setQrStatus('登录成功！');
       setIsSuccess(true);
@@ -111,24 +134,30 @@ export const LoginModal: React.FC = () => {
   };
 
   useEffect(() => {
-    if (!isLoginModalOpen) return;
+    // Do not initialize a QR code with the previous platform during the
+    // render where the modal tab is being synchronized.
+    if (!isLoginModalOpen || platformTab !== loginModalPlatform) return;
 
     let timer: any = null;
     let qrKey = '';
+    let cancelled = false;
 
     const initQr = async () => {
       try {
+        if (cancelled) return;
         setIsSuccess(false);
         setQrImg('');
 
         if (platformTab === 'netease') {
           setQrStatus('正在连接网易云 API...');
           qrKey = await neteaseApi.getQrKey();
+          if (cancelled) return;
           if (!qrKey) {
             setQrStatus('扫码超时，建议点下方【网页官方登录】');
             return;
           }
           const imgData = await neteaseApi.getQrImage(qrKey);
+          if (cancelled) return;
           if (imgData) {
             setQrImg(imgData);
             setQrStatus('请使用网易云音乐 App 扫码登录');
@@ -137,9 +166,11 @@ export const LoginModal: React.FC = () => {
             return;
           }
 
-          timer = setInterval(async () => {
+          const pollNetease = async () => {
             try {
+              if (cancelled) return;
               const res = await neteaseApi.checkQrStatus(qrKey);
+              if (cancelled) return;
               if (res.code === 800) {
                 setQrStatus('二维码已过期，请刷新');
                 clearInterval(timer);
@@ -150,9 +181,12 @@ export const LoginModal: React.FC = () => {
                 setIsSuccess(true);
                 clearInterval(timer);
 
-                setTimeout(async () => {
+                window.setTimeout(async () => {
+                  if (cancelled) return;
                   await fetchUserData('netease');
-                  setTimeout(() => {
+                  if (cancelled) return;
+                  window.setTimeout(() => {
+                    if (cancelled) return;
                     setIsLoginModalOpen(false);
                   }, 800);
                 }, 600);
@@ -160,25 +194,115 @@ export const LoginModal: React.FC = () => {
             } catch (e) {
               // Ignore
             }
-          }, 2000);
-        } else {
+            if (!cancelled) timer = window.setTimeout(pollNetease, 2000);
+          };
+          timer = window.setTimeout(pollNetease, 2000);
+        } else if (platformTab === 'qq') {
           // QQ Music Login
           setQrStatus('请使用 QQ 音乐 App 扫码或在下方绑定 Cookie');
           qrKey = await qqMusicApi.getQrKey();
+          if (cancelled) return;
           const imgData = await qqMusicApi.getQrImage(qrKey);
+          if (cancelled) return;
           setQrImg(imgData);
+          const pollQq = async () => {
+            try {
+              if (cancelled) return;
+              const res = await qqMusicApi.checkQrStatus(qrKey);
+              if (cancelled) return;
+              if (res.code === 800) {
+                setQrStatus('二维码已过期，请刷新');
+                return;
+              }
+              if (res.code === 803) {
+                setQrStatus('登录成功！');
+                setIsSuccess(true);
+                await fetchUserData('qq');
+                if (!cancelled) window.setTimeout(() => {
+                  if (!cancelled) setIsLoginModalOpen(false);
+                }, 800);
+                return;
+              }
+              if (res.code === 802) {
+                setQrStatus('已扫码，请在手机上确认登录');
+              } else {
+                setQrStatus('请使用 QQ 音乐 App 扫码或在下方绑定 Cookie');
+              }
+            } catch {
+              // Keep polling through transient local/API failures.
+            }
+            if (!cancelled) timer = window.setTimeout(pollQq, 2000);
+          };
+          timer = window.setTimeout(pollQq, 1500);
+        } else {
+          setQrStatus('正在连接酷狗概念版微信登录...');
+          const wechatQr = await kugouMusicApi.getWeChatQr();
+          if (cancelled) return;
+          qrKey = wechatQr.uuid;
+          if (!qrKey || !wechatQr.image) {
+            setQrStatus('酷狗概念版微信二维码生成失败，请刷新重试');
+            return;
+          }
+          setQrImg(wechatQr.image);
+          setQrStatus('请使用微信扫描二维码登录酷狗概念版');
+          const pollWeChat = async () => {
+            try {
+              if (cancelled) return;
+              const res = await kugouMusicApi.checkWeChatQr(qrKey);
+              if (cancelled) return;
+              if (res.code === 800) {
+                setQrStatus('二维码已过期，请刷新');
+                return;
+              } else if (res.code === 804) {
+                setQrStatus('微信已拒绝登录');
+                return;
+              } else if (res.code === 802) {
+                setQrStatus('已扫码，请在微信上确认登录');
+              } else if (res.code === 803) {
+                const loggedIn = await kugouMusicApi.loginWithWeChatCode(res.wxCode || '');
+                if (cancelled) return;
+                if (!loggedIn) {
+                  setQrStatus('微信登录凭证转换失败，请刷新二维码重试');
+                  return;
+                }
+                const account = await kugouMusicApi.getUserAccount();
+                if (cancelled) return;
+                if (!account) {
+                  kugouMusicApi.clearCookie();
+                  setQrStatus('酷狗概念版账号验证失败，请重新扫码');
+                  return;
+                }
+                setQrStatus('登录成功！');
+                setIsSuccess(true);
+                await fetchUserData('kugou');
+                if (!cancelled) window.setTimeout(() => {
+                  if (!cancelled) setIsLoginModalOpen(false);
+                }, 800);
+                return;
+              }
+            } catch {
+              // Keep polling through transient upstream failures and the
+              // provider's long-poll timeout.
+            }
+            if (!cancelled) timer = window.setTimeout(pollWeChat, 500);
+          };
+          timer = window.setTimeout(pollWeChat, 300);
         }
       } catch (err) {
-        setQrStatus('登录交互初始化异常，请重新尝试');
+        if (!cancelled) setQrStatus('登录交互初始化异常，请重新尝试');
       }
     };
 
     initQr();
 
     return () => {
-      if (timer) clearInterval(timer);
+      cancelled = true;
+      if (timer) {
+        clearInterval(timer);
+        clearTimeout(timer);
+      }
     };
-  }, [isLoginModalOpen, refreshKey, platformTab]);
+  }, [isLoginModalOpen, refreshKey, platformTab, loginModalPlatform]);
 
   return (
     <AnimatePresence initial={false}>
@@ -218,14 +342,14 @@ export const LoginModal: React.FC = () => {
                   setPlatformTab('netease');
                   setLoginModalPlatform('netease');
                 }}
-                className={`flex items-center space-x-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
                   platformTab === 'netease'
                     ? 'bg-gradient-to-r from-red-500 to-rose-600 text-white shadow-md'
                     : 'text-white/60 hover:text-white'
                 }`}
               >
                 <div className="w-2 h-2 rounded-full bg-rose-300" />
-                <span>网易云账号</span>
+                <span>网易云音乐</span>
               </button>
 
               <button
@@ -234,14 +358,30 @@ export const LoginModal: React.FC = () => {
                   setPlatformTab('qq');
                   setLoginModalPlatform('qq');
                 }}
-                className={`flex items-center space-x-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
                   platformTab === 'qq'
                     ? 'bg-gradient-to-r from-emerald-500 to-green-600 text-white shadow-md'
                     : 'text-white/60 hover:text-white'
                 }`}
               >
                 <div className="w-2 h-2 rounded-full bg-emerald-300" />
-                <span>QQ 音乐账号</span>
+                <span>QQ 音乐</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setPlatformTab('kugou');
+                  setLoginModalPlatform('kugou');
+                }}
+                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
+                  platformTab === 'kugou'
+                    ? 'bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-md'
+                    : 'text-white/60 hover:text-white'
+                }`}
+              >
+                <div className="w-2 h-2 rounded-full bg-sky-300" />
+                <span>酷狗概念版</span>
               </button>
             </div>
 
@@ -252,12 +392,14 @@ export const LoginModal: React.FC = () => {
                   className={`w-8 h-8 rounded-xl flex items-center justify-center shadow-lg ${
                     platformTab === 'qq'
                       ? 'bg-gradient-to-tr from-emerald-500 to-green-600 shadow-emerald-500/30'
-                      : 'bg-gradient-to-tr from-rose-500 to-red-600 shadow-rose-500/30'
+                      : platformTab === 'kugou'
+                        ? 'bg-gradient-to-tr from-sky-500 to-blue-600 shadow-sky-500/30'
+                        : 'bg-gradient-to-tr from-rose-500 to-red-600 shadow-rose-500/30'
                   }`}
                 >
                   <QrCode className="w-4 h-4 text-white" />
                 </div>
-                <span>{platformTab === 'qq' ? 'QQ 音乐账号登录' : '网易云账号登录'}</span>
+                <span>{getPlatformName(platformTab)}账号登录</span>
               </div>
               <p className="text-xs text-white/50 font-medium">扫码同步您的个人歌单与无损音乐资产</p>
             </div>
@@ -310,7 +452,7 @@ export const LoginModal: React.FC = () => {
             {/* Status Message */}
             <div className="text-xs text-white/90 font-medium px-4 py-1.5 bg-white/10 rounded-full border border-white/15 backdrop-blur-md flex items-center space-x-2 max-w-full shadow-sm">
               <AlertCircle
-                className={`w-4 h-4 shrink-0 ${platformTab === 'qq' ? 'text-emerald-400' : 'text-rose-400'}`}
+                className={`w-4 h-4 shrink-0 ${platformTab === 'qq' ? 'text-emerald-400' : platformTab === 'kugou' ? 'text-sky-400' : 'text-rose-400'}`}
               />
               <span className="truncate">{qrStatus}</span>
             </div>
@@ -337,7 +479,7 @@ export const LoginModal: React.FC = () => {
                 </button>
               )}
 
-              {window.electronAPI?.loginViaWindow && (
+              {platformTab !== 'kugou' && window.electronAPI?.loginViaWindow && (
                 <button
                   onClick={handleWindowLogin}
                   className={`flex items-center space-x-1.5 px-5 py-2 rounded-full text-white text-xs font-bold shadow-lg transition-all hover:scale-105 active:scale-95 cursor-pointer ${
@@ -357,7 +499,7 @@ export const LoginModal: React.FC = () => {
             <div className="flex items-center space-x-1 text-[11px] text-white/40 pt-1">
               <ShieldCheck className="w-3 h-3 text-emerald-400" />
               <span>
-                基于{platformTab === 'qq' ? 'QQ 音乐' : '网易云'}官方 API 通信 · 安全加密
+                基于{getPlatformName(platformTab)} API 通信 · 本地保存登录凭据
               </span>
             </div>
           </motion.div>
