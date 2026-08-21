@@ -108,9 +108,10 @@ int main(int argc, char *argv[])
 #endif
 
     QSurfaceFormat format = QSurfaceFormat::defaultFormat();
-    // Four samples keep rounded edges smooth while halving the multisample
-    // render-target cost compared with the previous global 8x setting.
-    format.setSamples(4);
+    // Qt Quick analytically antialiases the rectangles, text and rounded
+    // controls used by this UI. A multisampled full-window render target only
+    // multiplies bandwidth/VRAM here, especially at fullscreen resolutions.
+    format.setSamples(0);
     format.setAlphaBufferSize(8);
     QSurfaceFormat::setDefaultFormat(format);
 
@@ -254,7 +255,7 @@ int main(int argc, char *argv[])
 
     QString iconPath = QDir(appRoot).absoluteFilePath(QStringLiteral("app-icon.png"));
     if (!QFileInfo::exists(iconPath))
-        iconPath = QDir(appRoot).absoluteFilePath(QStringLiteral("../public/icon.png"));
+        iconPath = QString::fromUtf8(BETA_DEV_APP_ICON_PATH);
     const QIcon appIcon(iconPath);
     if (!appIcon.isNull()) {
         QApplication::setWindowIcon(appIcon);
@@ -312,10 +313,52 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (app.arguments().contains(QStringLiteral("--self-test"))) {
-        QTimer::singleShot(100, &app, [&app, &bridge] {
-            app.exit(bridge.sidecarReady() ? 0 : 3);
+    if (app.arguments().contains(QStringLiteral("--audio-self-test"))) {
+        // End-to-end audio smoke test: wait for providers, start a real free
+        // track and require the media clock to advance before succeeding.
+        auto *audioTimer = new QTimer(&app);
+        audioTimer->setInterval(100);
+        audioTimer->setProperty("attempts", 0);
+        audioTimer->setProperty("started", false);
+        QObject::connect(audioTimer, &QTimer::timeout, &app,
+                         [&app, &bridge, audioTimer] {
+            const int attempts = audioTimer->property("attempts").toInt() + 1;
+            audioTimer->setProperty("attempts", attempts);
+            if (!audioTimer->property("started").toBool()) {
+                if (bridge.sidecarReady()) {
+                    audioTimer->setProperty("started", true);
+                    audioTimer->setProperty("attempts", 0);
+                    bridge.play(0);
+                } else if (attempts >= 120) {
+                    app.exit(3);
+                }
+                return;
+            }
+            if (bridge.isPlaying() && bridge.positionMs() >= 500) {
+                app.exit(0);
+            } else if (attempts >= 100) {
+                app.exit(4);
+            }
         });
+        audioTimer->start();
+    } else if (app.arguments().contains(QStringLiteral("--self-test"))) {
+        // The production GUI no longer blocks its first frame on provider
+        // startup. Let the launch smoke test wait asynchronously for the same
+        // health condition so it still validates the complete runtime.
+        auto *healthTimer = new QTimer(&app);
+        healthTimer->setInterval(100);
+        healthTimer->setProperty("attempts", 0);
+        QObject::connect(healthTimer, &QTimer::timeout, &app,
+                         [&app, &bridge, healthTimer] {
+            const int attempts = healthTimer->property("attempts").toInt() + 1;
+            healthTimer->setProperty("attempts", attempts);
+            if (bridge.sidecarReady() || attempts >= 50) {
+                const int exitCode = bridge.sidecarReady() ? 0 : 3;
+                healthTimer->stop();
+                app.exit(exitCode);
+            }
+        });
+        healthTimer->start();
     }
 
     return app.exec();

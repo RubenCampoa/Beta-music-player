@@ -35,7 +35,7 @@ ScrollView {
                     Rectangle {
                         width: 13; height: 13; radius: 7; border.color: "#ff2d55"; border.width: 2; color: "transparent"
                         Rectangle { width: 3; height: 3; radius: 2; color: "#ff2d55"; anchors.centerIn: parent }
-                        RotationAnimation on rotation { from: 0; to: 360; duration: 5000; loops: Animation.Infinite }
+                        RotationAnimation on rotation { from: 0; to: 360; duration: 5000; loops: Animation.Infinite; running: root.visible }
                     }
                     Text { text: "v" + appVersion + " 正式版"; color: "#7d8796"; font.pixelSize: 11; font.weight: Font.DemiBold }
                 }

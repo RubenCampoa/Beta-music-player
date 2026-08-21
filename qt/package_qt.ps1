@@ -4,7 +4,6 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $qtDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$repoDir = Split-Path -Parent $qtDir
 $qtRoot = 'C:\Qt\6.5.3\msvc2019_64'
 $buildDir = Join-Path $qtDir 'cpp\build-nmake'
 $distDir = Join-Path $qtDir 'dist'
@@ -36,7 +35,7 @@ New-Item -ItemType Directory -Path $stageDir, (Join-Path $stageDir 'node'), $run
 Copy-Item -LiteralPath $exe -Destination (Join-Path $stageDir 'BetaMusicPlayer.exe')
 Copy-Item -LiteralPath (Join-Path $qtDir 'app') -Destination $stageDir -Recurse
 Copy-Item -LiteralPath (Join-Path $qtDir 'netease_server.js') -Destination $stageDir
-Copy-Item -LiteralPath (Join-Path $repoDir 'public\icon.png') -Destination (Join-Path $stageDir 'app-icon.png')
+Copy-Item -LiteralPath (Join-Path $qtDir 'app-icon.png') -Destination (Join-Path $stageDir 'app-icon.png')
 Copy-Item -LiteralPath (Join-Path $qtDir 'app.ico') -Destination (Join-Path $stageDir 'app.ico')
 if (Test-Path -LiteralPath (Join-Path $qtDir 'webview2\build\native\x64\WebView2Loader.dll')) {
     Copy-Item -LiteralPath (Join-Path $qtDir 'webview2\build\native\x64\WebView2Loader.dll') -Destination (Join-Path $stageDir 'WebView2Loader.dll')
@@ -45,31 +44,19 @@ if (Test-Path -LiteralPath (Join-Path $qtDir 'webview2\build\native\x64\WebView2
 $nodeExe = (Get-Command node.exe -ErrorAction Stop).Source
 Copy-Item -LiteralPath $nodeExe -Destination (Join-Path $stageDir 'node\node.exe')
 
-# Dedicated production-only sidecar manifest to avoid bundling React / Vite / Lucide frontend bloat
-$sidecarManifest = @{
-    name = "beta-music-player-sidecar"
-    version = "1.0.8"
-    private = $true
-    dependencies = @{
-        "@neteasecloudmusicapienhanced/api" = "4.38.0"
-        "@sansenjian/qq-music-api" = "^2.4.0"
-        "kugoumusicapi" = "git+https://github.com/MakcRe/KuGouMusicApi.git#7a60b706002526914644e50c90f1310c0dc32182"
-        "axios" = "^1.7.2"
-        "cors" = "^2.8.5"
-        "crypto-js" = "^4.2.0"
-        "express" = "^4.19.2"
-        "pako" = "^2.1.0"
-        "qrc-decoder" = "^1.0.2"
-        "xml2js" = "^0.6.2"
-    }
-} | ConvertTo-Json -Depth 5
-Set-Content -LiteralPath (Join-Path $runtimeWork 'package.json') -Value $sidecarManifest -Encoding UTF8
-
-Copy-Item -LiteralPath (Join-Path $repoDir 'scripts') -Destination $runtimeWork -Recurse
+Copy-Item -LiteralPath (Join-Path $qtDir 'package.json') -Destination $runtimeWork
+if (Test-Path -LiteralPath (Join-Path $qtDir 'package-lock.json')) {
+    Copy-Item -LiteralPath (Join-Path $qtDir 'package-lock.json') -Destination $runtimeWork
+}
+Copy-Item -LiteralPath (Join-Path $qtDir 'scripts') -Destination $runtimeWork -Recurse
 Push-Location $runtimeWork
 try {
     Write-Host "[sidecar] Installing lean backend dependencies..."
-    & npm.cmd install --omit=dev --no-audit --no-fund --ignore-scripts
+    if (Test-Path -LiteralPath (Join-Path $runtimeWork 'package-lock.json')) {
+        & npm.cmd ci --omit=dev --no-audit --no-fund --ignore-scripts
+    } else {
+        & npm.cmd install --omit=dev --no-audit --no-fund --ignore-scripts
+    }
     if ($LASTEXITCODE -ne 0) { throw 'Production sidecar dependency install failed.' }
     & node.exe (Join-Path $runtimeWork 'scripts\patch-ncm-lyric.js')
     & node.exe (Join-Path $runtimeWork 'scripts\patch-qmusic-lyric.js')
@@ -88,53 +75,9 @@ foreach ($required in @(
     (Join-Path $stageDir 'netease_server.js'),
     (Join-Path $stageDir 'node_modules\@neteasecloudmusicapienhanced\api'),
     (Join-Path $stageDir 'node_modules\@sansenjian\qq-music-api'),
-    (Join-Path $stageDir 'node_modules\kugoumusicapi'),
     (Join-Path $stageDir 'node_modules\qrc-decoder')
 )) {
     if (-not (Test-Path -LiteralPath $required)) { throw "Staged sidecar component is missing: $required" }
-}
-
-function Get-FreeLoopbackPort {
-    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
-    $listener.Start()
-    try { return ([Net.IPEndPoint]$listener.LocalEndpoint).Port }
-    finally { $listener.Stop() }
-}
-
-$sidecarPortSet = [Collections.Generic.HashSet[int]]::new()
-while ($sidecarPortSet.Count -lt 3) {
-    [void]$sidecarPortSet.Add((Get-FreeLoopbackPort))
-}
-$sidecarPorts = @($sidecarPortSet)
-$oldNeteasePort = $env:BETA_NETEASE_PORT
-$oldQqPort = $env:BETA_QQ_PORT
-$oldKugouPort = $env:BETA_KUGOU_PORT
-$env:BETA_NETEASE_PORT = [string]$sidecarPorts[0]
-$env:BETA_QQ_PORT = [string]$sidecarPorts[1]
-$env:BETA_KUGOU_PORT = [string]$sidecarPorts[2]
-$sidecarCheck = $null
-try {
-    $sidecarCheck = Start-Process -FilePath (Join-Path $stageDir 'node\node.exe') `
-        -ArgumentList (Join-Path $stageDir 'netease_server.js') -WorkingDirectory $stageDir `
-        -WindowStyle Hidden -PassThru
-    $healthy = $false
-    for ($attempt = 0; $attempt -lt 60 -and -not $healthy; $attempt++) {
-        Start-Sleep -Milliseconds 150
-        $healthy = $true
-        foreach ($port in $sidecarPorts) {
-            $client = [Net.Sockets.TcpClient]::new()
-            try { $client.Connect('127.0.0.1', $port) }
-            catch { $healthy = $false }
-            finally { $client.Dispose() }
-        }
-        if ($sidecarCheck.HasExited) { break }
-    }
-    if (-not $healthy) { throw 'Staged three-platform sidecar failed its loopback health check.' }
-} finally {
-    if ($sidecarCheck -and -not $sidecarCheck.HasExited) { Stop-Process -Id $sidecarCheck.Id -Force }
-    $env:BETA_NETEASE_PORT = $oldNeteasePort
-    $env:BETA_QQ_PORT = $oldQqPort
-    $env:BETA_KUGOU_PORT = $oldKugouPort
 }
 
 Write-Host "[windeployqt] Deploying Qt runtime without unused WebEngine/OpenGL fallback..."
@@ -201,7 +144,6 @@ $notice = @(
     'Node.js (MIT)',
     '@neteasecloudmusicapienhanced/api',
     '@sansenjian/qq-music-api',
-    'kugoumusicapi',
     '',
     'Detailed package licenses are included in node_modules.'
 )
@@ -213,12 +155,31 @@ if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force 
 Compress-Archive -Path (Join-Path $stageDir '*') -DestinationPath $zipPath -CompressionLevel Optimal
 
 Write-Host "[package] Compiling NSIS installer with LZMA solid compression..."
-$makensis = Get-ChildItem "$env:LOCALAPPDATA\electron-builder\Cache\nsis" -Recurse -Filter makensis.exe -ErrorAction SilentlyContinue |
-    Where-Object { $_.DirectoryName -notmatch '\\Bin$' } | Select-Object -First 1
-if (-not $makensis) { $makensis = Get-Command makensis.exe -ErrorAction SilentlyContinue }
-if (-not $makensis) { throw 'NSIS makensis.exe was not found.' }
+$makensis = Get-Command makensis.exe -ErrorAction SilentlyContinue
+if (-not $makensis) {
+    foreach ($candidate in @(
+        "$env:ProgramFiles\NSIS\makensis.exe",
+        "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+    )) {
+        if (Test-Path -LiteralPath $candidate) {
+            $makensis = Get-Item -LiteralPath $candidate
+            break
+        }
+    }
+}
+if (-not $makensis) { throw 'NSIS makensis.exe was not found. Install NSIS 3 and add it to PATH.' }
+$makensisPath = if ($makensis -is [IO.FileInfo]) {
+    $makensis.FullName
+} elseif ($makensis.Source) {
+    $makensis.Source
+} else {
+    $makensis.Path
+}
+if (-not $makensisPath -or -not (Test-Path -LiteralPath $makensisPath)) {
+    throw 'NSIS makensis.exe path could not be resolved.'
+}
 $setupPath = Join-Path $distDir "Beta Music Player Setup $version.exe"
-& $makensis.FullName "/DVERSION=$version" "/DSOURCE_DIR=$stageDir" "/DOUTPUT_FILE=$setupPath" (Join-Path $qtDir 'installer.nsi')
+& $makensisPath "/DVERSION=$version" "/DSOURCE_DIR=$stageDir" "/DOUTPUT_FILE=$setupPath" (Join-Path $qtDir 'installer.nsi')
 if ($LASTEXITCODE -ne 0) { throw 'NSIS installer build failed.' }
 
 Remove-Item -LiteralPath $runtimeWork -Recurse -Force

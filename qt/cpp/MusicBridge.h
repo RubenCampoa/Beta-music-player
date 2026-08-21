@@ -25,6 +25,27 @@
 class QWindow;
 class QNetworkReply;
 
+class SidecarNetworkAccessManager final : public QNetworkAccessManager
+{
+public:
+    explicit SidecarNetworkAccessManager(QObject *parent = nullptr)
+        : QNetworkAccessManager(parent) {}
+
+    void setSidecarIdentity(quint16 neteasePort, quint16 qqPort, const QByteArray &token);
+    void setSidecarCookies(const QByteArray &neteaseCookie, const QByteArray &qqCookie);
+
+protected:
+    QNetworkReply *createRequest(Operation operation, const QNetworkRequest &request,
+                                 QIODevice *outgoingData = nullptr) override;
+
+private:
+    quint16 m_neteasePort = 0;
+    quint16 m_qqPort = 0;
+    QByteArray m_token;
+    QByteArray m_neteaseCookie;
+    QByteArray m_qqCookie;
+};
+
 // Native C++ replacement for the former PySide `bridge` context object.
 // Property names deliberately remain identical, so the QML UI does not need a
 // second rewrite while services migrate from Python to Qt/C++.
@@ -84,9 +105,9 @@ public:
     static QJsonArray parseLrc(const QString &text);
     static QJsonArray parseYrc(const QString &text);
     static QJsonArray parseQrc(const QString &text);
-    static QJsonArray parseKrc(const QString &text);
     static QString filterQqLyricLines(const QString &text);
     static int compareVersions(const QString &left, const QString &right);
+    Q_INVOKABLE int lyric_index_at(int adjustedMilliseconds) const;
 
     QString songs() const;
     QVariantMap currentSong() const;
@@ -231,23 +252,20 @@ private:
     void requestSearch(const QString &query);
     void requestQqSearch(const QString &query);
     void requestQqHome();
+    void requestFastHomeSongs();
     void requestQqPublicSearch(const QString &query);
     void handleQqSongs(const QByteArray &payload);
-    void requestKugouSearch(const QString &query);
-    void requestKugouHome();
-    void handleKugouSongs(const QByteArray &payload);
     void requestLyrics(const QJsonObject &song);
-    void requestKugouLyrics(const QJsonObject &song);
-    void requestKugouLyricSearch(const QJsonObject &song, const QString &hash, int attempt);
-    void requestKugouLyricContent(const QString &id, const QString &accessKey, int fmtIndex);
     void requestPlayUrl(const QJsonObject &song, bool autoplay);
+    void startResolvedPlayback(const QJsonObject &song, const QString &mediaUrl,
+                               bool autoplay, quint64 serial);
+    void skipUnavailableTrack(const QString &reason);
+    void prefetchNextPlayUrl();
+    QString playCacheKey(const QJsonObject &song) const;
+    void invalidatePlayUrlCache();
     void requestQqPlayUrl(const QJsonObject &song, bool autoplay, quint64 serial, int qualityIndex = 0);
-    void requestKugouPlayUrl(const QJsonObject &song, bool autoplay, quint64 serial);
-      void requestKugouPlayUrlLevel(const QJsonObject &song, bool autoplay, quint64 serial,
-                                    const QStringList &qualities, int qualityIndex);
-      void requestKugouLegacyPlayUrl(const QJsonObject &song, bool autoplay, quint64 serial);
-    void requestKugouCover(const QJsonObject &song);
     void requestQqCreatedPlaylists(const QString &uin);
+    void requestQqLikedPlaylist(const QString &uin, const QJsonArray &createdPlaylists);
     void requestQqCollectedPlaylists(const QString &uin, const QJsonArray &createdPlaylists);
     void requestPlayLevel(const QJsonObject &song, const QStringList &levels,
                           int levelIndex, bool autoplay, quint64 serial);
@@ -256,19 +274,14 @@ private:
     void pollLoginQr();
     void completeNeteaseLogin(const QString &cookie);
     void requestNeteaseAccount();
+    void requestNeteaseVipInfo(const QString &userId);
     void requestQqLoginQr();
     void requestQqAccount();
+    void requestQqVipInfo();
     void requestQqUserPlaylists(const QString &uin);
-    void requestKugouLoginQr();
-    void pollKugouLoginQr();
-    void completeKugouLogin(const QString &wxCode);
-    void requestKugouAccount();
-    void requestKugouUserPlaylists(const QString &userId, const QString &token);
-    void requestKugouDeviceRegistration(std::function<void()> onReady);
     void requestUserPlaylists(const QString &userId);
     void requestPlaylistDetail(const QJsonObject &playlist);
     void requestQqPlaylistDetail(const QJsonObject &playlist);
-    void requestKugouPlaylistDetail(const QJsonObject &playlist);
     QString playlistCacheKey(const QJsonObject &playlist) const;
     qint64 restorePlaylistCache(const QJsonObject &playlist);
     void storePlaylistCache(const QJsonObject &playlist, const QJsonObject &detail,
@@ -285,14 +298,19 @@ private:
     void handleSongs(const QByteArray &payload, bool home);
     void handleNeteaseHomeSongs(const QByteArray &payload);
     void setHomePlaylists(QJsonArray playlists);
+    void cacheCurrentHomeSongs();
+    void prepareAudioOutput();
     void setSongs(QJsonArray songs);
     bool songIsFavorite(const QJsonObject &song) const;
     void applyFavoriteStates(QJsonArray &songs) const;
-    void setCurrentIndex(int index, bool autoplay = true);
+    void mergeSongsIntoFavorites(const QJsonArray &songs);
+    void setCurrentIndex(int index, bool autoplay = true, bool resetFailureCount = true);
     void loadLegacyStorage();
     void saveLegacyStorage();
     void flushLegacyStorage();
     void ensureLocalApi();
+    void probeLocalApi(int attemptsRemaining);
+    void refreshSidecarCookies();
     QUrl localApiUrl(const QString &path, const QUrlQuery &query = {}) const;
     void saveSettings();
     void setBusy(bool busy);
@@ -307,7 +325,7 @@ private:
 
     QPointer<QWindow> m_window;
     QPointer<QWindow> m_desktopLyricWindow;
-    QNetworkAccessManager m_network;
+    SidecarNetworkAccessManager m_network;
     QMediaPlayer m_player;
     QMediaPlayer m_metaReader;
     QAudioOutput m_audio;
@@ -322,6 +340,8 @@ private:
     QJsonObject m_playlistDetail;
     QJsonObject m_accounts;
     QJsonObject m_userPlaylistsByPlatform;
+    QJsonObject m_homeSongsByPlatform;
+    QJsonObject m_homePlaylistsByPlatform;
     QJsonArray m_userPlaylists;
     QJsonArray m_homePlaylists;
     QJsonArray m_localSongs;
@@ -335,13 +355,14 @@ private:
     QSet<QString> m_pendingCoverDownloads;
     QSet<QString> m_pendingAvatarDownloads;
     QHash<QString, QJsonObject> m_playlistCache;
+    QHash<QString, QString> m_playUrlCache;
+    QHash<QString, qint64> m_playUrlCachedAt;
+    QSet<QString> m_pendingPlayPrefetch;
+    quint64 m_playCacheGeneration = 0;
     QString m_storagePath;
     QString m_cookie;
     QString m_qqCookie;
-    QString m_kugouCookie;
-    QString m_kugouDfid;
     QString m_loginQrKey;
-    QString m_kugouLoginUuid;
     QString m_platform = QStringLiteral("netease");
     QString m_viewMode = QStringLiteral("discover");
     QString m_repeatMode = QStringLiteral("off");
@@ -358,11 +379,13 @@ private:
     int m_volume = 80;
     int m_volumeBeforeMute = 80;
     quint64 m_playRequestSerial = 0;
+    quint64 m_lyricRequestSerial = 0;
     quint64 m_playlistRequestSerial = 0;
+    quint64 m_contentRequestSerial = 0;
     QString m_activePlaylistKey;
     quint16 m_neteasePort = 0;
     quint16 m_qqPort = 0;
-    quint16 m_kugouPort = 0;
+    QByteArray m_sidecarToken;
     QRect m_beforeFullscreenGeometry;
     bool m_beforeFullscreenMaximized = false;
     bool m_fullLyrics = false;
@@ -375,6 +398,8 @@ private:
     bool m_muted = false;
     bool m_sidecarReady = false;
     bool m_playRecoveryAttempted = false;
+    bool m_handlingPlaybackFailure = false;
+    int m_consecutivePlaybackFailures = 0;
     QString m_lastError;
     QTimer m_loginTimer;
     QTimer m_storageSaveTimer;

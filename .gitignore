@@ -24,7 +24,6 @@ qt/cpp/vc_redist*.exe
 
 # Production & Build outputs
 dist/
-dist-electron/
 release/
 
 # Editor & Local settings
@@ -69,5 +68,4 @@ analyze_screenshot.py
 qt/dist/
 qt/cpp/app.ico
 qt/crash_log*
-
 

@@ -26,10 +26,15 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QMediaMetaData>
+#include <QMediaDevices>
+#include <QAudioDevice>
 #include <QStandardPaths>
 #include <QTcpSocket>
 #include <QTcpServer>
 #include <QThread>
+#include <QThreadPool>
+#include <QElapsedTimer>
+#include <QUuid>
 #include <QUrlQuery>
 #include <QWindow>
 #include <QRegularExpression>
@@ -40,11 +45,124 @@
 #include <cmath>
 #include <utility>
 
+void SidecarNetworkAccessManager::setSidecarIdentity(quint16 neteasePort, quint16 qqPort,
+                                                     const QByteArray &token)
+{
+    m_neteasePort = neteasePort;
+    m_qqPort = qqPort;
+    m_token = token;
+}
+
+void SidecarNetworkAccessManager::setSidecarCookies(const QByteArray &neteaseCookie,
+                                                    const QByteArray &qqCookie)
+{
+    m_neteaseCookie = neteaseCookie;
+    m_qqCookie = qqCookie;
+}
+
+QNetworkReply *SidecarNetworkAccessManager::createRequest(
+    Operation operation, const QNetworkRequest &sourceRequest, QIODevice *outgoingData)
+{
+    QNetworkRequest request(sourceRequest);
+    const QUrl url = request.url();
+    const bool isLoopback = url.host() == QStringLiteral("127.0.0.1")
+        || url.host().compare(QStringLiteral("localhost"), Qt::CaseInsensitive) == 0;
+    if (isLoopback && !m_token.isEmpty()
+        && (url.port() == m_neteasePort || url.port() == m_qqPort)) {
+        request.setRawHeader("X-Beta-Sidecar-Token", m_token);
+        const QByteArray cookie = url.port() == m_neteasePort ? m_neteaseCookie : m_qqCookie;
+        if (!cookie.isEmpty()) request.setRawHeader("Cookie", cookie);
+        // The provider can forward upstream Set-Cookie headers. If Qt stores
+        // those against 127.0.0.1, a later anonymous cookie may replace the
+        // explicitly selected account and turn VIP URLs into 30-second trials.
+        // Sidecar authentication is managed by MusicBridge, so keep Qt's
+        // automatic cookie jar out of both request and response handling.
+        request.setAttribute(QNetworkRequest::CookieLoadControlAttribute,
+                             QNetworkRequest::Manual);
+        request.setAttribute(QNetworkRequest::CookieSaveControlAttribute,
+                             QNetworkRequest::Manual);
+    }
+    return QNetworkAccessManager::createRequest(operation, request, outgoingData);
+}
+
 namespace {
 #ifndef BETA_APP_VERSION
-#define BETA_APP_VERSION "1.0.8-Beta"
+#define BETA_APP_VERSION "1.0.9"
 #endif
 constexpr auto kNeteaseBase = "https://music.163.com";
+constexpr qint64 kMaximumImageBytes = 16LL * 1024 * 1024;
+
+void limitImageDownload(QNetworkReply *reply)
+{
+    QObject::connect(reply, &QNetworkReply::downloadProgress, reply,
+                     [reply](qint64 received, qint64 total) {
+        if (received > kMaximumImageBytes || total > kMaximumImageBytes)
+            reply->abort();
+    });
+}
+
+void pruneCacheDirectory(const QString &path, qint64 maximumBytes, int maximumAgeDays)
+{
+    QDir root(path);
+    if (!root.exists()) return;
+
+    const QDateTime cutoff = QDateTime::currentDateTimeUtc().addDays(-maximumAgeDays);
+    QList<QFileInfo> retained;
+    qint64 totalBytes = 0;
+    QDirIterator iterator(path, QDir::Files | QDir::NoDotAndDotDot | QDir::NoSymLinks,
+                          QDirIterator::Subdirectories);
+    while (iterator.hasNext()) {
+        const QFileInfo info(iterator.next());
+        if (info.lastModified().toUTC() < cutoff) {
+            QFile::remove(info.absoluteFilePath());
+            continue;
+        }
+        retained.push_back(info);
+        totalBytes += info.size();
+    }
+    if (totalBytes <= maximumBytes) return;
+
+    std::sort(retained.begin(), retained.end(), [](const QFileInfo &left, const QFileInfo &right) {
+        return left.lastModified() < right.lastModified();
+    });
+    for (const QFileInfo &info : std::as_const(retained)) {
+        if (totalBytes <= maximumBytes) break;
+        if (QFile::remove(info.absoluteFilePath())) totalBytes -= info.size();
+    }
+}
+
+bool probeSidecar(quint16 port, const QByteArray &service, const QByteArray &token,
+                  int timeoutMilliseconds)
+{
+    if (!port || token.isEmpty()) return false;
+    QTcpSocket probe;
+    probe.connectToHost(QHostAddress::LocalHost, port);
+    if (!probe.waitForConnected(timeoutMilliseconds)) return false;
+
+    QByteArray request = "GET /__beta_health HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+                         "Connection: close\r\nX-Beta-Sidecar-Token: ";
+    request += token;
+    request += "\r\n\r\n";
+    if (probe.write(request) != request.size()
+        || !probe.waitForBytesWritten(timeoutMilliseconds))
+        return false;
+
+    QByteArray response;
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < timeoutMilliseconds) {
+        const int remaining = timeoutMilliseconds - int(timer.elapsed());
+        if (!probe.waitForReadyRead(std::max(1, remaining))) break;
+        response += probe.readAll();
+        if (response.contains("\r\n\r\n") && response.contains("\"ok\":true")) break;
+    }
+    response += probe.readAll();
+    const QByteArray expectedHeader = QByteArray("X-Beta-Sidecar: ") + service;
+    const QByteArray expectedBody = QByteArray("\"service\":\"") + service + '"';
+    return response.startsWith("HTTP/1.1 200")
+        && response.contains(expectedHeader)
+        && response.contains(expectedBody);
+}
 
 void appendTrace(const QByteArray &message)
 {
@@ -95,6 +213,61 @@ bool jsonPositive(const QJsonValue &value)
     return jsonInteger(value) > 0;
 }
 
+qint64 jsonInt64(const QJsonValue &value)
+{
+    if (value.isDouble()) return qint64(value.toDouble());
+    if (value.isString()) {
+        bool ok = false;
+        const qint64 result = value.toString().toLongLong(&ok);
+        if (ok) return result;
+    }
+    return 0;
+}
+
+bool isShortTrialResponse(const QJsonObject &media, const QJsonObject &song)
+{
+    const QJsonValue trialInfo = media.value(QStringLiteral("freeTrialInfo"));
+    if (!trialInfo.isUndefined() && !trialInfo.isNull()) {
+        // Some third-party providers serialize null as the literal string
+        // "null". Do not mistake that compatibility value for a real trial.
+        if (!trialInfo.isString()
+            || trialInfo.toString().trimmed().compare(QStringLiteral("null"),
+                                                       Qt::CaseInsensitive) != 0)
+            return true;
+    }
+
+    const qint64 returnedMs = jsonInt64(media.value(QStringLiteral("time")));
+    const qint64 expectedMs = jsonInt64(song.value(QStringLiteral("duration"))) * 1000;
+    return expectedMs >= 120000 && returnedMs >= 10000 && returnedMs <= 60000
+        && returnedMs + 30000 < expectedMs;
+}
+
+QString expiryDateText(qint64 milliseconds)
+{
+    if (milliseconds <= 0) return {};
+    return QDateTime::fromMSecsSinceEpoch(milliseconds).date().toString(QStringLiteral("yyyy-MM-dd"));
+}
+
+QDate latestQqExpiry(const QJsonObject &identity, const QJsonObject &data)
+{
+    QDate latest;
+    const QStringList keys = {
+        QStringLiteral("HugeVipEnd"), QStringLiteral("GroupVipEnd"),
+        QStringLiteral("eightEnd"), QStringLiteral("twelveEnd"),
+        QStringLiteral("LMEnd"), QStringLiteral("CPLoverEnd")
+    };
+    for (const QString &key : keys) {
+        const QDate date = QDate::fromString(identity.value(key).toString(), Qt::ISODate);
+        if (date.isValid() && (!latest.isValid() || date > latest)) latest = date;
+    }
+    for (const QString &key : {QStringLiteral("send"), QStringLiteral("starend"),
+                               QStringLiteral("ystarend")}) {
+        const QDate date = QDate::fromString(data.value(key).toString(), Qt::ISODate);
+        if (date.isValid() && (!latest.isValid() || date > latest)) latest = date;
+    }
+    return latest;
+}
+
 #ifdef Q_OS_WIN
 QByteArray dpapiProtect(const QByteArray &plain)
 {
@@ -141,8 +314,6 @@ QByteArray coverReferer(const QString &url)
         || url.contains(QStringLiteral("q.qlogo.cn"))
         || url.contains(QStringLiteral("y.qq.com")))
         return QByteArray("https://y.qq.com/");
-    if (url.contains(QStringLiteral("kugou.com")))
-        return QByteArray("https://www.kugou.com/");
     return QByteArray("https://music.163.com/");
 }
 
@@ -314,6 +485,7 @@ MusicBridge::MusicBridge(QObject *parent)
     connect(&m_storageSaveTimer, &QTimer::timeout, this, &MusicBridge::flushLegacyStorage);
     m_player.setAudioOutput(&m_audio);
     m_audio.setVolume(0.80);
+    prepareAudioOutput();
     m_settings = {{"audioQuality", "high"}, {"lyricAnimation", true},
                   {"lyricGlow", true}, {"lyricBlur", true},
                   {"lyricZoom", true}, {"lyricFade", true},
@@ -327,7 +499,20 @@ MusicBridge::MusicBridge(QObject *parent)
     m_fluidColors = {QStringLiteral("#4473b8"), QStringLiteral("#c0608f"),
                      QStringLiteral("#d98c46"), QStringLiteral("#44a392")};
     loadLegacyStorage();
+    refreshSidecarCookies();
     appendTrace("bridge:storage-loaded");
+    QTimer::singleShot(2500, [] {
+        const QString cacheRoot = QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation))
+                                      .filePath(QStringLiteral("BetaMusicPlayerQt"));
+        QThreadPool::globalInstance()->start([cacheRoot] {
+            pruneCacheDirectory(QDir(cacheRoot).filePath(QStringLiteral("covers")),
+                                256LL * 1024 * 1024, 60);
+            pruneCacheDirectory(QDir(cacheRoot).filePath(QStringLiteral("avatars")),
+                                32LL * 1024 * 1024, 60);
+            pruneCacheDirectory(QDir(cacheRoot).filePath(QStringLiteral("playlists")),
+                                64LL * 1024 * 1024, 30);
+        });
+    });
     restoreLocalLibrary();
     appendTrace("bridge:library-restored");
     ensureLocalApi();
@@ -351,24 +536,55 @@ MusicBridge::MusicBridge(QObject *parent)
     connect(&m_player, &QMediaPlayer::positionChanged, this, &MusicBridge::refreshPosition);
     connect(&m_player, &QMediaPlayer::durationChanged, this, [this](qint64 value) {
         emit durationChanged(int(value));
+        const QString source = m_current.value(QStringLiteral("source")).toString();
+        const QJsonObject account = m_accounts.value(source).toObject();
+        const qint64 expectedMs = jsonInt64(m_current.value(QStringLiteral("duration"))) * 1000;
+        const bool looksLikeTrial = account.value(QStringLiteral("vipActive")).toBool()
+            && expectedMs >= 120000 && value >= 10000 && value <= 60000
+            && value + 30000 < expectedMs;
+        if (!looksLikeTrial || m_playRecoveryAttempted || source == QStringLiteral("local"))
+            return;
+
+        // A provider can return an apparently valid CDN URL whose media is only
+        // the 30-second preview. Invalidate the prefetched URL and resolve once
+        // more with the current VIP cookie instead of silently playing the clip.
+        m_playRecoveryAttempted = true;
+        const QString expectedKey = playCacheKey(m_current);
+        invalidatePlayUrlCache();
+        m_player.stop();
+        show_toast(QStringLiteral("检测到试听音源，正在使用会员凭据刷新完整歌曲"));
+        QTimer::singleShot(0, this, [this, expectedKey] {
+            if (playCacheKey(m_current) == expectedKey)
+                requestPlayUrl(m_current, true);
+        });
     });
     connect(&m_player, &QMediaPlayer::playbackStateChanged, this, [this] {
         emit playingChanged(isPlaying());
+        if (isPlaying()) {
+            m_consecutivePlaybackFailures = 0;
+            m_handlingPlaybackFailure = false;
+        }
         if (isPlaying() && m_settings.value(QStringLiteral("autoDesktopLyric")).toBool(false)
             && !m_desktopLyricActive)
             toggle_desktop_lyric();
     });
     connect(&m_player, &QMediaPlayer::errorOccurred, this, [this](QMediaPlayer::Error, const QString &message) {
+        appendTrace(QByteArray("player:error=") + message.toUtf8());
         if (!m_current.isEmpty() && m_current.value(QStringLiteral("source")).toString() != QStringLiteral("local")
             && !m_playRecoveryAttempted) {
             m_playRecoveryAttempted = true;
+            const QString key = playCacheKey(m_current);
+            m_playUrlCache.remove(key);
+            m_playUrlCachedAt.remove(key);
             show_toast(QStringLiteral("播放连接已失效，正在刷新音源"));
             requestPlayUrl(m_current, true);
             return;
         }
-        if (!message.isEmpty()) show_toast(message);
+        skipUnavailableTrack(message.isEmpty()
+            ? QStringLiteral("当前歌曲无法播放") : message);
     });
     connect(&m_player, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus status) {
+        appendTrace(QByteArray("player:status=") + QByteArray::number(int(status)));
         if (status != QMediaPlayer::EndOfMedia) return;
         // 与原版 AudioController 一致：单曲循环只重播当前曲，其余模式切下一首。
         if (m_repeatMode == QStringLiteral("one") && m_currentIndex >= 0) {
@@ -394,7 +610,12 @@ MusicBridge::MusicBridge(QObject *parent)
     m_queue = m_songs;
     m_songsModel.setItems(m_songs);
     m_queueModel.setItems(m_queue);
-    QTimer::singleShot(0, this, &MusicBridge::load_home_recommendations);
+    // Normal launches finish sidecar health checks asynchronously and trigger
+    // this load from probeLocalApi(). Synchronous self-tests already have a
+    // ready sidecar, but do not enter an event loop long enough to need home.
+    if (m_sidecarReady
+        && !QCoreApplication::arguments().contains(QStringLiteral("--sidecar-self-test")))
+        QTimer::singleShot(0, this, &MusicBridge::load_home_recommendations);
     if (m_settings.value(QStringLiteral("autoCheckUpdate")).toBool(true))
         QTimer::singleShot(1800, this, [this] { checkForUpdates(true); });
     appendTrace("bridge:end");
@@ -415,6 +636,17 @@ MusicBridge::~MusicBridge()
 
 void MusicBridge::setWindow(QWindow *window) { m_window = window; }
 void MusicBridge::setDesktopLyricWindow(QWindow *window) { m_desktopLyricWindow = window; }
+void MusicBridge::prepareAudioOutput()
+{
+    const QAudioDevice device = QMediaDevices::defaultAudioOutput();
+    if (!device.isNull() && m_audio.device() != device)
+        m_audio.setDevice(device);
+    m_audio.setVolume(std::clamp(m_volume, 0, 100) / 100.0);
+    m_audio.setMuted(m_muted);
+    appendTrace(QByteArray("audio:device=") + device.description().toUtf8()
+                + " volume=" + QByteArray::number(m_volume)
+                + " muted=" + (m_muted ? "1" : "0"));
+}
 QString MusicBridge::compactJson(const QJsonValue &value)
 {
     if (value.isArray())
@@ -466,8 +698,7 @@ void MusicBridge::loadLegacyStorage()
     if (!document.isObject()) return;
     m_storageRoot = document.object();
     const QString storedPlatform = m_storageRoot.value(QStringLiteral("activePlatform")).toString();
-    if (storedPlatform == QStringLiteral("netease") || storedPlatform == QStringLiteral("qq")
-        || storedPlatform == QStringLiteral("kugou"))
+    if (storedPlatform == QStringLiteral("netease") || storedPlatform == QStringLiteral("qq"))
         m_platform = storedPlatform;
     const QJsonObject auth = m_storageRoot.value("auth").toObject();
     const auto decodeStoredCookie = [](const QString &value) -> QString {
@@ -484,7 +715,7 @@ void MusicBridge::loadLegacyStorage()
     };
     m_cookie = decodeStoredCookie(auth.value("netease").toString());
     m_qqCookie = decodeStoredCookie(auth.value("qq").toString());
-    m_kugouCookie = decodeStoredCookie(auth.value("kugou").toString());
+    m_storageRoot["auth"] = QJsonObject{{"netease", auth.value("netease")}, {"qq", auth.value("qq")}};
     m_accounts = m_storageRoot.value("accounts").toObject();
     for (auto accountIt = m_accounts.begin(); accountIt != m_accounts.end(); ++accountIt) {
         QJsonObject profile = accountIt.value().toObject();
@@ -493,6 +724,19 @@ void MusicBridge::loadLegacyStorage()
         accountIt.value() = profile;
     }
     m_userPlaylistsByPlatform = m_storageRoot.value("userPlaylists").toObject();
+    m_homeSongsByPlatform = m_storageRoot.value(QStringLiteral("homeSongs")).toObject();
+    m_homePlaylistsByPlatform = m_storageRoot.value(QStringLiteral("homePlaylists")).toObject();
+    const auto retainSupportedPlatforms = [](QJsonObject &map) {
+        QJsonObject supported;
+        for (const QString &key : {QStringLiteral("netease"), QStringLiteral("qq")}) {
+            if (map.contains(key)) supported.insert(key, map.value(key));
+        }
+        map = supported;
+    };
+    retainSupportedPlatforms(m_accounts);
+    retainSupportedPlatforms(m_userPlaylistsByPlatform);
+    retainSupportedPlatforms(m_homeSongsByPlatform);
+    retainSupportedPlatforms(m_homePlaylistsByPlatform);
     m_userPlaylists = m_userPlaylistsByPlatform.value(m_platform).toArray();
     m_favorites = m_storageRoot.value("favorites").toObject();
     // Older Qt builds stored the song snapshot without an isLiked field.  The
@@ -555,15 +799,15 @@ void MusicBridge::flushLegacyStorage()
     };
     const QString neteaseCookie = encodeStoredCookie(m_cookie);
     const QString qqCookie = encodeStoredCookie(m_qqCookie);
-    const QString kugouCookie = encodeStoredCookie(m_kugouCookie);
     if (neteaseCookie.isEmpty()) auth.remove("netease"); else auth.insert("netease", neteaseCookie);
     if (qqCookie.isEmpty()) auth.remove("qq"); else auth.insert("qq", qqCookie);
-    if (kugouCookie.isEmpty()) auth.remove("kugou"); else auth.insert("kugou", kugouCookie);
     m_storageRoot.insert("auth", auth);
     m_storageRoot.insert(QStringLiteral("activePlatform"), m_platform);
     m_storageRoot.insert("accounts", m_accounts);
     m_userPlaylistsByPlatform.insert(m_platform, m_userPlaylists);
     m_storageRoot.insert("userPlaylists", m_userPlaylistsByPlatform);
+    m_storageRoot.insert(QStringLiteral("homeSongs"), m_homeSongsByPlatform);
+    m_storageRoot.insert(QStringLiteral("homePlaylists"), m_homePlaylistsByPlatform);
     m_storageRoot.insert("favorites", m_favorites);
     QJsonArray history;
     for (const QString &entry : m_searchHistory) history.append(entry);
@@ -610,24 +854,12 @@ void MusicBridge::persistLocalLibrary()
 
 void MusicBridge::ensureLocalApi()
 {
-    const auto portReady = [](quint16 port) {
-        QTcpSocket probe;
-        probe.connectToHost(QHostAddress::LocalHost, port);
-        const bool connected = probe.waitForConnected(120);
-        if (connected) probe.disconnectFromHost();
-        return connected;
-    };
-
-    QString script;
-    const QStringList roots{QCoreApplication::applicationDirPath(), QDir::currentPath()};
-    for (const QString &root : roots) {
-        QDir directory(root);
-        for (int depth = 0; depth < 5 && script.isEmpty(); ++depth) {
-            const QString candidate = directory.absoluteFilePath(QStringLiteral("netease_server.js"));
-            if (QFile::exists(candidate)) script = candidate;
-            else if (!directory.cdUp()) break;
-        }
-        if (!script.isEmpty()) break;
+    const QString appDirectory = QCoreApplication::applicationDirPath();
+    QString script = QDir(appDirectory).absoluteFilePath(QStringLiteral("netease_server.js"));
+    bool bundledSidecar = QFileInfo::exists(script);
+    if (!bundledSidecar) {
+        const QString developmentScript = QString::fromUtf8(BETA_DEV_SIDECAR_PATH);
+        if (QFileInfo(developmentScript).isFile()) script = developmentScript;
     }
     if (!QFile::exists(script)) {
         setLastError(QStringLiteral("内置音乐平台服务文件缺失"));
@@ -637,16 +869,13 @@ void MusicBridge::ensureLocalApi()
 
     QTcpServer neteaseReservation;
     QTcpServer qqReservation;
-    QTcpServer kugouReservation;
     const bool portsReserved = neteaseReservation.listen(QHostAddress::LocalHost, 0)
-        && qqReservation.listen(QHostAddress::LocalHost, 0)
-        && kugouReservation.listen(QHostAddress::LocalHost, 0);
+        && qqReservation.listen(QHostAddress::LocalHost, 0);
     if (portsReserved) {
         m_neteasePort = neteaseReservation.serverPort();
         m_qqPort = qqReservation.serverPort();
-        m_kugouPort = kugouReservation.serverPort();
     }
-    if (!m_neteasePort || !m_qqPort || !m_kugouPort) {
+    if (!m_neteasePort || !m_qqPort) {
         setLastError(QStringLiteral("无法分配本地音乐平台服务端口"));
         QTimer::singleShot(0, this, [this] { show_toast(m_lastError); });
         return;
@@ -655,18 +884,62 @@ void MusicBridge::ensureLocalApi()
     // release them together immediately before starting the bundled services.
     neteaseReservation.close();
     qqReservation.close();
-    kugouReservation.close();
+    m_sidecarToken = (QUuid::createUuid().toString(QUuid::WithoutBraces)
+                      + QUuid::createUuid().toString(QUuid::WithoutBraces)).toUtf8();
+    m_network.setSidecarIdentity(m_neteasePort, m_qqPort, m_sidecarToken);
     const QString bundledNode = QDir(QFileInfo(script).absolutePath())
                                     .filePath(QStringLiteral("node/node.exe"));
-    m_localApi.setProgram(QFileInfo::exists(bundledNode) ? bundledNode : QStringLiteral("node"));
+    if (QFileInfo::exists(bundledNode)) {
+        m_localApi.setProgram(bundledNode);
+    } else if (!bundledSidecar) {
+        const QString developmentNode = QStandardPaths::findExecutable(QStringLiteral("node"));
+        if (developmentNode.isEmpty()) {
+            setLastError(QStringLiteral("开发环境未找到 Node.js；请先在 qt 目录安装侧车依赖"));
+            QTimer::singleShot(0, this, [this] { show_toast(m_lastError); });
+            return;
+        }
+        m_localApi.setProgram(developmentNode);
+    } else {
+        setLastError(QStringLiteral("内置 Node.js 运行时缺失，拒绝从系统 PATH 启动"));
+        QTimer::singleShot(0, this, [this] { show_toast(m_lastError); });
+        return;
+    }
     m_localApi.setArguments({script});
     m_localApi.setWorkingDirectory(QFileInfo(script).absolutePath());
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("BETA_NETEASE_PORT"), QString::number(m_neteasePort));
     environment.insert(QStringLiteral("BETA_QQ_PORT"), QString::number(m_qqPort));
-    environment.insert(QStringLiteral("BETA_KUGOU_PORT"), QString::number(m_kugouPort));
+    // QProcess cleanup covers normal shutdown.  Give the sidecar the parent
+    // PID as well so it can terminate itself after a debugger stop, crash or
+    // forced process termination, where MusicBridge::~MusicBridge never runs.
+    environment.insert(QStringLiteral("BETA_PARENT_PID"),
+                       QString::number(QCoreApplication::applicationPid()));
+    environment.insert(QStringLiteral("BETA_SIDECAR_TOKEN"), QString::fromUtf8(m_sidecarToken));
     m_localApi.setProcessEnvironment(environment);
-    m_localApi.setProcessChannelMode(QProcess::ForwardedErrorChannel);
+    // Always drain the child output.  Besides making startup failures visible
+    // in an opt-in trace, this prevents a long-running provider process from
+    // ever blocking on a full redirected output pipe.
+    m_localApi.setProcessChannelMode(QProcess::MergedChannels);
+    connect(&m_localApi, &QProcess::readyReadStandardOutput, this, [this] {
+        const QByteArray output = m_localApi.readAllStandardOutput();
+        // Provider request logs may contain authentication cookies.  Record
+        // only coarse startup milestones while still draining all output.
+        if (output.contains("[NetEase API] Ready")) appendTrace("sidecar:netease-ready");
+        if (output.contains("[QQ Music API] Ready")) appendTrace("sidecar:qq-ready");
+        if (output.contains("Startup failed") || output.contains("Server error"))
+            appendTrace("sidecar:provider-error");
+    });
+    connect(&m_localApi, &QProcess::errorOccurred, this, [](QProcess::ProcessError error) {
+        appendTrace(QByteArray("sidecar:error=") + QByteArray::number(int(error)));
+    });
+    connect(&m_localApi, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+            [](int code, QProcess::ExitStatus status) {
+        appendTrace(QByteArray("sidecar:finished code=") + QByteArray::number(code)
+                    + " status=" + QByteArray::number(int(status)));
+    });
+    appendTrace(QByteArray("sidecar:start program=") + m_localApi.program().toUtf8()
+                + " ports=" + QByteArray::number(m_neteasePort) + ','
+                + QByteArray::number(m_qqPort));
     m_localApi.start();
     m_ownsLocalApi = m_localApi.waitForStarted(1500);
     if (!m_ownsLocalApi) {
@@ -674,48 +947,105 @@ void MusicBridge::ensureLocalApi()
         QTimer::singleShot(0, this, [this] { show_toast(m_lastError); });
         return;
     }
-    for (int attempt = 0; attempt < 50; ++attempt) {
-        if (portReady(m_neteasePort) && portReady(m_qqPort) && portReady(m_kugouPort)) {
-            m_sidecarReady = true;
-            return;
+    // Packaging/CI explicitly asks for a synchronous health result. During a
+    // normal GUI launch, poll from the event loop instead: provider modules can
+    // take several seconds to initialise and must not delay the first window.
+    if (QCoreApplication::arguments().contains(QStringLiteral("--sidecar-self-test"))) {
+        for (int attempt = 0; attempt < 50; ++attempt) {
+            if (probeSidecar(m_neteasePort, "netease", m_sidecarToken, 120)
+                && probeSidecar(m_qqPort, "qq", m_sidecarToken, 120)) {
+                m_sidecarReady = true;
+                return;
+            }
+            QThread::msleep(80);
         }
-        QThread::msleep(80);
+        setLastError(QStringLiteral("内置音乐平台服务健康检查失败"));
+        m_localApi.kill();
+        m_localApi.waitForFinished(1000);
+        m_ownsLocalApi = false;
+        return;
+    }
+    QTimer::singleShot(0, this, [this] { probeLocalApi(50); });
+}
+
+void MusicBridge::probeLocalApi(int attemptsRemaining)
+{
+    if (probeSidecar(m_neteasePort, "netease", m_sidecarToken, 60)
+        && probeSidecar(m_qqPort, "qq", m_sidecarToken, 60)) {
+        m_sidecarReady = true;
+        appendTrace("sidecar:ready");
+        const QString neteaseUserId = m_accounts.value(QStringLiteral("netease")).toObject()
+                                           .value(QStringLiteral("userId")).toString();
+        if (!m_cookie.isEmpty() && !neteaseUserId.isEmpty())
+            requestNeteaseVipInfo(neteaseUserId);
+        if (!m_qqCookie.isEmpty() && m_accounts.contains(QStringLiteral("qq")))
+            requestQqVipInfo();
+        load_home_recommendations();
+        return;
+    }
+    if (attemptsRemaining > 1 && m_localApi.state() != QProcess::NotRunning) {
+        QTimer::singleShot(80, this, [this, attemptsRemaining] {
+            probeLocalApi(attemptsRemaining - 1);
+        });
+        return;
     }
     setLastError(QStringLiteral("内置音乐平台服务健康检查失败"));
-    m_localApi.kill();
-    m_localApi.waitForFinished(1000);
+    appendTrace(QByteArray("sidecar:health-failed state=")
+                + QByteArray::number(int(m_localApi.state())));
+    if (m_localApi.state() != QProcess::NotRunning) {
+        m_localApi.kill();
+        m_localApi.waitForFinished(1000);
+    }
     m_ownsLocalApi = false;
-    QTimer::singleShot(0, this, [this] { show_toast(m_lastError); });
+    show_toast(m_lastError);
 }
 
 QUrl MusicBridge::localApiUrl(const QString &path, const QUrlQuery &sourceQuery) const
 {
     QUrl url(QStringLiteral("http://127.0.0.1:") + QString::number(m_neteasePort) + path);
     QUrlQuery query(sourceQuery);
-    if (!m_cookie.isEmpty()) {
-        QString cookie = m_cookie;
-        if (!cookie.contains(QRegularExpression(QStringLiteral("(?:^|;\\s*)os="))))
-            cookie += QStringLiteral("; os=pc");
-        query.addQueryItem(QStringLiteral("cookie"), cookie);
-    }
     query.addQueryItem(QStringLiteral("timestamp"), QString::number(QDateTime::currentMSecsSinceEpoch()));
     url.setQuery(query);
     return url;
 }
 
+void MusicBridge::refreshSidecarCookies()
+{
+    QString neteaseCookie = m_cookie;
+    if (!neteaseCookie.isEmpty()
+        && !neteaseCookie.contains(QRegularExpression(QStringLiteral("(?:^|;\\s*)os=")))) {
+        neteaseCookie += QStringLiteral("; os=pc");
+    }
+    m_network.setSidecarCookies(neteaseCookie.toUtf8(), m_qqCookie.toUtf8());
+    appendTrace(QByteArray("auth:sidecar netease=")
+                + (m_cookie.isEmpty() ? "empty"
+                   : m_cookie.contains(QStringLiteral("MUSIC_U=")) ? "music-u" : "other")
+                + " qq=" + (m_qqCookie.isEmpty() ? "empty" : "present"));
+}
+
 int MusicBridge::activeIndex() const
 {
     // 支持与原版一致的每首歌歌词快慢偏移（正 = 提前）。
-    const double platformOffsetMs = m_current.value(QStringLiteral("source")).toString() == QStringLiteral("kugou")
-        ? 400.0 : 0.0;
-    const double offsetSeconds = (m_lyricOffset + platformOffsetMs) / 1000.0;
-    const double seconds = m_player.position() / 1000.0 + offsetSeconds;
-    int active = -1;
-    for (int i = 0; i < m_lyrics.size(); ++i) {
-        if (m_lyrics.at(i).toObject().value("time").toDouble() <= seconds) active = i;
-        else break;
+    const double offsetSeconds = m_lyricOffset / 1000.0;
+    return lyric_index_at(int(m_player.position() + offsetSeconds * 1000.0));
+}
+
+int MusicBridge::lyric_index_at(int adjustedMilliseconds) const
+{
+    const double seconds = adjustedMilliseconds / 1000.0;
+    // Lyrics are sorted by the parsers. This getter is evaluated by several
+    // QML bindings on every media position notification, so use an upper-bound
+    // search instead of scanning all elapsed lines for each binding.
+    int first = 0;
+    int last = m_lyrics.size();
+    while (first < last) {
+        const int middle = first + (last - first) / 2;
+        if (m_lyrics.at(middle).toObject().value("time").toDouble() <= seconds)
+            first = middle + 1;
+        else
+            last = middle;
     }
-    return active;
+    return first - 1;
 }
 
 QString MusicBridge::highResolutionCover(QString url, const QString &source)
@@ -750,12 +1080,6 @@ QString MusicBridge::highResolutionCover(QString url, const QString &source)
         return url;
     }
 
-    if (source == "kugou" || url.contains("kugou.com")) {
-        url.replace("{size}", "800");
-        url.replace(QRegularExpression(QStringLiteral("/(?:120|150|240|300|400|480|600|800)/")), QStringLiteral("/800/"));
-        url.replace(QRegularExpression(QStringLiteral("_(?:120|150|240|300|400|480|600|800)(?=\\.(?:jpg|jpeg|png|webp))")), QStringLiteral("_800"));
-        return url;
-    }
     return url;
 }
 
@@ -771,8 +1095,20 @@ QJsonArray MusicBridge::fallbackSongs()
 void MusicBridge::show_toast(const QString &message) { m_toast = message; emit toastChanged(message); }
 void MusicBridge::set_platform(const QString &value)
 {
+    if (value != QStringLiteral("netease") && value != QStringLiteral("qq")) return;
     if (value == m_platform) return;
+    ++m_contentRequestSerial;
+    ++m_playlistRequestSerial;
+    m_activePlaylistKey.clear();
     m_platform = value;
+    m_songs = {};
+    m_queue = {};
+    m_homePlaylists = {};
+    emit songsChanged();
+    emit queueChanged();
+    m_homePlaylistsModel.setItems(m_homePlaylists);
+    m_playlistDetail = {};
+    emit playlistDetailChanged();
     m_userPlaylists = m_userPlaylistsByPlatform.value(m_platform).toArray();
     emit platformChanged(value);
     emit accountChanged();
@@ -784,19 +1120,6 @@ void MusicBridge::set_platform(const QString &value)
     if (m_userPlaylists.isEmpty()) {
         if (m_platform == "qq" && m_accounts.contains("qq")) {
             requestQqUserPlaylists(m_accounts.value("qq").toObject().value("userId").toString());
-        } else if (m_platform == "kugou" && m_accounts.contains("kugou")) {
-            const auto cookieValue = [](const QString &cookie, const QString &name) {
-                for (const QString &part : cookie.split(';')) {
-                    const QString trimmed = part.trimmed();
-                    if (trimmed.startsWith(name + '=')) {
-                        return QUrl::fromPercentEncoding(trimmed.mid(name.size() + 1).toUtf8());
-                    }
-                }
-                return QString();
-            };
-            const QString userId = cookieValue(m_kugouCookie, QStringLiteral("userid"));
-            const QString token = cookieValue(m_kugouCookie, QStringLiteral("token"));
-            requestKugouUserPlaylists(userId, token);
         } else if (m_platform == "netease" && m_accounts.contains("netease")) {
             requestUserPlaylists(m_accounts.value("netease").toObject().value("userId").toString());
         }
@@ -804,14 +1127,20 @@ void MusicBridge::set_platform(const QString &value)
 }
 void MusicBridge::load_home_recommendations()
 {
-    setBusy(true);
+    ++m_contentRequestSerial;
     setLastError({});
-    if (m_platform == QStringLiteral("qq")) { requestQqHome(); return; }
-    if (m_platform == QStringLiteral("kugou")) { requestKugouHome(); return; }
+    const QJsonArray cachedSongs = m_homeSongsByPlatform.value(m_platform).toArray();
+    const QJsonArray cachedPlaylists = m_homePlaylistsByPlatform.value(m_platform).toArray();
+    if (!cachedPlaylists.isEmpty()) setHomePlaylists(cachedPlaylists);
+    if (!cachedSongs.isEmpty()) setSongs(cachedSongs);
+    else setBusy(true);
+    if (m_platform == QStringLiteral("qq")) {
+        requestQqHome();
+        requestFastHomeSongs();
+        return;
+    }
     if (m_platform == "netease") requestHome();
-    else if (m_platform == "qq") requestQqSearch(QStringLiteral("热门歌曲"));
-    else if (m_platform == "kugou") requestKugouSearch(QStringLiteral("热门歌曲"));
-    else setSongs(fallbackSongs());
+    else { setSongs(fallbackSongs()); setBusy(false); }
 }
 void MusicBridge::load_browse(const QString &category)
 {
@@ -833,8 +1162,9 @@ void MusicBridge::set_view_mode(const QString &mode) { if (m_viewMode != mode) {
 
 void MusicBridge::requestHome()
 {
+    const quint64 contentSerial = m_contentRequestSerial;
     requestNeteaseHomePlaylists();
-    // 与原版 Electron 对齐：主页推荐使用网易云精选歌单 3778678，其歌曲带
+    // 主页推荐使用网易云精选歌单 3778678，其歌曲带
     // 真实的 fee/privileges（VIP 信息正确）。/personalized/newsong 返回的歌
     // 曲几乎全是 fee=8 的试听曲，导致 VIP 标记无法正确识别。
     QUrl url(QStringLiteral("http://127.0.0.1:") + QString::number(m_neteasePort)
@@ -843,13 +1173,13 @@ void MusicBridge::requestHome()
     query.addQueryItem(QStringLiteral("id"), QStringLiteral("3778678"));
     query.addQueryItem(QStringLiteral("limit"), QStringLiteral("100"));
     query.addQueryItem(QStringLiteral("offset"), QStringLiteral("0"));
-    if (!m_cookie.isEmpty()) query.addQueryItem(QStringLiteral("cookie"), m_cookie);
     url.setQuery(query);
     QNetworkRequest request{url};
     request.setTransferTimeout(15000);
     auto *reply = m_network.get(request);
-    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, contentSerial] {
         const auto data = reply->readAll(); const auto error = reply->error(); reply->deleteLater();
+        if (contentSerial != m_contentRequestSerial || m_platform != QStringLiteral("netease")) return;
         appendTrace(QByteArray("home:reply error=") + QByteArray::number(int(error))
                     + " bytes=" + QByteArray::number(data.size()));
         if (error == QNetworkReply::NoError && !data.isEmpty()) handleNeteaseHomeSongs(data);
@@ -857,18 +1187,55 @@ void MusicBridge::requestHome()
     });
 }
 
+void MusicBridge::requestFastHomeSongs()
+{
+    const QString source = m_platform;
+    const quint64 contentSerial = m_contentRequestSerial;
+    const QString query = QStringLiteral("热门歌曲");
+    QUrl url;
+    if (source == QStringLiteral("qq")) {
+        url = QUrl(QStringLiteral("http://127.0.0.1:") + QString::number(m_qqPort)
+                   + QStringLiteral("/getSearchByKey"));
+        QUrlQuery params;
+        params.addQueryItem(QStringLiteral("key"), query);
+        params.addQueryItem(QStringLiteral("limit"), QStringLiteral("30"));
+        params.addQueryItem(QStringLiteral("page"), QStringLiteral("1"));
+        url.setQuery(params);
+    } else {
+        return;
+    }
+
+    QNetworkRequest request(url);
+    request.setRawHeader("User-Agent", "Mozilla/5.0");
+    request.setRawHeader("Referer", "https://y.qq.com/");
+    request.setTransferTimeout(8000);
+    auto *reply = m_network.get(request);
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, source, contentSerial] {
+        const QByteArray payload = reply->readAll();
+        const bool ok = reply->error() == QNetworkReply::NoError;
+        reply->deleteLater();
+        if (!ok || payload.isEmpty() || source != m_platform
+            || contentSerial != m_contentRequestSerial) return;
+        handleQqSongs(payload);
+        cacheCurrentHomeSongs();
+    });
+}
+
 void MusicBridge::requestNeteaseHomePlaylists()
 {
+    const quint64 contentSerial = m_contentRequestSerial;
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("limit"), QStringLiteral("6"));
     query.addQueryItem(QStringLiteral("timestamp"), QString::number(QDateTime::currentMSecsSinceEpoch()));
     QNetworkRequest request{localApiUrl(QStringLiteral("/personalized"), query)};
     request.setTransferTimeout(15000);
     auto *reply = m_network.get(request);
-    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, contentSerial] {
         const QByteArray payload = reply->readAll();
         const auto error = reply->error();
         reply->deleteLater();
+        if (contentSerial != m_contentRequestSerial || m_platform != QStringLiteral("netease")) return;
         if (error != QNetworkReply::NoError || payload.isEmpty()) return;
         const QJsonArray raw = QJsonDocument::fromJson(payload).object().value(QStringLiteral("result")).toArray();
         QJsonArray playlists;
@@ -921,17 +1288,18 @@ void MusicBridge::clear_search_history()
 }
 void MusicBridge::requestSearch(const QString &query)
 {
+    const quint64 contentSerial = ++m_contentRequestSerial;
     if (m_platform == "qq") { requestQqSearch(query); return; }
-    if (m_platform == "kugou") { requestKugouSearch(query); return; }
     QNetworkRequest request{QUrl(QString::fromLatin1(kNeteaseBase) + "/api/cloudsearch/pc")};
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
     request.setRawHeader("User-Agent", "Mozilla/5.0"); request.setRawHeader("Referer", "https://music.163.com/");
     request.setTransferTimeout(15000);
     QUrlQuery form; form.addQueryItem("s", query); form.addQueryItem("type", "1"); form.addQueryItem("limit", "30"); form.addQueryItem("offset", "0");
     auto *reply = m_network.post(request, form.query(QUrl::FullyEncoded).toUtf8());
-    connect(reply, &QNetworkReply::finished, this, [this, reply, query] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, query, contentSerial] {
         const auto data = reply->readAll(); const auto error = reply->error(); reply->deleteLater();
-        if (query != m_searchQuery) return;
+        if (contentSerial != m_contentRequestSerial || m_platform != QStringLiteral("netease")
+            || query != m_searchQuery) return;
         if (error == QNetworkReply::NoError && !data.isEmpty()) handleSongs(data, false);
         else { setBusy(false); setLastError(QStringLiteral("网易云搜索失败")); show_toast(m_lastError); }
     });
@@ -939,21 +1307,22 @@ void MusicBridge::requestSearch(const QString &query)
 
 void MusicBridge::requestQqSearch(const QString &query)
 {
+    const quint64 contentSerial = m_contentRequestSerial;
     QUrl url(QStringLiteral("http://127.0.0.1:") + QString::number(m_qqPort) + QStringLiteral("/getSearchByKey"));
     QUrlQuery params;
     params.addQueryItem("key", query);
     params.addQueryItem("limit", "30");
     params.addQueryItem("page", "1");
-    if (!m_qqCookie.isEmpty()) params.addQueryItem("cookie", m_qqCookie);
     url.setQuery(params);
     QNetworkRequest request(url);
     request.setTransferTimeout(15000);
     auto *reply = m_network.get(request);
-    connect(reply, &QNetworkReply::finished, this, [this, query, reply] {
+    connect(reply, &QNetworkReply::finished, this, [this, query, reply, contentSerial] {
         const QByteArray payload = reply->readAll();
         const bool ok = reply->error() == QNetworkReply::NoError;
         reply->deleteLater();
-        if (query != m_searchQuery) return;
+        if (contentSerial != m_contentRequestSerial || m_platform != QStringLiteral("qq")
+            || query != m_searchQuery) return;
         if (!ok || payload.isEmpty()) {
             requestQqPublicSearch(query);
             return;
@@ -964,6 +1333,7 @@ void MusicBridge::requestQqSearch(const QString &query)
 
 void MusicBridge::requestQqHome()
 {
+    const quint64 contentSerial = m_contentRequestSerial;
     QUrl url(QStringLiteral("http://127.0.0.1:") + QString::number(m_qqPort)
              + QStringLiteral("/getSongLists"));
     QUrlQuery query;
@@ -971,14 +1341,14 @@ void MusicBridge::requestQqHome()
     query.addQueryItem(QStringLiteral("page"), QStringLiteral("0"));
     query.addQueryItem(QStringLiteral("sortId"), QStringLiteral("5"));
     query.addQueryItem(QStringLiteral("categoryId"), QStringLiteral("10000000"));
-    if (!m_qqCookie.isEmpty()) query.addQueryItem(QStringLiteral("cookie"), m_qqCookie);
     url.setQuery(query);
 
     auto *reply = m_network.get(QNetworkRequest(url));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, query] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, query, contentSerial] {
         const QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
         const auto error = reply->error();
         reply->deleteLater();
+        if (contentSerial != m_contentRequestSerial || m_platform != QStringLiteral("qq")) return;
         const QJsonArray list = root.value(QStringLiteral("response")).toObject()
             .value(QStringLiteral("data")).toObject().value(QStringLiteral("list")).toArray();
         if (error != QNetworkReply::NoError || list.isEmpty()) {
@@ -1025,6 +1395,7 @@ void MusicBridge::requestQqHome()
 
 void MusicBridge::requestQqPublicSearch(const QString &query)
 {
+    const quint64 contentSerial = m_contentRequestSerial;
     QUrl url(QStringLiteral("https://c.y.qq.com/soso/fcgi-bin/client_search_cp"));
     QUrlQuery params;
     params.addQueryItem("w", query);
@@ -1040,11 +1411,12 @@ void MusicBridge::requestQqPublicSearch(const QString &query)
     request.setRawHeader("Referer", "https://y.qq.com/");
     request.setTransferTimeout(15000);
     auto *reply = m_network.get(request);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, query] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, query, contentSerial] {
         setBusy(false);
         const QByteArray payload = reply->readAll();
         reply->deleteLater();
-        if (query != m_searchQuery) return;
+        if (contentSerial != m_contentRequestSerial || m_platform != QStringLiteral("qq")
+            || query != m_searchQuery) return;
         if (!payload.isEmpty()) {
             const auto doc = QJsonDocument::fromJson(payload);
             if (doc.isObject()) {
@@ -1129,243 +1501,6 @@ void MusicBridge::handleQqSongs(const QByteArray &payload)
     setSongs(parsed);
 }
 
-void MusicBridge::requestKugouSearch(const QString &query)
-{
-    // KuGou's public mobile endpoint is HTTP in the upstream desktop client;
-    // forcing HTTPS breaks on Windows installations missing its legacy chain.
-    QUrl url(QStringLiteral("http://mobilecdn.kugou.com/api/v3/search/song"));
-    QUrlQuery params;
-    params.addQueryItem("format", "json");
-    params.addQueryItem("keyword", query);
-    params.addQueryItem("page", "1");
-    params.addQueryItem("pagesize", "30");
-    params.addQueryItem("showtype", "1");
-    url.setQuery(params);
-    QNetworkRequest request(url);
-    request.setRawHeader("User-Agent", "Mozilla/5.0");
-    request.setRawHeader("Referer", "https://www.kugou.com/");
-    request.setTransferTimeout(15000);
-    auto *reply = m_network.get(request);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, query] {
-        const QByteArray payload = reply->readAll();
-        const bool ok = reply->error() == QNetworkReply::NoError;
-        reply->deleteLater();
-        if (query != m_searchQuery) return;
-        setBusy(false);
-        if (!ok) { show_toast(QStringLiteral("酷狗概念版搜索服务连接失败")); return; }
-        handleKugouSongs(payload);
-    });
-}
-
-void MusicBridge::requestKugouHome()
-{
-    QUrl url(QStringLiteral("http://127.0.0.1:") + QString::number(m_kugouPort)
-             + QStringLiteral("/top/playlist"));
-    QUrlQuery query;
-    query.addQueryItem(QStringLiteral("category_id"), QStringLiteral("0"));
-    url.setQuery(query);
-    auto *reply = m_network.get(QNetworkRequest(url));
-    connect(reply, &QNetworkReply::finished, this, [this, reply] {
-        const QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
-        const auto error = reply->error();
-        reply->deleteLater();
-        const QJsonObject data = root.value(QStringLiteral("data")).toObject();
-        QJsonArray list = data.value(QStringLiteral("special_list")).toArray();
-        if (list.isEmpty()) list = data.value(QStringLiteral("info")).toArray();
-        if (list.isEmpty()) list = data.value(QStringLiteral("lists")).toArray();
-        if (error != QNetworkReply::NoError || list.isEmpty()) {
-            setBusy(false);
-            setLastError(QStringLiteral("酷狗概念版推荐歌单加载失败"));
-            show_toast(m_lastError);
-            return;
-        }
-        QJsonArray playlists;
-        for (int i = 0; i < qMin(6, list.size()); ++i) {
-            const QJsonObject candidate = list.at(i).toObject();
-            QString candidateId = candidate.value(QStringLiteral("global_collection_id")).toVariant().toString();
-            if (candidateId.isEmpty()) candidateId = candidate.value(QStringLiteral("specialid")).toVariant().toString();
-            if (candidateId.isEmpty()) candidateId = candidate.value(QStringLiteral("id")).toVariant().toString();
-            if (candidateId.isEmpty()) continue;
-            playlists.append(QJsonObject{
-                {QStringLiteral("id"), QStringLiteral("kg_pl_") + candidateId},
-                {QStringLiteral("name"), candidate.value(QStringLiteral("specialname")).toString(candidate.value(QStringLiteral("name")).toString())},
-                {QStringLiteral("description"), candidate.value(QStringLiteral("intro")).toString(candidate.value(QStringLiteral("description")).toString()).left(100)},
-                {QStringLiteral("cover"), highResolutionCover(candidate.value(QStringLiteral("imgurl")).toString(candidate.value(QStringLiteral("flexible_cover")).toString()), QStringLiteral("kugou"))},
-                {QStringLiteral("trackCount"), candidate.value(QStringLiteral("song_count")).toInt(candidate.value(QStringLiteral("songcount")).toInt())},
-                {QStringLiteral("source"), QStringLiteral("kugou")}
-            });
-        }
-        if (!playlists.isEmpty()) setHomePlaylists(playlists);
-        const QJsonObject item = list.first().toObject();
-        QString id = item.value(QStringLiteral("global_collection_id")).toVariant().toString();
-        if (id.isEmpty()) id = item.value(QStringLiteral("specialid")).toVariant().toString();
-        if (id.isEmpty()) id = item.value(QStringLiteral("id")).toVariant().toString();
-        if (id.isEmpty()) {
-            setBusy(false);
-            setLastError(QStringLiteral("酷狗音乐推荐歌单数据无效"));
-            show_toast(m_lastError);
-            return;
-        }
-        requestKugouPlaylistDetail(QJsonObject{
-            {QStringLiteral("id"), QStringLiteral("kg_pl_") + id},
-            {QStringLiteral("name"), item.value(QStringLiteral("specialname")).toString(
-                 item.value(QStringLiteral("name")).toString())},
-            {QStringLiteral("cover"), item.value(QStringLiteral("imgurl")).toString(
-                 item.value(QStringLiteral("flexible_cover")).toString())},
-            {QStringLiteral("source"), QStringLiteral("kugou")},
-            {QStringLiteral("_home"), true}
-        });
-    });
-}
-
-void MusicBridge::handleKugouSongs(const QByteArray &payload)
-{
-    setBusy(false);
-    const QJsonObject root = QJsonDocument::fromJson(payload).object();
-    const QJsonObject data = root.value("data").toObject();
-    QJsonArray raw = data.value("info").toArray();
-    if (raw.isEmpty()) raw = data.value("lists").toArray();
-    if (raw.isEmpty()) raw = data.value("songs").toArray();
-    QJsonArray parsed;
-    for (const QJsonValue &value : raw) {
-        const QJsonObject item = value.toObject();
-        const QString hash = item.value("hash").toString(item.value("filehash").toString()).toUpper();
-        if (hash.isEmpty()) continue;
-
-        // 标题：酷狗概念版歌单用 `name`（常为 "歌手 - 歌名"），公开搜索用
-        // `songname`/`song_name`/`filename`。
-        QString title = item.value("songname").toString(item.value("song_name").toString());
-        if (title.isEmpty()) title = item.value("name").toString();
-        if (title.isEmpty()) title = item.value("filename").toString();
-
-        // 歌手：概念版歌单用 `singerinfo`（对象或数组），公开搜索用
-        // `singername`/`author_name`。
-        QStringList artists;
-        const QJsonValue singerValue = item.value("singerinfo");
-        if (singerValue.isArray()) {
-            for (const QJsonValue &s : singerValue.toArray())
-                artists << s.toObject().value("name").toString();
-        } else if (singerValue.isObject()) {
-            artists << singerValue.toObject().value("name").toString();
-        }
-        if (artists.isEmpty())
-            artists << item.value("singername").toString(item.value("author_name").toString());
-        QString artist = artists.join(QStringLiteral(", "));
-
-        if (title.isEmpty()) {
-            const QString filename = item.value("filename").toString();
-            const int separator = filename.indexOf(QStringLiteral(" - "));
-            title = separator >= 0 ? filename.mid(separator + 3) : filename;
-            if (artist.isEmpty() && separator > 0) artist = filename.left(separator);
-        }
-
-        // 歌单 `name` 形如 "歌手 - 歌名"，与歌手一致时剥离前缀避免重复显示。
-        if (!artist.isEmpty()) {
-            const int separator = title.indexOf(QStringLiteral(" - "));
-            if (separator > 0) {
-                const auto normalize = [](QString s) {
-                    s = s.toLower();
-                    s.remove(QRegularExpression(QStringLiteral("[\\s/／、，,&·.\\-—–_]")));
-                    return s;
-                };
-                if (normalize(title.left(separator)) == normalize(artist))
-                    title = title.mid(separator + 3).trimmed();
-            }
-        }
-
-        const QJsonObject albumInfo = item.value("albuminfo").toObject();
-        const QJsonObject songInfo = item.value("info").toObject().isEmpty()
-            ? item.value("audio_info").toObject() : item.value("info").toObject();
-        const QJsonObject transParam = item.value("trans_param").toObject();
-        QString cover = item.value("album_cover").toString();
-        if (cover.isEmpty()) cover = item.value("album_pic").toString();
-        if (cover.isEmpty()) cover = item.value("album_img").toString(item.value("album_imgurl").toString());
-        if (cover.isEmpty()) cover = songInfo.value("image").toString(songInfo.value("cover").toString(songInfo.value("pic").toString(songInfo.value("imgurl").toString())));
-        if (cover.isEmpty()) cover = albumInfo.value("cover").toString(albumInfo.value("pic").toString(albumInfo.value("imgurl").toString(albumInfo.value("img").toString())));
-        if (cover.isEmpty()) cover = item.value("imgurl").toString(item.value("img_url").toString(item.value("img").toString(item.value("pic").toString())));
-        if (cover.isEmpty()) cover = item.value("sizable_cover").toString(item.value("cover").toString(item.value("cover_url").toString(item.value("coverUrl").toString())));
-        if (cover.isEmpty()) cover = transParam.value("union_cover").toString(transParam.value("unionCover").toString(transParam.value("sizable_cover").toString()));
-
-        const int duration = item.value("duration").toInt(int(item.value("timelen").toDouble() / 1000.0));
-        const QJsonObject pay = item.value("pay").toObject();
-        const QJsonArray download = item.value("download").toArray();
-        const QJsonArray relateGoods = item.value("relate_goods").toArray();
-
-        // 与 Electron kugouMusicApi.getVipRequirement 对齐：
-        // - privilege>=10 仅在无 status/play_status 时作为付费信号；
-        // - relate_goods 子项与 pkg_price / pay_block 同样参与判定。
-        const bool explicitVip = jsonPositive(item.value("is_vip"))
-            || jsonPositive(item.value("isvip"))
-            || jsonPositive(item.value("isVip"))
-            || jsonPositive(item.value("vip"))
-            || jsonPositive(item.value("vip_song"))
-            || jsonPositive(item.value("vipSong"));
-        const int musicPackAdvance = jsonInteger(transParam.value("musicpack_advance"),
-                                                 jsonInteger(transParam.value("musicpackAdvance")));
-        const int downloadPayType = download.isEmpty() ? 0
-            : jsonInteger(download.first().toObject().value("pay_type"));
-        const int payType = jsonInteger(item.value("pay_type"),
-                                        jsonInteger(item.value("payType"),
-                                                    jsonInteger(pay.value("pay_type"),
-                                                                jsonInteger(pay.value("payType"), downloadPayType))));
-        const double price = item.value("price").toDouble(pay.value("price").toDouble(0));
-        const double packagePrice = item.value("pkg_price").toDouble(item.value("pkgPrice").toDouble(
-            pay.value("pkg_price").toDouble(pay.value("pkgPrice").toDouble(0))));
-        const int fee = jsonInteger(item.value("fee"),
-                                    jsonInteger(item.value("fee_type"),
-                                                jsonInteger(item.value("feeType"),
-                                                            jsonInteger(pay.value("fee")))));
-        const int privilege = jsonInteger(item.value("privilege"),
-                                          jsonInteger(item.value("privilege_type"),
-                                                      jsonInteger(item.value("privilegeType"))));
-        const int status = jsonInteger(item.value("status"),
-                                       jsonInteger(item.value("play_status"),
-                                                   jsonInteger(item.value("playStatus"), -1)));
-        const int payBlock = jsonInteger(item.value("pay_block_text"),
-                                         jsonInteger(item.value("payBlockText"),
-                                                     jsonInteger(transParam.value("pay_block_tpl"),
-                                                                 jsonInteger(transParam.value("payBlockTpl")))));
-        bool relatedPaid = false;
-        for (const QJsonValue &gv : relateGoods) {
-            const QJsonObject g = gv.toObject();
-            if (jsonInteger(g.value("privilege")) >= 10
-                || jsonInteger(g.value("pay_type")) > 0
-                || jsonPositive(g.value("is_vip")) || jsonPositive(g.value("isvip")))
-                relatedPaid = true;
-        }
-        const bool hasStatus = status >= 0;
-        const bool vip = explicitVip
-            || musicPackAdvance > 0
-            || payType > 0
-            || price > 0
-            || packagePrice > 0
-            || fee > 0
-            || jsonInteger(item.value("feetype")) > 0
-            || relatedPaid
-            || (privilege >= 10 && !hasStatus)
-            || (payBlock > 1 && !hasStatus);
-
-        const QString kugouAlbumId = item.value("album_id").toVariant().toString().isEmpty()
-            ? item.value("albumid").toVariant().toString() : item.value("album_id").toVariant().toString();
-        const QString kugouAlbumAudioId = item.value("album_audio_id").toVariant().toString().isEmpty()
-            ? (item.value("audio_id").toVariant().toString().isEmpty()
-                ? item.value("album_audioid").toVariant().toString()
-                : item.value("audio_id").toVariant().toString())
-            : item.value("album_audio_id").toVariant().toString();
-
-        parsed.append(QJsonObject{
-            {"id", QStringLiteral("kugou-") + hash}, {"platformId", hash},
-            {"name", title}, {"artist", artist},
-            {"album", item.value("album_name").toString(
-                 item.value("albuminfo").toObject().value("name").toString())},
-            {"cover", highResolutionCover(cover, "kugou")}, {"duration", duration},
-            {"source", "kugou"}, {"vip", vip}, {"isLiked", false},
-            {"kugouAlbumId", kugouAlbumId},
-            {"kugouAlbumAudioId", kugouAlbumAudioId}});
-    }
-    if (parsed.isEmpty()) { show_toast(QStringLiteral("酷狗概念版未返回可用歌曲")); return; }
-    setSongs(parsed);
-}
 void MusicBridge::handleSongs(const QByteArray &payload, bool home)
 {
     setBusy(false);
@@ -1423,7 +1558,10 @@ void MusicBridge::handleNeteaseHomeSongs(const QByteArray &payload)
         parsed.append(song);
     }
     appendTrace(QByteArray("home:parsed=") + QByteArray::number(parsed.size()));
-    if (!parsed.isEmpty()) setSongs(parsed);
+    if (!parsed.isEmpty()) {
+        setSongs(parsed);
+        cacheCurrentHomeSongs();
+    }
     else { setLastError(QStringLiteral("网易云推荐加载失败")); show_toast(m_lastError); }
 }
 void MusicBridge::setSongs(QJsonArray songs)
@@ -1447,6 +1585,14 @@ void MusicBridge::setSongs(QJsonArray songs)
     const int preloadCount = qMin(16, int(m_songs.size()));
     for (int index = 0; index < preloadCount; ++index)
         cacheCover(m_songs.at(index).toObject().value("cover").toString());
+}
+
+void MusicBridge::cacheCurrentHomeSongs()
+{
+    if (m_platform == QStringLiteral("netease") || m_platform == QStringLiteral("qq")) {
+        m_homeSongsByPlatform.insert(m_platform, m_songs);
+        saveLegacyStorage();
+    }
 }
 
 bool MusicBridge::isFavorite(const QString &songId) const
@@ -1506,6 +1652,27 @@ void MusicBridge::applyFavoriteStates(QJsonArray &songs) const
     }
 }
 
+void MusicBridge::mergeSongsIntoFavorites(const QJsonArray &songs)
+{
+    for (const QJsonValue &value : songs) {
+        QJsonObject song = value.toObject();
+        const QString id = song.value(QStringLiteral("id")).toVariant().toString();
+        if (id.isEmpty()) continue;
+        song.insert(QStringLiteral("isLiked"), true);
+        m_favorites.insert(id, song);
+    }
+    applyFavoriteStates(m_songs);
+    applyFavoriteStates(m_queue);
+    if (songIsFavorite(m_current)) {
+        m_current.insert(QStringLiteral("isLiked"), true);
+        emit currentSongChanged();
+    }
+    saveLegacyStorage();
+    emit favoritesChanged();
+    emit songsChanged();
+    emit queueChanged();
+}
+
 void MusicBridge::setHomePlaylists(QJsonArray playlists)
 {
     for (int i = 0; i < playlists.size(); ++i) {
@@ -1515,6 +1682,14 @@ void MusicBridge::setHomePlaylists(QJsonArray playlists)
         playlists[i] = playlist;
     }
     m_homePlaylists = std::move(playlists);
+    if (!m_homePlaylists.isEmpty()) {
+        const QString source = m_homePlaylists.first().toObject()
+                                   .value(QStringLiteral("source")).toString(m_platform);
+        if (!source.isEmpty()) {
+            m_homePlaylistsByPlatform.insert(source, m_homePlaylists);
+            saveLegacyStorage();
+        }
+    }
     m_homePlaylistsModel.setItems(m_homePlaylists);
     for (const QJsonValue &value : std::as_const(m_homePlaylists))
         cacheCover(value.toObject().value(QStringLiteral("cover")).toString());
@@ -1542,11 +1717,16 @@ void MusicBridge::play_local(int index)
     setCurrentIndex(index);
 }
 void MusicBridge::play_queue_index(int index) { setCurrentIndex(index); }
-void MusicBridge::setCurrentIndex(int index, bool autoplay)
+void MusicBridge::setCurrentIndex(int index, bool autoplay, bool resetFailureCount)
 {
     if (index < 0 || index >= m_queue.size()) return;
+    if (resetFailureCount) m_consecutivePlaybackFailures = 0;
+    m_handlingPlaybackFailure = false;
+    // 立即终止上一首，避免用户点击后旧歌曲还继续播放、造成“切歌没响应”的感觉。
+    m_player.stop();
     set_lyric_offset(0);
     m_playRecoveryAttempted = false;
+    prepareAudioOutput();
     m_currentIndex = index; m_current = m_queue.at(index).toObject();
     if (songIsFavorite(m_current))
         m_current.insert(QStringLiteral("isLiked"), true);
@@ -1555,10 +1735,6 @@ void MusicBridge::setCurrentIndex(int index, bool autoplay)
     // music CDNs. Fetch the selected cover once through the bridge and then
     // switch every view to the locally cached, lossless file URL.
     cacheCover(m_current.value("cover").toString());
-    if (m_current.value("source").toString() == "kugou"
-        && m_current.value("cover").toString().isEmpty()) {
-        requestKugouCover(m_current);
-    }
     if (m_current.value("source").toString() == "local") {
         m_player.setSource(QUrl(m_current.value("audioUrl").toString()));
         requestLyrics(m_current);
@@ -1567,7 +1743,10 @@ void MusicBridge::setCurrentIndex(int index, bool autoplay)
         return;
     }
     const QString nativeId = m_current.value("platformId").toString();
-    if (nativeId.isEmpty()) { show_toast(QStringLiteral("该曲目暂时没有可用音源")); return; }
+    if (nativeId.isEmpty()) {
+        skipUnavailableTrack(QStringLiteral("该曲目暂时没有可用音源"));
+        return;
+    }
     requestPlayUrl(m_current, autoplay);
     requestLyrics(m_current);
     emit currentSongChanged();
@@ -1594,6 +1773,7 @@ void MusicBridge::cacheCover(const QString &coverUrl)
     request.setRawHeader("User-Agent", "Mozilla/5.0");
     request.setRawHeader("Referer", coverReferer(coverUrl));
     auto *reply = m_network.get(request);
+    limitImageDownload(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, coverUrl, cacheRoot, cachedPath, cachedUrl] {
         m_pendingCoverDownloads.remove(coverUrl);
         const QByteArray bytes = reply->readAll();
@@ -1631,6 +1811,7 @@ void MusicBridge::cacheAvatar(const QString &avatarUrl, const QString &platform)
     request.setRawHeader("Referer", platform == "qq"
         ? "https://y.qq.com/" : "https://music.163.com/");
     auto *reply = m_network.get(request);
+    limitImageDownload(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, platform, avatarUrl, cacheRoot, cachedPath, cachedUrl, requestKey] {
         m_pendingAvatarDownloads.remove(requestKey);
         const QByteArray bytes = reply->readAll();
@@ -1721,6 +1902,7 @@ void MusicBridge::requestCoverPalette(const QString &coverUrl)
     request.setRawHeader("User-Agent", "Mozilla/5.0");
     request.setRawHeader("Referer", coverReferer(coverUrl));
     auto *reply = m_network.get(request);
+    limitImageDownload(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply] {
         QImage image;
         image.loadFromData(reply->readAll());
@@ -1782,12 +1964,15 @@ void MusicBridge::computeFluidPalette(QImage image)
 void MusicBridge::requestPlayUrl(const QJsonObject &song, bool autoplay)
 {
     const quint64 serial = ++m_playRequestSerial;
-    if (song.value("source").toString() == "qq") {
-        requestQqPlayUrl(song, autoplay, serial);
+    const QString cacheKey = playCacheKey(song);
+    const qint64 cachedAt = m_playUrlCachedAt.value(cacheKey);
+    if (!cacheKey.isEmpty() && !m_playUrlCache.value(cacheKey).isEmpty()
+        && QDateTime::currentMSecsSinceEpoch() - cachedAt < 8 * 60 * 1000) {
+        startResolvedPlayback(song, m_playUrlCache.value(cacheKey), autoplay, serial);
         return;
     }
-    if (song.value("source").toString() == "kugou") {
-        requestKugouPlayUrl(song, autoplay, serial);
+    if (song.value("source").toString() == "qq") {
+        requestQqPlayUrl(song, autoplay, serial);
         return;
     }
     const QString quality = m_settings.value("audioQuality").toString("high");
@@ -1796,6 +1981,145 @@ void MusicBridge::requestPlayUrl(const QJsonObject &song, bool autoplay)
     QStringList levels{requested, QStringLiteral("exhigh"), QStringLiteral("standard")};
     levels.removeDuplicates();
     requestPlayLevel(song, levels, 0, autoplay, serial);
+}
+
+void MusicBridge::invalidatePlayUrlCache()
+{
+    ++m_playCacheGeneration;
+    m_playUrlCache.clear();
+    m_playUrlCachedAt.clear();
+    m_pendingPlayPrefetch.clear();
+}
+
+QString MusicBridge::playCacheKey(const QJsonObject &song) const
+{
+    const QString source = song.value(QStringLiteral("source")).toString();
+    const QString platformId = song.value(QStringLiteral("platformId")).toVariant().toString();
+    if (source.isEmpty() || platformId.isEmpty()) return {};
+    return source + QLatin1Char(':') + platformId;
+}
+
+void MusicBridge::startResolvedPlayback(const QJsonObject &song, const QString &mediaUrl,
+                                        bool autoplay, quint64 serial)
+{
+    if (serial != m_playRequestSerial || mediaUrl.isEmpty()) return;
+    const QString key = playCacheKey(song);
+    if (!key.isEmpty()) {
+        m_playUrlCache.insert(key, mediaUrl);
+        m_playUrlCachedAt.insert(key, QDateTime::currentMSecsSinceEpoch());
+    }
+    appendTrace(QByteArray("player:resolved source=")
+                + song.value(QStringLiteral("source")).toString().toUtf8()
+                + " cached=" + (key.isEmpty() ? "0" : "1"));
+    m_player.setSource(QUrl(mediaUrl));
+    if (autoplay) m_player.play();
+    QTimer::singleShot(200, this, &MusicBridge::prefetchNextPlayUrl);
+}
+
+void MusicBridge::skipUnavailableTrack(const QString &reason)
+{
+    if (m_handlingPlaybackFailure) return;
+    m_handlingPlaybackFailure = true;
+    ++m_playRequestSerial; // Ignore late replies belonging to the failed song.
+    m_player.stop();
+
+    ++m_consecutivePlaybackFailures;
+    if (m_queue.size() <= 1 || m_consecutivePlaybackFailures >= m_queue.size()) {
+        show_toast(QStringLiteral("%1；播放列表中没有其他可播放歌曲").arg(reason));
+        return;
+    }
+
+    int nextIndex = m_currentIndex + 1;
+    if (nextIndex >= m_queue.size()) {
+        if (m_repeatMode == QStringLiteral("all")) nextIndex = 0;
+        else {
+            show_toast(QStringLiteral("%1；后面没有可播放歌曲").arg(reason));
+            return;
+        }
+    }
+
+    show_toast(QStringLiteral("%1，已自动跳到下一首").arg(reason));
+    QTimer::singleShot(0, this, [this, nextIndex] {
+        setCurrentIndex(nextIndex, true, false);
+    });
+}
+
+void MusicBridge::prefetchNextPlayUrl()
+{
+    if (m_queue.isEmpty() || m_currentIndex < 0) return;
+    int nextIndex = m_currentIndex + 1;
+    if (nextIndex >= m_queue.size()) {
+        if (m_repeatMode != QStringLiteral("all")) return;
+        nextIndex = 0;
+    }
+    const QJsonObject song = m_queue.at(nextIndex).toObject();
+    const QString source = song.value(QStringLiteral("source")).toString();
+    const QString platformId = song.value(QStringLiteral("platformId")).toVariant().toString();
+    const QString key = playCacheKey(song);
+    if (key.isEmpty() || source == QStringLiteral("local")
+        || m_pendingPlayPrefetch.contains(key)) return;
+    const qint64 cachedAt = m_playUrlCachedAt.value(key);
+    if (!m_playUrlCache.value(key).isEmpty()
+        && QDateTime::currentMSecsSinceEpoch() - cachedAt < 8 * 60 * 1000) return;
+
+    QUrl url;
+    if (source == QStringLiteral("netease")) {
+        QUrlQuery query;
+        query.addQueryItem(QStringLiteral("id"), platformId);
+        query.addQueryItem(QStringLiteral("level"), QStringLiteral("standard"));
+        url = localApiUrl(QStringLiteral("/song/url/v1"), query);
+    } else if (source == QStringLiteral("qq")) {
+        url = QUrl(QStringLiteral("http://127.0.0.1:") + QString::number(m_qqPort)
+                   + QStringLiteral("/getMusicPlay"));
+        QUrlQuery query;
+        query.addQueryItem(QStringLiteral("songmid"), platformId);
+        query.addQueryItem(QStringLiteral("quality"), QStringLiteral("128"));
+        url.setQuery(query);
+    } else {
+        return;
+    }
+
+    m_pendingPlayPrefetch.insert(key);
+    QNetworkRequest request(url);
+    request.setRawHeader("User-Agent", "Mozilla/5.0");
+    request.setTransferTimeout(8000);
+    const quint64 cacheGeneration = m_playCacheGeneration;
+    auto *reply = m_network.get(request);
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, song, source, platformId, key, cacheGeneration] {
+        const QByteArray payload = reply->readAll();
+        const bool ok = reply->error() == QNetworkReply::NoError;
+        reply->deleteLater();
+        if (cacheGeneration != m_playCacheGeneration) return;
+        m_pendingPlayPrefetch.remove(key);
+        if (!ok || payload.isEmpty()) return;
+        const QJsonObject root = QJsonDocument::fromJson(payload).object();
+        QString mediaUrl;
+        if (source == QStringLiteral("netease")) {
+            const QJsonArray data = root.value(QStringLiteral("data")).toArray();
+            if (!data.isEmpty()) {
+                const QJsonObject media = data.first().toObject();
+                const bool vipActive = m_accounts.value(source).toObject()
+                                           .value(QStringLiteral("vipActive")).toBool();
+                if (vipActive && isShortTrialResponse(media, song)) {
+                    appendTrace(QByteArray("player:prefetch-trial-rejected key=") + key.toUtf8());
+                    return;
+                }
+                mediaUrl = media.value(QStringLiteral("url")).toString();
+            }
+        } else if (source == QStringLiteral("qq")) {
+            QJsonObject data = root.value(QStringLiteral("data")).toObject();
+            if (data.isEmpty()) data = root.value(QStringLiteral("response")).toObject()
+                                           .value(QStringLiteral("data")).toObject();
+            mediaUrl = data.value(QStringLiteral("playUrl")).toObject()
+                           .value(platformId).toObject().value(QStringLiteral("url")).toString();
+            if (mediaUrl.isEmpty()) mediaUrl = data.value(QStringLiteral("url")).toString();
+        }
+        if (mediaUrl.isEmpty()) return;
+        m_playUrlCache.insert(key, mediaUrl);
+        m_playUrlCachedAt.insert(key, QDateTime::currentMSecsSinceEpoch());
+        appendTrace(QByteArray("player:prefetched key=") + key.toUtf8());
+    });
 }
 
 void MusicBridge::requestQqPlayUrl(const QJsonObject &song, bool autoplay, quint64 serial, int qualityIndex)
@@ -1808,7 +2132,7 @@ void MusicBridge::requestQqPlayUrl(const QJsonObject &song, bool autoplay, quint
     else
         qualities = {QStringLiteral("320"), QStringLiteral("128"), QStringLiteral("m4a")};
     if (qualityIndex >= qualities.size()) {
-        show_toast(song.value("vip").toBool()
+        skipUnavailableTrack(song.value("vip").toBool()
             ? QStringLiteral("QQ 音乐提示：该曲需要当前账号的播放权益")
             : QStringLiteral("QQ 音乐未返回可播放音源"));
         return;
@@ -1817,7 +2141,6 @@ void MusicBridge::requestQqPlayUrl(const QJsonObject &song, bool autoplay, quint
     QUrlQuery params;
     params.addQueryItem("songmid", song.value("platformId").toString());
     params.addQueryItem("quality", qualities.at(qualityIndex));
-    if (!m_qqCookie.isEmpty()) params.addQueryItem("cookie", m_qqCookie);
     url.setQuery(params);
     QNetworkRequest request(url);
     request.setTransferTimeout(12000);
@@ -1835,196 +2158,7 @@ void MusicBridge::requestQqPlayUrl(const QJsonObject &song, bool autoplay, quint
             requestQqPlayUrl(song, autoplay, serial, qualityIndex + 1);
             return;
         }
-        m_player.setSource(QUrl(mediaUrl));
-        if (autoplay) m_player.play();
-    });
-}
-
-void MusicBridge::requestKugouPlayUrl(const QJsonObject &song, bool autoplay, quint64 serial)
-{
-    const QString hash = song.value("platformId").toString();
-    if (hash.isEmpty()) {
-        show_toast(QStringLiteral("酷狗概念版未返回可播放音源"));
-        return;
-    }
-
-    // 已登录的酷狗概念版账号优先走本地 API /song/url，可解析 VIP/高音质；
-    // 未登录或本地 API 不可用时回退到酷狗移动端公开接口。
-    const QString userId = cookieValue(m_kugouCookie, QStringLiteral("userid"));
-    const QString token = cookieValue(m_kugouCookie, QStringLiteral("token"));
-    const bool authenticated = !userId.isEmpty() && !token.isEmpty();
-
-    QStringList qualities;
-    if (m_settings.value(QStringLiteral("audioQuality")).toString() == QStringLiteral("standard"))
-        qualities = {QStringLiteral("128")};
-    else if (authenticated)
-        qualities = {QStringLiteral("320"), QStringLiteral("128")};
-    else
-        qualities = {QStringLiteral("128")};
-
-    if (m_kugouPort > 0)
-        requestKugouDeviceRegistration([this, song, autoplay, serial, qualities] { requestKugouPlayUrlLevel(song, autoplay, serial, qualities, 0); });
-    else
-        requestKugouLegacyPlayUrl(song, autoplay, serial);
-}
-
-void MusicBridge::requestKugouPlayUrlLevel(const QJsonObject &song, bool autoplay, quint64 serial,
-                                            const QStringList &qualities, int qualityIndex)
-{
-    if (serial != m_playRequestSerial) return;
-    if (qualityIndex >= qualities.size()) {
-        requestKugouLegacyPlayUrl(song, autoplay, serial);
-        return;
-    }
-
-    QUrl url(QStringLiteral("http://127.0.0.1:") + QString::number(m_kugouPort)
-             + QStringLiteral("/song/url"));
-    QUrlQuery params;
-    params.addQueryItem(QStringLiteral("hash"), song.value("platformId").toString());
-    params.addQueryItem(QStringLiteral("album_id"), song.value("kugouAlbumId").toString());
-    params.addQueryItem(QStringLiteral("album_audio_id"), song.value("kugouAlbumAudioId").toString());
-    params.addQueryItem(QStringLiteral("quality"), qualities.at(qualityIndex));
-
-    QStringList cookieParts;
-    if (!m_kugouDfid.isEmpty())
-        cookieParts << QStringLiteral("dfid=") + m_kugouDfid;
-    const QString userId = cookieValue(m_kugouCookie, QStringLiteral("userid"));
-    const QString token = cookieValue(m_kugouCookie, QStringLiteral("token"));
-    if (!userId.isEmpty())
-        cookieParts << QStringLiteral("userid=") + userId;
-    if (!token.isEmpty())
-        cookieParts << QStringLiteral("token=") + token;
-      for (const QString &part : m_kugouCookie.split(QLatin1Char(';'))) {
-          const int separator = part.indexOf(QLatin1Char('='));
-          if (separator <= 0) continue;
-          const QString key = part.left(separator).trimmed();
-          if (key == QStringLiteral("vip_type") || key == QStringLiteral("vip_token")
-              || key == QStringLiteral("t1")) {
-              cookieParts << key + QLatin1Char('=') + part.mid(separator + 1).trimmed();
-          }
-      }
-    if (!cookieParts.isEmpty())
-        params.addQueryItem(QStringLiteral("cookie"), cookieParts.join(QStringLiteral("; ")));
-    url.setQuery(params);
-
-    QNetworkRequest request(url);
-    request.setTransferTimeout(12000);
-    auto *reply = m_network.get(request);
-    connect(reply, &QNetworkReply::finished, this,
-            [this, reply, autoplay, song, serial, qualities, qualityIndex] {
-        const QByteArray payload = reply->readAll();
-        reply->deleteLater();
-        if (serial != m_playRequestSerial) return;
-
-        const QString mediaUrl = findAudioUrlInJson(QJsonDocument::fromJson(payload).object());
-        if (!mediaUrl.isEmpty()) {
-            m_player.setSource(QUrl(mediaUrl));
-            if (autoplay) m_player.play();
-            return;
-        }
-        // 接口返回了错误提示（例如需要设备验证）时继续下一音质或回退公开源。
-        requestKugouPlayUrlLevel(song, autoplay, serial, qualities, qualityIndex + 1);
-    });
-}
-
-void MusicBridge::requestKugouLegacyPlayUrl(const QJsonObject &song, bool autoplay, quint64 serial)
-{
-    QUrl url(QStringLiteral("http://m.kugou.com/app/i/getSongInfo.php"));
-    QUrlQuery params;
-    params.addQueryItem("cmd", "playInfo");
-    params.addQueryItem("hash", song.value("platformId").toString());
-    url.setQuery(params);
-    QNetworkRequest request(url);
-    request.setRawHeader("User-Agent", "Mozilla/5.0");
-    request.setRawHeader("Referer", "https://www.kugou.com/");
-    request.setTransferTimeout(12000);
-    auto *reply = m_network.get(request);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, autoplay, song, serial] {
-        const QByteArray payload = reply->readAll();
-        reply->deleteLater();
-        if (serial != m_playRequestSerial) return;
-        QString mediaUrl = findAudioUrlInJson(QJsonDocument::fromJson(payload).object());
-        if (mediaUrl.isEmpty()) {
-            const QJsonObject data = QJsonDocument::fromJson(payload).object();
-            const QJsonArray backups = data.value("backup_url").toArray();
-            if (!backups.isEmpty()) mediaUrl = backups.first().toString();
-        }
-        if (mediaUrl.isEmpty()) {
-            show_toast(song.value("vip").toBool()
-                ? QStringLiteral("该酷狗歌曲需要当前账号的播放权益")
-                : QStringLiteral("酷狗音乐未返回可播放音源"));
-            return;
-        }
-        m_player.setSource(QUrl(mediaUrl));
-        if (autoplay) m_player.play();
-    });
-}
-
-void MusicBridge::requestKugouCover(const QJsonObject &song)
-{
-    const QString hash = song.value("platformId").toString();
-    if (hash.isEmpty() || !m_kugouPort) return;
-    const QString songId = song.value("id").toString();
-
-    QUrl url(QStringLiteral("http://127.0.0.1:") + QString::number(m_kugouPort)
-             + QStringLiteral("/song/url"));
-    QUrlQuery params;
-    params.addQueryItem("hash", hash);
-    params.addQueryItem("album_id", song.value("kugouAlbumId").toString());
-    params.addQueryItem("album_audio_id", song.value("kugouAlbumAudioId").toString());
-    params.addQueryItem("quality", "128");
-
-    QStringList cookieParts;
-    if (!m_kugouDfid.isEmpty())
-        cookieParts << QStringLiteral("dfid=") + m_kugouDfid;
-    for (const QString &part : m_kugouCookie.split(QLatin1Char(';'))) {
-        const int separator = part.indexOf(QLatin1Char('='));
-        if (separator <= 0) continue;
-        const QString key = part.left(separator).trimmed();
-        if (key == QStringLiteral("userid") || key == QStringLiteral("token"))
-            cookieParts << key + QLatin1Char('=') + part.mid(separator + 1).trimmed();
-    }
-    if (!cookieParts.isEmpty())
-        params.addQueryItem("cookie", cookieParts.join(QStringLiteral("; ")));
-    url.setQuery(params);
-
-    QNetworkRequest request(url);
-    request.setTransferTimeout(10000);
-    auto *reply = m_network.get(request);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, songId] {
-        const QByteArray payload = reply->readAll();
-        reply->deleteLater();
-        if (m_current.value("id").toString() != songId) return;
-
-        const QString cover = findImageUrlInJson(QJsonDocument::fromJson(payload).object());
-        if (cover.isEmpty()) return;
-        const QString highCover = highResolutionCover(cover, "kugou");
-        if (highCover.isEmpty()) return;
-
-        m_current.insert("cover", highCover);
-        bool songsDirty = false;
-        bool queueDirty = false;
-        for (int i = 0; i < m_songs.size(); ++i) {
-            QJsonObject item = m_songs.at(i).toObject();
-            if (item.value("id").toString() == songId && item.value("cover").toString().isEmpty()) {
-                item.insert("cover", highCover);
-                m_songs[i] = item;
-                songsDirty = true;
-            }
-        }
-        for (int i = 0; i < m_queue.size(); ++i) {
-            QJsonObject item = m_queue.at(i).toObject();
-            if (item.value("id").toString() == songId && item.value("cover").toString().isEmpty()) {
-                item.insert("cover", highCover);
-                m_queue[i] = item;
-                queueDirty = true;
-            }
-        }
-        if (songsDirty) emit songsChanged();
-        if (queueDirty) emit queueChanged();
-        emit currentSongChanged();
-        requestCoverPalette(highCover);
-        cacheCover(highCover);
+        startResolvedPlayback(song, mediaUrl, autoplay, serial);
     });
 }
 
@@ -2035,10 +2169,11 @@ void MusicBridge::requestPlayLevel(const QJsonObject &song, const QStringList &l
     if (levelIndex >= levels.size()) {
         if (!song.value("vip").toBool()) {
             const QString id = song.value("platformId").toString();
-            m_player.setSource(QUrl(QStringLiteral("https://music.163.com/song/media/outer/url?id=") + id + ".mp3"));
-            if (autoplay) m_player.play();
+            startResolvedPlayback(song,
+                QStringLiteral("https://music.163.com/song/media/outer/url?id=") + id + QStringLiteral(".mp3"),
+                autoplay, serial);
         } else {
-            show_toast(QStringLiteral("无法获取 VIP 音源，请确认网易云会员登录状态"));
+            skipUnavailableTrack(QStringLiteral("无法获取 VIP 音源，请确认网易云会员登录状态"));
         }
         return;
     }
@@ -2056,15 +2191,25 @@ void MusicBridge::requestPlayLevel(const QJsonObject &song, const QStringList &l
         reply->deleteLater();
         if (serial != m_playRequestSerial) return;
         QString mediaUrl;
+        QJsonObject media;
         if (networkOk) {
             const QJsonDocument document = QJsonDocument::fromJson(payload);
             const QJsonArray data = document.object().value("data").toArray();
-            if (!data.isEmpty()) mediaUrl = data.first().toObject().value("url").toString();
+            if (!data.isEmpty()) {
+                media = data.first().toObject();
+                mediaUrl = media.value(QStringLiteral("url")).toString();
+            }
         }
         if (!mediaUrl.isEmpty()) {
-            m_player.setSource(QUrl(mediaUrl));
-            if (autoplay) m_player.play();
-            return;
+            const QString source = song.value(QStringLiteral("source")).toString();
+            const bool vipActive = m_accounts.value(source).toObject()
+                                       .value(QStringLiteral("vipActive")).toBool();
+            if (!vipActive || !isShortTrialResponse(media, song)) {
+                startResolvedPlayback(song, mediaUrl, autoplay, serial);
+                return;
+            }
+            appendTrace(QByteArray("player:trial-rejected level=")
+                        + levels.at(levelIndex).toUtf8());
         }
         requestPlayLevel(song, levels, levelIndex + 1, autoplay, serial);
     });
@@ -2080,11 +2225,6 @@ QJsonArray MusicBridge::parseYrc(const QString &text)
     return LyricParser::parseYrc(text);
 }
 
-QJsonArray MusicBridge::parseKrc(const QString &text)
-{
-    return LyricParser::parseKrc(text);
-}
-
 QJsonArray MusicBridge::parseQrc(const QString &document)
 {
     return LyricParser::parseQrc(document);
@@ -2097,24 +2237,28 @@ QString MusicBridge::filterQqLyricLines(const QString &text)
 
 void MusicBridge::requestLyrics(const QJsonObject &song)
 {
+    const quint64 serial = ++m_lyricRequestSerial;
+    m_lyrics = {};
+    emit lyricsChanged();
+
     if (song.value("source").toString() == "local") {
         const QUrl audioUrl(song.value("audioUrl").toString());
         QFileInfo audioFile(audioUrl.toLocalFile());
         QFile lrc(QDir(audioFile.absolutePath()).filePath(audioFile.completeBaseName() + QStringLiteral(".lrc")));
         m_lyrics = lrc.open(QIODevice::ReadOnly) ? parseLrc(QString::fromUtf8(lrc.readAll())) : QJsonArray{};
-        emit lyricsChanged();
+        if (serial == m_lyricRequestSerial) emit lyricsChanged();
         return;
     }
     if (song.value("source").toString() == "qq") {
         QUrl url(QStringLiteral("http://127.0.0.1:") + QString::number(m_qqPort) + QStringLiteral("/getLyric"));
         QUrlQuery params;
         params.addQueryItem("songmid", song.value("platformId").toString());
-        if (!m_qqCookie.isEmpty()) params.addQueryItem("cookie", m_qqCookie);
         url.setQuery(params);
         auto *reply = m_network.get(QNetworkRequest(url));
-        connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        connect(reply, &QNetworkReply::finished, this, [this, reply, serial] {
             const QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
             reply->deleteLater();
+            if (serial != m_lyricRequestSerial) return;
             QJsonObject lyricData = root.value("response").toObject();
             if (lyricData.isEmpty()) lyricData = root.value("data").toObject();
             if (lyricData.value("lyric").isUndefined()) {
@@ -2162,27 +2306,22 @@ void MusicBridge::requestLyrics(const QJsonObject &song)
         });
         return;
     }
-    if (song.value("source").toString() == "kugou") {
-        requestKugouLyrics(song);
-        return;
-    }
     QUrlQuery query;
     query.addQueryItem("id", song.value("platformId").toString());
     QNetworkRequest request{localApiUrl(QStringLiteral("/lyric/new"), query)};
     request.setRawHeader("User-Agent", "Mozilla/5.0");
     auto *reply = m_network.get(request);
-    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, serial] {
         const auto document = QJsonDocument::fromJson(reply->readAll());
         reply->deleteLater();
+        if (serial != m_lyricRequestSerial) return;
         if (!document.isObject()) return;
         const QJsonObject root = document.object();
         const QString yrc = root.value("yrc").toObject().value("lyric").toString();
         const QString lrc = root.value("lrc").toObject().value("lyric").toString();
-        QJsonArray parsed = parseYrc(yrc);
+        const QJsonArray yrcLines = parseYrc(yrc);
         const QJsonArray lrcLines = parseLrc(lrc);
-        if (parsed.isEmpty()) {
-            parsed = lrcLines;
-        }
+        QJsonArray parsed = LyricParser::preferCompleteLyrics(yrcLines, lrcLines);
 
         const QJsonArray translations = parseLrc(root.value("tlyric").toObject().value("lyric").toString());
         for (int i = 0; i < parsed.size(); ++i) {
@@ -2203,127 +2342,6 @@ void MusicBridge::requestLyrics(const QJsonObject &song)
     });
 }
 
-void MusicBridge::requestKugouLyrics(const QJsonObject &song)
-{
-    const QString hash = song.value("platformId").toString();
-    if (hash.isEmpty()) {
-        m_lyrics = {};
-        emit lyricsChanged();
-        return;
-    }
-    requestKugouLyricSearch(song, hash, 0);
-}
-
-void MusicBridge::requestKugouLyricSearch(const QJsonObject &song, const QString &hash, int attempt)
-{
-    QUrl url(QStringLiteral("http://127.0.0.1:") + QString::number(m_kugouPort)
-             + QStringLiteral("/search/lyric"));
-    QUrlQuery params;
-    params.addQueryItem("hash", hash);
-    if (!song.value("kugouAlbumAudioId").toString().isEmpty())
-        params.addQueryItem("album_audio_id", song.value("kugouAlbumAudioId").toString());
-    params.addQueryItem("duration", QString::number(song.value("duration").toInt() * 1000));
-    if (attempt > 0)
-        params.addQueryItem("keywords", (song.value("name").toString()
-            + QLatin1Char(' ') + song.value("artist").toString()).trimmed());
-      if (!m_kugouCookie.isEmpty())
-          params.addQueryItem(QStringLiteral("cookie"), m_kugouCookie);
-    url.setQuery(params);
-    auto *reply = m_network.get(QNetworkRequest(url));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, song, hash, attempt] {
-        const QByteArray payload = reply->readAll();
-        const bool ok = reply->error() == QNetworkReply::NoError;
-        reply->deleteLater();
-        if (!ok || payload.isEmpty()) {
-            m_lyrics = {};
-            emit lyricsChanged();
-            return;
-        }
-        const QJsonObject root = QJsonDocument::fromJson(payload).object();
-        auto pick = [](const QJsonObject &o) {
-            if (o.value(QStringLiteral("candidates")).isArray())
-                return o.value(QStringLiteral("candidates")).toArray();
-            if (o.value(QStringLiteral("info")).isArray())
-                return o.value(QStringLiteral("info")).toArray();
-            return QJsonArray{};
-        };
-        QJsonArray candidates = pick(root);
-        const QJsonObject body = root.value(QStringLiteral("body")).toObject();
-        if (candidates.isEmpty() && !body.isEmpty()) {
-            candidates = pick(body);
-            if (candidates.isEmpty())
-                candidates = pick(body.value(QStringLiteral("data")).toObject());
-        }
-        if (candidates.isEmpty())
-            candidates = pick(root.value(QStringLiteral("data")).toObject());
-
-        QString id;
-        QString accessKey;
-        for (const QJsonValue &value : std::as_const(candidates)) {
-            const QJsonObject item = value.toObject();
-            const QString cid = item.value(QStringLiteral("id")).toString();
-            const QString key = item.value(QStringLiteral("accesskey")).toString();
-            if (!cid.isEmpty() && !key.isEmpty()) { id = cid; accessKey = key; break; }
-        }
-        if (id.isEmpty() || accessKey.isEmpty()) {
-            if (attempt == 0) {
-                requestKugouLyricSearch(song, hash, 1);
-            } else {
-                m_lyrics = {};
-                emit lyricsChanged();
-            }
-            return;
-        }
-        requestKugouLyricContent(id, accessKey, 0);
-    });
-}
-
-void MusicBridge::requestKugouLyricContent(const QString &id, const QString &accessKey, int fmtIndex)
-{
-    const QStringList formats{QStringLiteral("krc"), QStringLiteral("lrc")};
-    if (fmtIndex >= formats.size()) {
-        m_lyrics = {};
-        emit lyricsChanged();
-        return;
-    }
-    QUrl url(QStringLiteral("http://127.0.0.1:") + QString::number(m_kugouPort)
-             + QStringLiteral("/lyric"));
-    QUrlQuery params;
-    params.addQueryItem("id", id);
-    params.addQueryItem("accesskey", accessKey);
-    params.addQueryItem("fmt", formats.at(fmtIndex));
-    params.addQueryItem("decode", QStringLiteral("true"));
-      if (!m_kugouCookie.isEmpty())
-          params.addQueryItem(QStringLiteral("cookie"), m_kugouCookie);
-    url.setQuery(params);
-    auto *reply = m_network.get(QNetworkRequest(url));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, id, accessKey, fmtIndex] {
-        const QByteArray payload = reply->readAll();
-        reply->deleteLater();
-        const QJsonObject root = QJsonDocument::fromJson(payload).object();
-        const QJsonObject body = root.value(QStringLiteral("body")).toObject();
-        const QJsonObject data = body.value(QStringLiteral("data")).toObject();
-        const QJsonObject rootData = root.value(QStringLiteral("data")).toObject();
-        QString content = root.value(QStringLiteral("decodeContent")).toString();
-        if (content.isEmpty()) content = root.value(QStringLiteral("content")).toString();
-        if (content.isEmpty()) content = body.value(QStringLiteral("decodeContent")).toString();
-        if (content.isEmpty()) content = data.value(QStringLiteral("decodeContent")).toString();
-        if (content.isEmpty()) content = body.value(QStringLiteral("content")).toString();
-        if (content.isEmpty()) content = data.value(QStringLiteral("content")).toString();
-        if (content.isEmpty()) content = rootData.value(QStringLiteral("decodeContent")).toString();
-        if (content.isEmpty()) content = rootData.value(QStringLiteral("content")).toString();
-        content.remove(QChar(0xFEFF));
-
-        QJsonArray parsed = parseKrc(content);
-        if (parsed.isEmpty()) parsed = parseLrc(content);
-        if (!parsed.isEmpty()) {
-            m_lyrics = parsed;
-            emit lyricsChanged();
-            return;
-        }
-        requestKugouLyricContent(id, accessKey, fmtIndex + 1);
-    });
-}
 void MusicBridge::toggle_play() { if (isPlaying()) m_player.pause(); else if (!m_current.isEmpty()) m_player.play(); else if (!m_queue.isEmpty()) setCurrentIndex(0); }
 void MusicBridge::seek(int milliseconds) { m_player.setPosition(std::max(0, milliseconds)); }
 void MusicBridge::next() { if (m_queue.isEmpty()) return; int index = m_currentIndex < 0 ? 0 : m_shuffle ? QRandomGenerator::global()->bounded(m_queue.size()) : (m_currentIndex + 1 >= m_queue.size() ? (m_repeatMode == QStringLiteral("all") ? 0 : m_currentIndex) : m_currentIndex + 1); setCurrentIndex(index); }
@@ -2332,7 +2350,7 @@ void MusicBridge::remove_queue_index(int index)
 {
     if (index < 0 || index >= m_queue.size()) return;
     m_queue.removeAt(index);
-    // 删除后按当前歌曲 id 重新定位索引。原版 Electron 的 removeFromQueue
+    // 删除后按当前歌曲 id 重新定位索引，避免索引错位
     // 以 songId 过滤后重新 findIndex，这里复刻同一语义，避免删除当前播放
     // 项之前的条目时 m_currentIndex 漂移导致下一首/上一首错位。
     const QString currentId = m_current.value("id").toString();
@@ -2377,7 +2395,14 @@ void MusicBridge::set_setting_value(const QString &key, const QVariant &value)
     saveSettings();
     emit settingsChanged();
 }
-void MusicBridge::set_audio_quality(const QString &quality) { m_settings.insert("audioQuality", quality); saveSettings(); emit settingsChanged(); }
+void MusicBridge::set_audio_quality(const QString &quality)
+{
+    if (m_settings.value(QStringLiteral("audioQuality")).toString() == quality) return;
+    m_settings.insert(QStringLiteral("audioQuality"), quality);
+    invalidatePlayUrlCache();
+    saveSettings();
+    emit settingsChanged();
+}
 void MusicBridge::set_lyric_offset(int milliseconds)
 {
     const int clamped = std::clamp(milliseconds, -2000, 2000);
@@ -2464,8 +2489,8 @@ void MusicBridge::checkForUpdates(bool silent)
         }
         if (compareVersions(tag, QStringLiteral(BETA_APP_VERSION)) > 0) {
             show_toast(QStringLiteral("发现新版本 %1，正在打开发布页面").arg(tag));
-            QDesktopServices::openUrl(QUrl(release.value(QStringLiteral("html_url")).toString(
-                QStringLiteral("https://github.com/RubenCampoa/Beta-music-player/releases/latest"))));
+            QDesktopServices::openUrl(QUrl(QStringLiteral(
+                "https://github.com/RubenCampoa/Beta-music-player/releases/latest")));
         } else if (!silent) {
             show_toast(QStringLiteral("当前已经是最新版本 (v%1)").arg(QStringLiteral(BETA_APP_VERSION)));
         }
@@ -2522,12 +2547,6 @@ void MusicBridge::begin_login(const QString &platform)
         requestQqLoginQr();
         return;
     }
-    if (platform == "kugou") {
-        m_loginStatus = QStringLiteral("正在生成酷狗概念版微信登录二维码");
-        emit loginStateChanged();
-        requestKugouLoginQr();
-        return;
-    }
     if (platform != "netease") {
         m_loginStatus = QStringLiteral("登录接口仍在迁移");
         emit loginStateChanged();
@@ -2576,7 +2595,6 @@ void MusicBridge::requestLoginQrImage(const QString &key)
 
 void MusicBridge::pollLoginQr()
 {
-    if (m_loginPlatform == "kugou") { pollKugouLoginQr(); return; }
     if (m_loginQrKey.isEmpty()) return;
     if (m_loginPlatform == "qq") {
         const QJsonObject state = QJsonDocument::fromJson(m_loginQrKey.toUtf8()).object();
@@ -2599,6 +2617,8 @@ void MusicBridge::pollLoginQr()
             if (cookie.isEmpty()) { m_loginStatus = QStringLiteral("QQ 登录成功但未收到会话 Cookie"); emit loginStateChanged(); return; }
             m_loginTimer.stop();
             m_qqCookie = cookie;
+            refreshSidecarCookies();
+            invalidatePlayUrlCache();
             requestQqAccount();
         });
         return;
@@ -2657,7 +2677,6 @@ void MusicBridge::requestQqAccount()
     QUrl url(QStringLiteral("http://127.0.0.1:") + QString::number(m_qqPort) + QStringLiteral("/user/getUserDetail"));
     QUrlQuery query;
     query.addQueryItem("uin", uin);
-    query.addQueryItem("cookie", m_qqCookie);
     url.setQuery(query);
     auto *reply = m_network.get(QNetworkRequest(url));
     connect(reply, &QNetworkReply::finished, this, [this, reply, uin] {
@@ -2675,7 +2694,61 @@ void MusicBridge::requestQqAccount()
         m_accounts.insert("qq", account);
         cacheAvatar(account.value("avatarUrl").toString(), QStringLiteral("qq"));
         emit accountChanged();
+        requestQqVipInfo();
         requestQqUserPlaylists(uin);
+    });
+}
+
+void MusicBridge::requestQqVipInfo()
+{
+    if (m_qqCookie.isEmpty()) return;
+    const QUrl url(QStringLiteral("http://127.0.0.1:") + QString::number(m_qqPort)
+                   + QStringLiteral("/user/getVipInfo"));
+    QNetworkRequest request(url);
+    request.setTransferTimeout(12000);
+    auto *reply = m_network.get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        const QByteArray payload = reply->readAll();
+        const bool ok = reply->error() == QNetworkReply::NoError;
+        reply->deleteLater();
+        if (!ok || m_qqCookie.isEmpty()) return;
+
+        const QJsonObject root = QJsonDocument::fromJson(payload).object();
+        QJsonObject data = root.value(QStringLiteral("response")).toObject()
+                               .value(QStringLiteral("req_1")).toObject()
+                               .value(QStringLiteral("data")).toObject();
+        if (data.isEmpty())
+            data = root.value(QStringLiteral("response")).toObject()
+                       .value(QStringLiteral("data")).toObject();
+        if (data.isEmpty()) return;
+
+        const QJsonObject identity = data.value(QStringLiteral("identity")).toObject();
+        const bool hugeVip = jsonPositive(identity.value(QStringLiteral("HugeVip")));
+        const bool luxuryVip = jsonPositive(data.value(QStringLiteral("svip")));
+        const bool greenVip = jsonPositive(identity.value(QStringLiteral("vip")));
+        const bool groupVip = jsonPositive(identity.value(QStringLiteral("GroupVipFlag")));
+        const bool active = hugeVip || luxuryVip || greenVip || groupVip;
+        QString label = QStringLiteral("普通用户");
+        if (hugeVip) label = QStringLiteral("超级会员");
+        else if (luxuryVip) label = QStringLiteral("豪华绿钻");
+        else if (greenVip) label = QStringLiteral("绿钻会员");
+        else if (groupVip) label = QStringLiteral("团体会员");
+
+        const int level = active ? jsonInteger(identity.value(QStringLiteral("level"))) : 0;
+        if (active && level > 0) label += QStringLiteral(" Lv.%1").arg(level);
+        const QDate expiry = latestQqExpiry(identity, data);
+        const QString expiryText = active && expiry.isValid()
+            ? expiry.toString(QStringLiteral("yyyy-MM-dd")) : QString();
+
+        QJsonObject account = m_accounts.value(QStringLiteral("qq")).toObject();
+        if (account.isEmpty()) return;
+        account.insert(QStringLiteral("vipActive"), active);
+        account.insert(QStringLiteral("vipLabel"), label);
+        account.insert(QStringLiteral("vipLevel"), level);
+        account.insert(QStringLiteral("vipExpireDate"), expiryText);
+        m_accounts.insert(QStringLiteral("qq"), account);
+        saveLegacyStorage();
+        emit accountChanged();
     });
 }
 
@@ -2691,7 +2764,6 @@ void MusicBridge::requestQqCreatedPlaylists(const QString &uin)
     query.addQueryItem("uin", uin);
     query.addQueryItem("offset", "0");
     query.addQueryItem("limit", "50");
-    query.addQueryItem("cookie", m_qqCookie);
     url.setQuery(query);
     auto *reply = m_network.get(QNetworkRequest(url));
     connect(reply, &QNetworkReply::finished, this, [this, reply, uin] {
@@ -2709,7 +2781,50 @@ void MusicBridge::requestQqCreatedPlaylists(const QString &uin)
             const QJsonObject playlist = qqPlaylistFromJson(value.toObject());
             if (!playlist.isEmpty()) created.append(playlist);
         }
-        requestQqCollectedPlaylists(uin, created);
+        requestQqLikedPlaylist(uin, created);
+    });
+}
+
+void MusicBridge::requestQqLikedPlaylist(const QString &uin, const QJsonArray &createdPlaylists)
+{
+    QUrl url(QStringLiteral("http://127.0.0.1:") + QString::number(m_qqPort)
+             + QStringLiteral("/user/getUserLikedSongs"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("uin"), uin);
+    query.addQueryItem(QStringLiteral("offset"), QStringLiteral("0"));
+    query.addQueryItem(QStringLiteral("limit"), QStringLiteral("50"));
+    url.setQuery(query);
+    auto *reply = m_network.get(QNetworkRequest(url));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, uin, createdPlaylists] {
+        const QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
+        reply->deleteLater();
+        QJsonArray merged = createdPlaylists;
+        QJsonObject data = root.value(QStringLiteral("response")).toObject()
+                               .value(QStringLiteral("data")).toObject();
+        if (data.isEmpty()) data = root.value(QStringLiteral("data")).toObject();
+        QJsonObject likedInfo = data.value(QStringLiteral("info")).toObject();
+        if (likedInfo.isEmpty()) {
+            const QJsonArray songs = data.value(QStringLiteral("songs")).toArray();
+            if (!songs.isEmpty()) likedInfo = songs.first().toObject();
+        }
+        if (!likedInfo.isEmpty()) {
+            if (!likedInfo.contains(QStringLiteral("dissid")))
+                likedInfo.insert(QStringLiteral("dissid"), likedInfo.value(QStringLiteral("id")));
+            if (!likedInfo.contains(QStringLiteral("dissname")))
+                likedInfo.insert(QStringLiteral("dissname"), likedInfo.value(QStringLiteral("title")));
+            if (!likedInfo.contains(QStringLiteral("songnum")))
+                likedInfo.insert(QStringLiteral("songnum"), likedInfo.value(QStringLiteral("songCount")));
+            const QJsonObject playlist = qqPlaylistFromJson(likedInfo);
+            bool duplicate = false;
+            for (const QJsonValue &value : std::as_const(merged)) {
+                if (value.toObject().value(QStringLiteral("id")) == playlist.value(QStringLiteral("id"))) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!playlist.isEmpty() && !duplicate) merged.prepend(playlist);
+        }
+        requestQqCollectedPlaylists(uin, merged);
     });
 }
 
@@ -2720,7 +2835,6 @@ void MusicBridge::requestQqCollectedPlaylists(const QString &uin, const QJsonArr
     query.addQueryItem("uin", uin);
     query.addQueryItem("page", "1");
     query.addQueryItem("limit", "50");
-    query.addQueryItem("cookie", m_qqCookie);
     url.setQuery(query);
     auto *reply = m_network.get(QNetworkRequest(url));
     connect(reply, &QNetworkReply::finished, this, [this, reply, createdPlaylists] {
@@ -2761,6 +2875,10 @@ void MusicBridge::requestQqCollectedPlaylists(const QString &uin, const QJsonArr
             merged.append(value);
         }
 
+        // 两个只读上游偶发 502 时保留上次已同步的数据，避免一次刷新把
+        // 用户侧边栏清空；任一接口成功返回歌单时再替换缓存。
+        if (merged.isEmpty())
+            merged = m_userPlaylistsByPlatform.value(QStringLiteral("qq")).toArray();
         m_userPlaylists = merged;
         m_userPlaylistsByPlatform.insert("qq", merged);
         saveLegacyStorage();
@@ -2777,266 +2895,20 @@ void MusicBridge::set_qq_cookie(const QString &cookie)
     const QString trimmed = cookie.trimmed();
     if (trimmed.isEmpty()) { show_toast(QStringLiteral("Cookie 不能为空")); return; }
     m_qqCookie = trimmed;
+    refreshSidecarCookies();
+    invalidatePlayUrlCache();
     saveLegacyStorage();
     m_loginStatus = QStringLiteral("QQ 音乐 Cookie 已绑定，正在获取账号信息…");
     emit loginStateChanged();
     requestQqAccount();
 }
 
-void MusicBridge::requestKugouLoginQr()
-{
-    QUrl url(QStringLiteral("http://127.0.0.1:") + QString::number(m_kugouPort) + QStringLiteral("/login/wx/create"));
-    auto *reply = m_network.get(QNetworkRequest(url));
-    connect(reply, &QNetworkReply::finished, this, [this, reply] {
-        const QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
-        reply->deleteLater();
-        const QJsonObject data = root.value("data").toObject();
-        const QJsonObject qrcode = root.value("qrcode").toObject().isEmpty()
-            ? data.value("qrcode").toObject() : root.value("qrcode").toObject();
-        const QString uuid = root.value("uuid").toString(data.value("uuid").toString());
-        const QString base64 = qrcode.value("qrcodebase64").toString(qrcode.value("base64").toString());
-        if (uuid.isEmpty() || base64.isEmpty()) {
-            m_loginStatus = QStringLiteral("酷狗微信二维码生成失败，请确认本地酷狗 API 服务已启动");
-            emit loginStateChanged();
-            return;
-        }
-        m_kugouLoginUuid = uuid;
-        m_loginQrImage = base64.startsWith("data:image/") ? base64
-            : QStringLiteral("data:image/jpeg;base64,") + base64;
-        m_loginStatus = QStringLiteral("请使用微信扫描二维码登录酷狗概念版");
-        m_loginTimer.start();
-        emit loginStateChanged();
-    });
-}
-
-void MusicBridge::pollKugouLoginQr()
-{
-    if (m_kugouLoginUuid.isEmpty()) return;
-    QUrl url(QStringLiteral("http://127.0.0.1:") + QString::number(m_kugouPort) + QStringLiteral("/login/wx/check"));
-    QUrlQuery query;
-    query.addQueryItem("uuid", m_kugouLoginUuid);
-    query.addQueryItem("timestamp", QString::number(QDateTime::currentMSecsSinceEpoch()));
-    url.setQuery(query);
-    auto *reply = m_network.get(QNetworkRequest(url));
-    connect(reply, &QNetworkReply::finished, this, [this, reply] {
-        const QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
-        reply->deleteLater();
-        const QJsonObject data = root.value("data").toObject();
-        const int status = root.value("wx_errcode").toInt(data.value("wx_errcode").toInt(408));
-        if (status == 402) {
-            m_loginTimer.stop();
-            m_loginStatus = QStringLiteral("二维码已过期，请点击刷新");
-            emit loginStateChanged();
-        } else if (status == 403) {
-            m_loginTimer.stop();
-            m_loginStatus = QStringLiteral("已拒绝微信登录");
-            emit loginStateChanged();
-        } else if (status == 404) {
-            m_loginStatus = QStringLiteral("已扫码，请在微信上确认登录");
-            emit loginStateChanged();
-        } else if (status == 405) {
-            const QString wxCode = root.value("wx_code").toString(data.value("wx_code").toString());
-            if (!wxCode.isEmpty()) {
-                m_loginTimer.stop();
-                completeKugouLogin(wxCode);
-            }
-        }
-    });
-}
-
-void MusicBridge::completeKugouLogin(const QString &wxCode)
-{
-    QUrl url(QStringLiteral("http://127.0.0.1:") + QString::number(m_kugouPort) + QStringLiteral("/login/openplat"));
-    QUrlQuery query; query.addQueryItem("code", wxCode);
-    url.setQuery(query);
-    auto *reply = m_network.get(QNetworkRequest(url));
-    connect(reply, &QNetworkReply::finished, this, [this, reply] {
-        const QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
-        reply->deleteLater();
-        // 兼容 kugoumusicapi 直接返回或 body 包装两种形态。
-        QJsonObject data = root.value("data").toObject();
-        if (data.isEmpty() && root.value("body").isObject())
-            data = root.value("body").toObject().value("data").toObject();
-        const QString token = data.value("token").toString(data.value("access_token").toString());
-        const QString userId = data.value("userid").toString(data.value("user_id").toString());
-        if (token.isEmpty() || userId.isEmpty()) {
-            m_loginStatus = QStringLiteral("酷狗微信登录凭证转换失败，请刷新重试");
-            emit loginStateChanged();
-            return;
-        }
-        QStringList parts{QStringLiteral("token=") + token, QStringLiteral("userid=") + userId};
-        const QString vipType = data.value("vip_type").toString();
-        const QString vipToken = data.value("vip_token").toString();
-        const QString t1 = data.value("t1").toString();
-        if (!vipType.isEmpty()) parts << QStringLiteral("vip_type=") + vipType;
-        if (!vipToken.isEmpty()) parts << QStringLiteral("vip_token=") + vipToken;
-        if (!t1.isEmpty()) parts << QStringLiteral("t1=") + t1;
-        m_kugouCookie = parts.join(QStringLiteral("; "));
-        saveLegacyStorage();
-        requestKugouAccount();
-    });
-}
-
-void MusicBridge::requestKugouAccount()
-{
-    // 从 cookie 解析 userid/token 作为显式查询参数（与原版 getUserAccount 一致）。
-    const auto cookieValue = [](const QString &cookie, const QString &name) {
-        for (const QString &part : cookie.split(';')) {
-            const QString trimmed = part.trimmed();
-            if (trimmed.startsWith(name + '=')) {
-                const QString value = trimmed.mid(name.size() + 1);
-                return QUrl::fromPercentEncoding(value.toUtf8());
-            }
-        }
-        return QString();
-    };
-    const QString userId = cookieValue(m_kugouCookie, QStringLiteral("userid"));
-    const QString token = cookieValue(m_kugouCookie, QStringLiteral("token"));
-    if (userId.isEmpty() || token.isEmpty()) {
-        m_loginStatus = QStringLiteral("酷狗登录凭证不完整，请重新登录");
-        emit loginStateChanged();
-        return;
-    }
-    QUrl url(QStringLiteral("http://127.0.0.1:") + QString::number(m_kugouPort) + QStringLiteral("/user/detail"));
-    QUrlQuery query;
-    query.addQueryItem("userid", userId);
-    query.addQueryItem("token", token);
-    url.setQuery(query);
-    auto *reply = m_network.get(QNetworkRequest(url));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, userId] {
-        const QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
-        reply->deleteLater();
-        QJsonObject user = root.value("data").toObject();
-        if (user.isEmpty()) user = root;
-        const QJsonObject accountObj = user.value("account").toObject();
-        const QString nickname = user.value("nickname").toString(
-            user.value("username").toString(accountObj.value("nickname").toString(QStringLiteral("酷狗概念版用户"))));
-        QString avatar = user.value("pic").toString(user.value("avatar").toString(accountObj.value("pic").toString()));
-        avatar = highResolutionCover(avatar, "kugou");
-        QJsonObject account{{"userId", userId}, {"nickname", nickname},
-            {"avatarUrl", avatar}, {"platform", "kugou"}};
-        m_accounts.insert("kugou", account);
-        if (!avatar.isEmpty()) cacheAvatar(avatar, QStringLiteral("kugou"));
-        emit accountChanged();
-        const auto cookieValue = [](const QString &cookie, const QString &name) {
-            for (const QString &part : cookie.split(';')) {
-                const QString trimmed = part.trimmed();
-                if (trimmed.startsWith(name + '=')) {
-                    return QUrl::fromPercentEncoding(trimmed.mid(name.size() + 1).toUtf8());
-                }
-            }
-            return QString();
-        };
-        const QString token = cookieValue(m_kugouCookie, QStringLiteral("token"));
-        requestKugouUserPlaylists(userId, token);
-        m_loginStatus = QStringLiteral("酷狗概念版登录成功");
-        emit loginStateChanged();
-        if (m_loginModalOpen) { m_loginModalOpen = false; emit loginModalChanged(false); }
-        show_toast(QStringLiteral("酷狗概念版账号已同步"));
-    });
-}
-
-void MusicBridge::requestKugouUserPlaylists(const QString &userId, const QString &token)
-{
-    if (userId.isEmpty() || token.isEmpty()) return;
-    QUrl url(QStringLiteral("http://127.0.0.1:") + QString::number(m_kugouPort) + QStringLiteral("/user/playlist"));
-    QUrlQuery query;
-    query.addQueryItem("userid", userId);
-    query.addQueryItem("token", token);
-    query.addQueryItem("page", "1");
-    query.addQueryItem("pagesize", "50");
-    url.setQuery(query);
-    auto *reply = m_network.get(QNetworkRequest(url));
-    connect(reply, &QNetworkReply::finished, this, [this, reply] {
-        const QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
-        reply->deleteLater();
-        QJsonObject data = root.value("data").toObject();
-        if (data.isEmpty() && root.value("body").isObject())
-            data = root.value("body").toObject().value("data").toObject();
-
-        QJsonArray raw = data.value("info").toArray();
-        if (raw.isEmpty()) raw = data.value("lists").toArray();
-        if (raw.isEmpty()) raw = data.value("list").toArray();
-        if (raw.isEmpty()) raw = data.value("collections").toArray();
-        if (raw.isEmpty()) raw = data.value("collection").toArray();
-        if (raw.isEmpty()) raw = findFirstPlaylistArrayInJson(root);
-
-        QJsonArray playlists;
-        QSet<QString> seen;
-        for (const QJsonValue &value : raw) {
-            QJsonObject item = value.toObject();
-            if (item.value("info").isObject()) item = item.value("info").toObject();
-            QString listId = item.value("listid").toVariant().toString();
-            if (listId.isEmpty()) listId = item.value("list_id").toVariant().toString();
-            if (listId.isEmpty()) listId = item.value("specialid").toVariant().toString();
-            if (listId.isEmpty()) listId = item.value("special_id").toVariant().toString();
-            QString globalCollectionId = item.value("global_collection_id").toVariant().toString();
-            if (globalCollectionId.isEmpty()) globalCollectionId = item.value("global_collectionid").toVariant().toString();
-              // 与 Electron kugouMusicApi.getUserPlaylists 对齐：
-              // 用户歌单必须以 kg_user_ 前缀打开 /playlist/track/all/new；
-              // 同时携带 global_collection_id 时编码到 id 中，供云端歌单接口回退。
-              QString id;
-              if (!listId.isEmpty()) {
-                  id = QStringLiteral("kg_user_") + listId;
-                  if (!globalCollectionId.isEmpty())
-                      id += QStringLiteral("::") + QString::fromUtf8(QUrl::toPercentEncoding(globalCollectionId));
-              } else if (!globalCollectionId.isEmpty()) {
-                  id = QStringLiteral("kg_pl_") + globalCollectionId;
-              } else {
-                  id = item.value("id").toVariant().toString();
-              }
-            if (id.isEmpty() || seen.contains(id)) continue;
-            seen.insert(id);
-
-            QString name = item.value("name").toString(item.value("specialname").toString(item.value("listname").toString(item.value("title").toString("酷狗歌单"))));
-            QString cover = item.value("pic").toString(item.value("imgurl").toString(item.value("cover").toString(item.value("flexible_cover").toString())));
-            if (cover.contains("{size}")) cover.replace("{size}", "400");
-            int count = item.value("count").toInt(item.value("songcount").toInt(item.value("total").toInt(item.value("song_count").toInt())));
-
-            playlists.append(QJsonObject{
-                {"id", id},
-                {"name", name},
-                {"cover", highResolutionCover(cover, "kugou")},
-                {"trackCount", count},
-                {"source", "kugou"}
-            });
-        }
-
-        m_userPlaylistsByPlatform.insert("kugou", playlists);
-        if (m_platform == "kugou") {
-            m_userPlaylists = playlists;
-            emit userPlaylistsChanged();
-        }
-        saveLegacyStorage();
-    });
-}
-
-void MusicBridge::requestKugouDeviceRegistration(std::function<void()> onReady)
-{
-    if (!m_kugouDfid.isEmpty()) { onReady(); return; }
-    QUrl url(QStringLiteral("http://127.0.0.1:") + QString::number(m_kugouPort)
-             + QStringLiteral("/register/dev"));
-      QUrlQuery query;
-      const QString userId = cookieValue(m_kugouCookie, QStringLiteral("userid"));
-      const QString token = cookieValue(m_kugouCookie, QStringLiteral("token"));
-      if (!userId.isEmpty()) query.addQueryItem(QStringLiteral("userid"), userId);
-      if (!token.isEmpty()) query.addQueryItem(QStringLiteral("token"), token);
-      url.setQuery(query);
-    auto *reply = m_network.get(QNetworkRequest(url));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, onReady] {
-        const QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
-        reply->deleteLater();
-        const QString dfid = root.value(QStringLiteral("data")).toObject()
-            .value(QStringLiteral("dfid")).toString();
-        if (!dfid.isEmpty()) m_kugouDfid = dfid;
-        onReady();
-    });
-}
-
 void MusicBridge::completeNeteaseLogin(const QString &cookie)
 {
     if (cookie.isEmpty()) return;
     m_cookie = cookie;
+    refreshSidecarCookies();
+    invalidatePlayUrlCache();
     requestNeteaseAccount();
 }
 
@@ -3057,7 +2929,64 @@ void MusicBridge::requestNeteaseAccount()
         m_accounts.insert("netease", account);
         cacheAvatar(account.value("avatarUrl").toString(), QStringLiteral("netease"));
         emit accountChanged();
+        requestNeteaseVipInfo(userId);
         requestUserPlaylists(userId);
+    });
+}
+
+void MusicBridge::requestNeteaseVipInfo(const QString &userId)
+{
+    if (m_cookie.isEmpty() || userId.isEmpty()) return;
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("uid"), userId);
+    QNetworkRequest request{localApiUrl(QStringLiteral("/vip/info/v2"), query)};
+    request.setTransferTimeout(12000);
+    auto *reply = m_network.get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        const QByteArray payload = reply->readAll();
+        const bool ok = reply->error() == QNetworkReply::NoError;
+        reply->deleteLater();
+        if (!ok || m_cookie.isEmpty()) return;
+
+        const QJsonObject root = QJsonDocument::fromJson(payload).object();
+        const QJsonObject data = root.value(QStringLiteral("data")).toObject();
+        if (data.isEmpty()) return;
+        const QJsonObject redplus = data.value(QStringLiteral("redplus")).toObject();
+        const QJsonObject associator = data.value(QStringLiteral("associator")).toObject();
+        const QJsonObject musicPackage = data.value(QStringLiteral("musicPackage")).toObject();
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        const qint64 redplusExpiry = jsonInt64(redplus.value(QStringLiteral("expireTime")));
+        const qint64 associatorExpiry = jsonInt64(associator.value(QStringLiteral("expireTime")));
+        const qint64 packageExpiry = jsonInt64(musicPackage.value(QStringLiteral("expireTime")));
+        const bool redplusActive = jsonInteger(redplus.value(QStringLiteral("vipLevel"))) > 0
+            && redplusExpiry > now;
+        const bool associatorActive = jsonInteger(associator.value(QStringLiteral("vipLevel"))) > 0
+            && associatorExpiry > now;
+        const bool packageActive = jsonInteger(musicPackage.value(QStringLiteral("vipLevel"))) > 0
+            && packageExpiry > now;
+        const bool active = redplusActive || associatorActive || packageActive;
+        const int level = active ? jsonInteger(data.value(QStringLiteral("redVipLevel")),
+            std::max({jsonInteger(redplus.value(QStringLiteral("vipLevel"))),
+                      jsonInteger(associator.value(QStringLiteral("vipLevel"))),
+                      jsonInteger(musicPackage.value(QStringLiteral("vipLevel"))) })) : 0;
+        QString label = QStringLiteral("普通用户");
+        if (redplusActive) label = QStringLiteral("黑胶 SVIP");
+        else if (associatorActive) label = QStringLiteral("黑胶 VIP");
+        else if (packageActive) label = QStringLiteral("音乐包会员");
+        if (active && level > 0) label += QStringLiteral(" Lv.%1").arg(level);
+        const qint64 expiry = std::max({redplusActive ? redplusExpiry : 0,
+                                        associatorActive ? associatorExpiry : 0,
+                                        packageActive ? packageExpiry : 0});
+
+        QJsonObject account = m_accounts.value(QStringLiteral("netease")).toObject();
+        if (account.isEmpty()) return;
+        account.insert(QStringLiteral("vipActive"), active);
+        account.insert(QStringLiteral("vipLabel"), label);
+        account.insert(QStringLiteral("vipLevel"), level);
+        account.insert(QStringLiteral("vipExpireDate"), expiryDateText(expiry));
+        m_accounts.insert(QStringLiteral("netease"), account);
+        saveLegacyStorage();
+        emit accountChanged();
     });
 }
 
@@ -3120,11 +3049,9 @@ void MusicBridge::requestUserPlaylists(const QString &userId)
 void MusicBridge::refresh_login_qr() { begin_login(m_loginPlatform); }
 void MusicBridge::login_via_web(const QString &platform)
 {
-    if (platform != QStringLiteral("netease") && platform != QStringLiteral("qq")
-        && platform != QStringLiteral("kugou")) return;
+    if (platform != QStringLiteral("netease") && platform != QStringLiteral("qq")) return;
     const QString name = platform == QStringLiteral("qq") ? QStringLiteral("QQ 音乐")
-        : platform == QStringLiteral("kugou") ? QStringLiteral("酷狗概念版")
-                                              : QStringLiteral("网易云音乐");
+                                                           : QStringLiteral("网易云音乐");
     show_toast(QStringLiteral("已打开 %1 官方网页登录窗口").arg(name));
     emit webLoginRequested(platform);
 }
@@ -3140,10 +3067,6 @@ void MusicBridge::complete_web_login(const QString &platform, const QString &coo
         completeNeteaseLogin(cookie);
     } else if (platform == QStringLiteral("qq")) {
         set_qq_cookie(cookie);
-    } else if (platform == QStringLiteral("kugou")) {
-        m_kugouCookie = cookie;
-        saveLegacyStorage();
-        requestKugouAccount();
     }
     show_toast(QStringLiteral("网页登录凭据已保存，正在同步账号资料"));
 }
@@ -3272,7 +3195,6 @@ void MusicBridge::requestPlaylistDetail(const QJsonObject &playlistSummary)
     }
     const QString source = playlistSummary.value(QStringLiteral("source")).toString(m_platform);
     if (source == QStringLiteral("qq")) { requestQqPlaylistDetail(playlistSummary); return; }
-    if (source == QStringLiteral("kugou")) { requestKugouPlaylistDetail(playlistSummary); return; }
     if (!homeRequest && m_songs.isEmpty()) setBusy(true);
     setLastError({});
     QUrlQuery query;
@@ -3285,6 +3207,7 @@ void MusicBridge::requestPlaylistDetail(const QJsonObject &playlistSummary)
         const QJsonObject detailRoot = QJsonDocument::fromJson(reply->readAll()).object();
         const auto detailError = reply->error();
         reply->deleteLater();
+        if (m_platform != QStringLiteral("netease")) return;
         if (!homeRequest && (requestSerial != m_playlistRequestSerial || requestKey != m_activePlaylistKey)) return;
         const QJsonObject playlist = detailRoot.value(QStringLiteral("playlist")).toObject();
         if (detailError != QNetworkReply::NoError || playlist.isEmpty()) {
@@ -3309,6 +3232,7 @@ void MusicBridge::requestPlaylistDetail(const QJsonObject &playlistSummary)
             const QJsonObject tracksRoot = QJsonDocument::fromJson(tracksReply->readAll()).object();
             const auto tracksError = tracksReply->error();
             tracksReply->deleteLater();
+            if (m_platform != QStringLiteral("netease")) return;
             if (!homeRequest && (requestSerial != m_playlistRequestSerial || requestKey != m_activePlaylistKey)) return;
 
             QJsonArray tracks = tracksRoot.value(QStringLiteral("songs")).toArray();
@@ -3388,9 +3312,8 @@ void MusicBridge::requestQqPlaylistDetail(const QJsonObject &playlistSummary)
     QUrl url(QStringLiteral("http://127.0.0.1:") + QString::number(m_qqPort) + QStringLiteral("/getSongListDetail"));
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("disstid"), id);
-    if (!m_qqCookie.isEmpty()) query.addQueryItem(QStringLiteral("cookie"), m_qqCookie);
     url.setQuery(query);
-    setBusy(true);
+    if (!homeRequest) setBusy(true);
     QNetworkRequest request(url);
     request.setTransferTimeout(20000);
     auto *reply = m_network.get(request);
@@ -3398,6 +3321,7 @@ void MusicBridge::requestQqPlaylistDetail(const QJsonObject &playlistSummary)
         const QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
         const auto error = reply->error();
         reply->deleteLater();
+        if (m_platform != QStringLiteral("qq")) return;
         if (!homeRequest && (requestSerial != m_playlistRequestSerial || requestKey != m_activePlaylistKey)) return;
         const QJsonArray detailList = root.value(QStringLiteral("response")).toObject()
             .value(QStringLiteral("cdlist")).toArray();
@@ -3433,16 +3357,16 @@ void MusicBridge::requestQqPlaylistDetail(const QJsonObject &playlistSummary)
             fallbackParams.addQueryItem(QStringLiteral("key"), fallbackQuery);
             fallbackParams.addQueryItem(QStringLiteral("limit"), QStringLiteral("30"));
             fallbackParams.addQueryItem(QStringLiteral("page"), QStringLiteral("1"));
-            if (!m_qqCookie.isEmpty()) fallbackParams.addQueryItem(QStringLiteral("cookie"), m_qqCookie);
             fallbackUrl.setQuery(fallbackParams);
             QNetworkRequest fallbackRequest(fallbackUrl);
             fallbackRequest.setTransferTimeout(15000);
             auto *fallbackReply = m_network.get(fallbackRequest);
             connect(fallbackReply, &QNetworkReply::finished, this,
-                    [this, fallbackReply, homeRequest, requestKey, requestSerial] {
+                    [this, fallbackReply, playlistSummary, homeRequest, requestKey, requestSerial] {
                 const QByteArray payload = fallbackReply->readAll();
                 const bool ok = fallbackReply->error() == QNetworkReply::NoError;
                 fallbackReply->deleteLater();
+                if (m_platform != QStringLiteral("qq")) return;
                 if (!homeRequest && (requestSerial != m_playlistRequestSerial || requestKey != m_activePlaylistKey)) return;
                 if (!ok || payload.isEmpty()) {
                     setBusy(false);
@@ -3451,6 +3375,11 @@ void MusicBridge::requestQqPlaylistDetail(const QJsonObject &playlistSummary)
                     return;
                 }
                 handleQqSongs(payload);
+                if (homeRequest) cacheCurrentHomeSongs();
+                const QString playlistName = playlistSummary.value(QStringLiteral("name")).toString();
+                if (!homeRequest && (playlistName.contains(QStringLiteral("我喜欢"))
+                                     || playlistName.contains(QStringLiteral("Favorite"), Qt::CaseInsensitive)))
+                    mergeSongsIntoFavorites(m_songs);
                 if (!homeRequest && !m_songs.isEmpty()) {
                     m_playlistDetail.insert(QStringLiteral("count"), m_songs.size());
                     emit playlistDetailChanged();
@@ -3460,8 +3389,13 @@ void MusicBridge::requestQqPlaylistDetail(const QJsonObject &playlistSummary)
         }
         handleQqSongs(QJsonDocument(QJsonObject{{QStringLiteral("data"), QJsonObject{{QStringLiteral("list"), tracks}}}})
                           .toJson(QJsonDocument::Compact));
+        if (homeRequest) cacheCurrentHomeSongs();
         if (!playlistSummary.value(QStringLiteral("_home")).toBool()) {
-            m_playlistDetail = {{"name", detail.value("dissname").toString(playlistSummary.value("name").toString())},
+            const QString playlistName = detail.value("dissname").toString(playlistSummary.value("name").toString());
+            if (playlistName.contains(QStringLiteral("我喜欢"))
+                || playlistName.contains(QStringLiteral("Favorite"), Qt::CaseInsensitive))
+                mergeSongsIntoFavorites(m_songs);
+            m_playlistDetail = {{"name", playlistName},
                 {"description", detail.value("desc").toString()},
                 {"cover", highResolutionCover(detail.value("logo").toString(playlistSummary.value("cover").toString()), "qq")},
                 {"source", "qq"}, {"count", tracks.size()}};
@@ -3472,85 +3406,13 @@ void MusicBridge::requestQqPlaylistDetail(const QJsonObject &playlistSummary)
     });
 }
 
-void MusicBridge::requestKugouPlaylistDetail(const QJsonObject &playlistSummary)
-{
-    const bool homeRequest = playlistSummary.value(QStringLiteral("_home")).toBool();
-    const QString requestKey = playlistCacheKey(playlistSummary);
-    const quint64 requestSerial = homeRequest ? 0 : m_playlistRequestSerial;
-    QString id = playlistSummary.value(QStringLiteral("id")).toString();
-    const bool userPlaylist = id.startsWith(QStringLiteral("kg_user_"));
-    id.remove(QRegularExpression(QStringLiteral("^(?:kg_pl_|kugou_|kg_user_)")));
-    const QStringList pieces = id.split(QStringLiteral("::"));
-    setBusy(true);
-
-    // 酷狗概念版(lite)歌单接口需要已注册设备 dfid，否则上游直接返回 502。
-    requestKugouDeviceRegistration([this, playlistSummary, homeRequest, requestKey,
-                                    requestSerial, userPlaylist, pieces] {
-        QUrl url(QStringLiteral("http://127.0.0.1:") + QString::number(m_kugouPort)
-                 + (userPlaylist ? QStringLiteral("/playlist/track/all/new")
-                                 : QStringLiteral("/playlist/track/all")));
-        QUrlQuery query;
-        query.addQueryItem(userPlaylist ? QStringLiteral("listid") : QStringLiteral("id"),
-                           pieces.value(0));
-        query.addQueryItem(QStringLiteral("page"), QStringLiteral("1"));
-        query.addQueryItem(QStringLiteral("pagesize"), QStringLiteral("1000"));
-          const QString kugouUserId = cookieValue(m_kugouCookie, QStringLiteral("userid"));
-          const QString kugouToken = cookieValue(m_kugouCookie, QStringLiteral("token"));
-          if (userPlaylist && !kugouUserId.isEmpty())
-              query.addQueryItem(QStringLiteral("userid"), kugouUserId);
-          if (userPlaylist && !kugouToken.isEmpty())
-              query.addQueryItem(QStringLiteral("token"), kugouToken);
-        // 统一通过 `cookie` 查询参数传递 dfid / userid / token，与
-        // kugoumusicapi 的 cookie 解析约定一致。
-        QStringList cookieParts;
-        if (!m_kugouDfid.isEmpty())
-            cookieParts << QStringLiteral("dfid=") + m_kugouDfid;
-        for (const QString &part : m_kugouCookie.split(QLatin1Char(';'))) {
-            const int separator = part.indexOf(QLatin1Char('='));
-            if (separator <= 0) continue;
-            const QString key = part.left(separator).trimmed();
-            if (key == QStringLiteral("userid") || key == QStringLiteral("token"))
-                cookieParts << key + QLatin1Char('=') + part.mid(separator + 1).trimmed();
-        }
-        if (!cookieParts.isEmpty())
-            query.addQueryItem(QStringLiteral("cookie"), cookieParts.join(QStringLiteral("; ")));
-        url.setQuery(query);
-
-        QNetworkRequest request(url);
-        request.setTransferTimeout(20000);
-        auto *reply = m_network.get(request);
-        connect(reply, &QNetworkReply::finished, this,
-                [this, reply, playlistSummary, homeRequest, requestKey, requestSerial] {
-            const QByteArray payload = reply->readAll();
-            const auto error = reply->error();
-            reply->deleteLater();
-            if (!homeRequest && (requestSerial != m_playlistRequestSerial
-                                 || requestKey != m_activePlaylistKey)) return;
-            if (error != QNetworkReply::NoError) {
-                setBusy(false); setLastError(QStringLiteral("酷狗概念版歌单加载失败"));
-                show_toast(m_lastError); return;
-            }
-            handleKugouSongs(payload);
-            if (m_songs.isEmpty()) return;
-            if (!homeRequest) {
-                m_playlistDetail = {{"name", playlistSummary.value("name").toString()},
-                    {"description", playlistSummary.value("description").toString()},
-                    {"cover", playlistSummary.value("cover").toString()}, {"source", "kugou"},
-                    {"count", m_songs.size()}};
-                emit playlistDetailChanged();
-                set_view_mode(QStringLiteral("playlist_detail"));
-                storePlaylistCache(playlistSummary, m_playlistDetail, m_songs);
-            }
-        });
-    });
-}
-
 void MusicBridge::logout(const QString &platform)
 {
-    if (platform != "netease" && platform != "qq" && platform != "kugou") return;
+    if (platform != "netease" && platform != "qq") return;
     if (platform == "netease") m_cookie.clear();
     if (platform == "qq") m_qqCookie.clear();
-    if (platform == "kugou") m_kugouCookie.clear();
+    refreshSidecarCookies();
+    invalidatePlayUrlCache();
     m_accounts.remove(platform);
     m_userPlaylistsByPlatform.remove(platform);
     if (m_platform == platform) m_userPlaylists = {};
@@ -3599,7 +3461,7 @@ void MusicBridge::toggle_like(const QString &songId)
             auto *reply = m_network.get(QNetworkRequest(localApiUrl(QStringLiteral("/like"), query)));
             connect(reply, &QNetworkReply::finished, reply, &QObject::deleteLater);
         }
-    } else if (source == QStringLiteral("qq") || source == QStringLiteral("kugou")) {
+    } else if (source == QStringLiteral("qq")) {
         show_toast(QStringLiteral("已保存到本地收藏；当前平台不支持从此客户端写入云端喜欢列表"));
     }
 }

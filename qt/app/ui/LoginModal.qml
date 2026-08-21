@@ -12,12 +12,10 @@ Item {
     readonly property bool isLoggedIn: !!(currentAccount && currentAccount.nickname)
 
     function accent(platform) {
-        return platform === "qq" ? "#10b981"
-             : platform === "kugou" ? "#0ea5e9" : "#f43f5e"
+        return platform === "qq" ? "#10b981" : "#f43f5e"
     }
     function platformName(platform) {
-        return platform === "qq" ? "QQ 音乐"
-             : platform === "kugou" ? "酷狗概念版" : "网易云音乐"
+        return platform === "qq" ? "QQ 音乐" : "网易云音乐"
     }
     function loginTitle(platform) {
         return platformName(platform) + "账号登录"
@@ -140,8 +138,7 @@ Item {
                     Repeater {
                         model: [
                             { key: "netease", name: "网易云" },
-                            { key: "qq", name: "QQ 音乐" },
-                            { key: "kugou", name: "酷狗概念版" }
+                            { key: "qq", name: "QQ 音乐" }
                         ]
                         delegate: Rectangle {
                             required property var modelData
@@ -249,7 +246,7 @@ Item {
                                 color: "#202837"
                                 border.width: 2
                                 border.color: root.accent(bridge.loginPlatform)
-                                clip: true
+                                antialiasing: true
                                 RoundedImage {
                                     anchors.fill: parent
                                     source: root.currentAccount.avatarUrl || ""
@@ -374,7 +371,10 @@ Item {
                                 RotationAnimator on rotation {
                                     from: 0; to: 360; duration: 1100
                                     loops: Animation.Infinite
-                                    running: bridge.loginQrImage === ""
+                                    // The modal stays instantiated for quick reopening, but
+                                    // its spinner must not keep the whole scene graph ticking
+                                    // while the overlay is hidden.
+                                    running: root.visible && bridge.loginQrImage === ""
                                 }
                             }
                             Text {
@@ -474,7 +474,7 @@ Item {
                             }
                             Text {
                                 id: statusText
-                                text: bridge.loginStatus ? bridge.loginStatus : (bridge.loginPlatform === "qq" ? "请使用 QQ 音乐 App 扫码登录" : bridge.loginPlatform === "kugou" ? "请使用微信扫码登录酷狗概念版" : "请使用网易云音乐 App 扫码登录")
+                                text: bridge.loginStatus ? bridge.loginStatus : (bridge.loginPlatform === "qq" ? "请使用 QQ 音乐 App 扫码登录" : "请使用网易云音乐 App 扫码登录")
                                 color: "#f1f5f9"
                                 font.pixelSize: 11
                                 font.weight: Font.DemiBold
@@ -552,7 +552,7 @@ Item {
                 }
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "基于" + (bridge.loginPlatform === "qq" ? "QQ 音乐" : bridge.loginPlatform === "kugou" ? "酷狗音乐" : "网易云音乐") + "官方 API 通信 · 安全加密"
+                    text: "基于" + (bridge.loginPlatform === "qq" ? "QQ 音乐" : "网易云音乐") + "官方 API 通信 · 安全加密"
                     color: "#a0b2be"
                     font.pixelSize: 10
                 }

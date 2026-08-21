@@ -8,18 +8,52 @@ Item {
     id: root
     property var detail: bridge.playlistDetail
     readonly property var songs: bridge.songsModel
+    property string playlistIdentity: ""
+    property real scrollYBeforeReset: 0
+    property bool scrollToBeginningPending: false
 
     function duration(value) {
         var seconds = Math.floor(value || 0)
         return Math.floor(seconds / 60) + ":" + ((seconds % 60) < 10 ? "0" : "") + (seconds % 60)
     }
     function accent() {
-        return detail.source === "qq" ? "#059669" : detail.source === "kugou" ? "#0284c7" : "#e11d48"
+        return detail.source === "qq" ? "#059669" : "#e11d48"
     }
+    function currentPlaylistIdentity() {
+        var source = detail && detail.source ? String(detail.source) : ""
+        var identity = detail && (detail.id || detail.platformId || detail.name)
+                ? String(detail.id || detail.platformId || detail.name) : ""
+        return source + ":" + identity
+    }
+    function syncPlaylistIdentity() {
+        var nextIdentity = currentPlaylistIdentity()
+        if (nextIdentity === ":" || nextIdentity === playlistIdentity)
+            return
+
+        scrollToBeginningPending = playlistIdentity !== ""
+        playlistIdentity = nextIdentity
+        if (scrollToBeginningPending)
+            Qt.callLater(function() { list.positionViewAtBeginning() })
+    }
+    function restoreScrollPosition(value) {
+        var minimum = list.originY
+        var maximum = Math.max(minimum, minimum + list.contentHeight - list.height)
+        list.contentY = Math.max(minimum, Math.min(maximum, value))
+    }
+
+    onDetailChanged: syncPlaylistIdentity()
+    Component.onCompleted: syncPlaylistIdentity()
 
     Connections {
         target: root.songs
-        function onModelReset() { list.positionViewAtBeginning() }
+        function onModelAboutToBeReset() {
+            root.scrollYBeforeReset = root.scrollToBeginningPending ? list.originY : list.contentY
+        }
+        function onModelReset() {
+            var restoreY = root.scrollYBeforeReset
+            root.scrollToBeginningPending = false
+            Qt.callLater(function() { root.restoreScrollPosition(restoreY) })
+        }
     }
 
     ListView {
@@ -37,8 +71,6 @@ Item {
         flickDeceleration: 5200
         headerPositioning: ListView.InlineHeader
         ScrollBar.vertical: AppScrollBar {}
-
-        onVisibleChanged: if (visible) positionViewAtBeginning()
 
         header: Item {
             width: list.width

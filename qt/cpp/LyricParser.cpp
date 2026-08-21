@@ -99,54 +99,17 @@ QJsonArray parseYrc(const QString &text)
     return lines;
 }
 
-QJsonArray parseKrc(const QString &text)
+QJsonArray preferCompleteLyrics(const QJsonArray &wordTimed, const QJsonArray &plainTimed)
 {
-    // 酷狗 KRC 逐字歌词：行头 [起始ms,行时长ms]，词内 <偏移ms,时长ms,0>文本。
-    // 与原版 src/utils/krc.ts 的 parseKrc 保持同一数据模型。
-    QList<QJsonObject> collected;
-    const QRegularExpression linePattern(QStringLiteral("^\\[(-?\\d+),(\\d+)\\](.*)$"));
-    const QRegularExpression wordPattern(QStringLiteral("<(-?\\d+),(\\d+),\\d+>([^<]*)"));
-    int globalOffsetMs = 0;
-    const QRegularExpression offsetPattern(QStringLiteral("\\[offset:(-?\\d+)\\]"),
-                                           QRegularExpression::CaseInsensitiveOption);
-    const auto offsetMatch = offsetPattern.match(text);
-    if (offsetMatch.hasMatch()) globalOffsetMs = offsetMatch.captured(1).toInt();
+    if (wordTimed.isEmpty()) return plainTimed;
+    if (plainTimed.isEmpty()) return wordTimed;
 
-    for (const QString &raw : text.split(QLatin1Char('\n'))) {
-        const QString value = raw.trimmed();
-        if (value.isEmpty()) continue;
-        const auto lineMatch = linePattern.match(value);
-        if (!lineMatch.hasMatch()) continue;
-        const double lineStartMs = lineMatch.captured(1).toDouble() + globalOffsetMs;
-        const QString timedText = lineMatch.captured(3);
-        QJsonArray words;
-        QString rendered;
-        auto iterator = wordPattern.globalMatch(timedText);
-        while (iterator.hasNext()) {
-            const auto wordMatch = iterator.next();
-            const QString wordText = wordMatch.captured(3);
-            if (wordText.isEmpty()) continue;
-            rendered += wordText;
-            words.append(QJsonObject{
-                {"time", (lineStartMs + wordMatch.captured(1).toDouble()) / 1000.0},
-                {"duration", std::max(0.05, wordMatch.captured(2).toDouble() / 1000.0)},
-                {"text", wordText}
-            });
-        }
-        if (words.isEmpty() || isPersonnelOrMetaLine(rendered)) continue;
-        collected.append(QJsonObject{
-            {"time", lineStartMs / 1000.0},
-            {"text", rendered.trimmed()}, {"translation", ""}, {"words", words}
-        });
-    }
-    std::sort(collected.begin(), collected.end(), [](const QJsonObject &a, const QJsonObject &b) {
-        return a.value(QStringLiteral("time")).toDouble()
-             < b.value(QStringLiteral("time")).toDouble();
-    });
-    QJsonArray lines;
-    for (const QJsonObject &line : std::as_const(collected))
-        lines.append(line);
-    return lines;
+    // Some providers occasionally return a truncated word-timed payload while
+    // the ordinary LRC in the same response is complete. A non-empty YRC/QRC
+    // must not win merely because one line happened to parse successfully.
+    if (plainTimed.size() >= 4 && wordTimed.size() * 2 < plainTimed.size())
+        return plainTimed;
+    return wordTimed;
 }
 
 QJsonArray parseQrc(const QString &document)
@@ -172,11 +135,18 @@ QJsonArray parseQrc(const QString &document)
         if (!lineMatch.hasMatch()) continue;
         const QString timedText = lineMatch.captured(3);
         QJsonArray words;
-        int previousEnd = 0;
+        QList<QRegularExpressionMatch> timings;
         auto iterator = timingPattern.globalMatch(timedText);
-        while (iterator.hasNext()) {
-            const auto timing = iterator.next();
-            const QString word = timedText.mid(previousEnd, timing.capturedStart() - previousEnd);
+        while (iterator.hasNext()) timings.append(iterator.next());
+        const bool timingBeforeWord = !timings.isEmpty() && timings.first().capturedStart() == 0;
+        int previousEnd = 0;
+        for (int index = 0; index < timings.size(); ++index) {
+            const auto &timing = timings.at(index);
+            const int wordStart = timingBeforeWord ? timing.capturedEnd() : previousEnd;
+            const int wordEnd = timingBeforeWord
+                ? (index + 1 < timings.size() ? timings.at(index + 1).capturedStart() : timedText.size())
+                : timing.capturedStart();
+            const QString word = timedText.mid(wordStart, wordEnd - wordStart);
             if (!word.isEmpty()) {
                 words.append(QJsonObject{{"text", word},
                     {"time", timing.captured(1).toDouble() / 1000.0},
@@ -184,7 +154,7 @@ QJsonArray parseQrc(const QString &document)
             }
             previousEnd = timing.capturedEnd();
         }
-        const QString trailing = timedText.mid(previousEnd);
+        const QString trailing = timingBeforeWord ? QString() : timedText.mid(previousEnd);
         if (!trailing.isEmpty() && !words.isEmpty()) {
             QJsonObject last = words.last().toObject();
             last.insert(QStringLiteral("text"), last.value(QStringLiteral("text")).toString() + trailing);
@@ -196,7 +166,7 @@ QJsonArray parseQrc(const QString &document)
             rendered += word.toObject().value(QStringLiteral("text")).toString();
         if (isPersonnelOrMetaLine(rendered)) continue;
         collected.append(QJsonObject{{"time", lineMatch.captured(1).toDouble() / 1000.0},
-            {"text", rendered.trimmed()}, {"translation", QString()}, {"words", words}});
+            {"text", rendered}, {"translation", QString()}, {"words", words}});
     }
     std::sort(collected.begin(), collected.end(), [](const QJsonObject &left, const QJsonObject &right) {
         return left.value(QStringLiteral("time")).toDouble() < right.value(QStringLiteral("time")).toDouble();

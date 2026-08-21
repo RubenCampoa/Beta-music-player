@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(BetaMusicPlayerQt VERSION 1.0.8 LANGUAGES CXX)
+project(BetaMusicPlayerQt VERSION 1.0.9 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -45,7 +45,14 @@ target_link_libraries(BetaMusicPlayerCpp PRIVATE
     Qt6::Network
 )
 target_compile_definitions(BetaMusicPlayerCpp PRIVATE
-    BETA_APP_VERSION="1.0.8-Beta"
+    BETA_APP_VERSION="1.0.9"
+)
+
+file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../netease_server.js" BETA_DEV_SIDECAR_PATH)
+file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../app-icon.png" BETA_DEV_APP_ICON_PATH)
+target_compile_definitions(BetaMusicPlayerCpp PRIVATE
+    BETA_DEV_SIDECAR_PATH="${BETA_DEV_SIDECAR_PATH}"
+    BETA_DEV_APP_ICON_PATH="${BETA_DEV_APP_ICON_PATH}"
 )
 
 if (WIN32)
@@ -60,7 +67,7 @@ if (WIN32)
     )
 endif()
 
-# 单元测试：覆盖歌词解析纯函数（parseLrc/parseYrc/parseKrc/filterQqLyricLines）。
+# 单元测试：覆盖歌词解析纯函数（parseLrc/parseYrc/filterQqLyricLines）。
 enable_testing()
 qt_add_executable(LyricsTest
     test/LyricsTest.cpp
@@ -72,6 +79,9 @@ qt_add_executable(LyricsTest
     MusicBridge.h
 )
 target_include_directories(LyricsTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(LyricsTest PRIVATE
+    BETA_DEV_SIDECAR_PATH="${BETA_DEV_SIDECAR_PATH}"
+)
 target_link_libraries(LyricsTest PRIVATE
     Qt6::Core
     Qt6::Gui
@@ -83,3 +93,5 @@ if (WIN32)
     target_link_libraries(LyricsTest PRIVATE user32 crypt32)
 endif()
 add_test(NAME LyricsTest COMMAND LyricsTest)
+add_test(NAME SidecarTest COMMAND BetaMusicPlayerCpp --sidecar-self-test)
+set_tests_properties(SidecarTest PROPERTIES TIMEOUT 20)

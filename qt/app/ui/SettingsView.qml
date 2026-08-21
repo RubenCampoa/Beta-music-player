@@ -122,13 +122,12 @@ ScrollView {
             Layout.topMargin: 33
             title: "多平台账号管理与即时切换"
             icon: "♙"
-            hint: "当前主平台：" + (bridge.platform === "qq" ? "QQ 音乐" : bridge.platform === "kugou" ? "酷狗概念版" : "网易云音乐")
+            hint: "当前主平台：" + (bridge.platform === "qq" ? "QQ 音乐" : "网易云音乐")
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 12
                 PlatformCard { Layout.fillWidth: true; platformKey: "netease"; platformLabel: "网易云音乐"; accent: "#fa233b" }
                 PlatformCard { Layout.fillWidth: true; platformKey: "qq"; platformLabel: "QQ 音乐"; accent: "#10b981" }
-                PlatformCard { Layout.fillWidth: true; platformKey: "kugou"; platformLabel: "酷狗概念版"; accent: "#0ea5e9" }
             }
         }
 
@@ -213,6 +212,9 @@ ScrollView {
         property color accent: "#fa233b"
         property bool active: bridge.platform === platformKey
         property var accountData: root.accountsData[platformKey] || ({})
+        property bool vipActive: accountData.vipActive === true
+        property string vipLabel: accountData.vipLabel || "普通用户"
+        property string vipExpireDate: accountData.vipExpireDate || ""
         Layout.preferredHeight: 125
         radius: 13
         color: active ? Qt.rgba(accent.r, accent.g, accent.b, 0.09) : (cardMouse.containsMouse ? "#141f2937" : "#0d1f2937")
@@ -298,7 +300,7 @@ ScrollView {
                     Layout.preferredHeight: 38
                     radius: 19
                     color: Qt.rgba(platformCard.accent.r, platformCard.accent.g, platformCard.accent.b, 0.12)
-                    clip: true
+                    antialiasing: true
                     RoundedImage {
                         anchors.fill: parent
                         source: platformCard.accountData.avatarUrl || ""
@@ -310,18 +312,43 @@ ScrollView {
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 1
-                    Text {
+                    RowLayout {
                         Layout.fillWidth: true
-                        text: platformCard.accountData.nickname || "未绑定账号"
-                        color: platformCard.accountData.nickname ? "#374151" : "#929aa7"
-                        font.pixelSize: 12
-                        font.bold: !!platformCard.accountData.nickname
-                        elide: Text.ElideRight
+                        spacing: 6
+                        Text {
+                            Layout.fillWidth: true
+                            text: platformCard.accountData.nickname || "未绑定账号"
+                            color: platformCard.accountData.nickname ? "#374151" : "#929aa7"
+                            font.pixelSize: 12
+                            font.bold: !!platformCard.accountData.nickname
+                            elide: Text.ElideRight
+                        }
+                        Rectangle {
+                            visible: !!platformCard.accountData.nickname
+                            Layout.preferredWidth: vipBadgeText.implicitWidth + 12
+                            Layout.preferredHeight: 18
+                            radius: 9
+                            color: platformCard.vipActive ? "#fff3cd" : "#101f2937"
+                            border.width: 1
+                            border.color: platformCard.vipActive ? "#f4cf74" : "#161f2937"
+                            Text {
+                                id: vipBadgeText
+                                anchors.centerIn: parent
+                                text: platformCard.vipLabel
+                                color: platformCard.vipActive ? "#a56508" : "#929aa7"
+                                font.pixelSize: 9
+                                font.bold: true
+                            }
+                        }
                     }
                     Text {
                         visible: !!platformCard.accountData.nickname
-                        text: platformCard.platformKey === "netease" ? "网易云音乐用户" : platformCard.platformKey === "qq" ? "QQ 音乐用户" : "酷狗音乐用户"
-                        color: "#929aa7"
+                        text: platformCard.vipActive
+                            ? (platformCard.vipExpireDate !== ""
+                                ? "会员有效期至 " + platformCard.vipExpireDate
+                                : "会员权益生效中")
+                            : "当前账号无有效会员权益"
+                        color: platformCard.vipActive ? "#b7791f" : "#929aa7"
                         font.pixelSize: 10
                     }
                 }

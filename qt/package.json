@@ -1,0 +1,21 @@
+{
+  "name": "beta-music-player-sidecar",
+  "version": "1.0.9",
+  "private": true,
+  "description": "Loopback-only NetEase and QQ provider runtime for the Qt client",
+  "scripts": {
+    "postinstall": "node scripts/patch-ncm-lyric.js && node scripts/patch-qmusic-lyric.js && node scripts/patch-qmusic-cookie.js",
+    "start": "node netease_server.js"
+  },
+  "dependencies": {
+    "@neteasecloudmusicapienhanced/api": "4.38.0",
+    "@sansenjian/qq-music-api": "^2.4.0",
+    "axios": "^1.7.2",
+    "cors": "^2.8.5",
+    "crypto-js": "^4.2.0",
+    "express": "^4.19.2",
+    "pako": "^2.1.0",
+    "qrc-decoder": "^1.0.2",
+    "xml2js": "^0.6.2"
+  }
+}

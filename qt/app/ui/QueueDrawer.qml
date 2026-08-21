@@ -92,9 +92,9 @@ Item {
                         anchors.margins: 10
                         spacing: 11
                         Rectangle {
-                            width: 42; height: 42; radius: 9; color: "#26303d"; clip: true
+                            width: 42; height: 42; radius: 9; color: "#26303d"; antialiasing: true
                             RoundedImage { anchors.fill: parent; source: item.cover || ""; radius: 8; preferredSourceSize: 160 }
-                            Rectangle { anchors.fill: parent; visible: row.current; color: "#66000000" }
+                            Rectangle { anchors.fill: parent; radius: 8; antialiasing: true; visible: row.current; color: "#66000000" }
                             Text { anchors.centerIn: parent; visible: row.current; text: bridge.isPlaying ? "▶" : "Ⅱ"; color: "#fb7185"; font.pixelSize: 14; font.bold: true }
                         }
                         ColumnLayout {

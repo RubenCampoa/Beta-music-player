@@ -24,14 +24,13 @@ Item {
     onObservedPlatformChanged: resetSearchScroll()
     Component.onCompleted: resetSearchScroll()
     function platformName(source) {
-        return source === "qq" ? "QQ 音乐" : source === "kugou" ? "酷狗概念版" : source === "local" ? "本地音乐" : "网易云"
+        return source === "qq" ? "QQ 音乐" : source === "local" ? "本地音乐" : "网易云"
     }
     function platformColor(key) {
-        return key === "qq" ? "#10b981" : key === "kugou" ? "#0ea5e9" : "#fa233b"
+        return key === "qq" ? "#10b981" : "#fa233b"
     }
     function platformDotColor(key, active) {
         if (key === "qq") return active ? "#a7f3d0" : "#10b981"
-        if (key === "kugou") return active ? "#bae6fd" : "#0ea5e9"
         return active ? "#ffb3c1" : "#fa233b"
     }
     function accent() { return root.platformColor(bridge.platform) }
@@ -74,7 +73,6 @@ Item {
 
                             PlatformTab { key: "netease"; label: "网易云音乐" }
                             PlatformTab { key: "qq"; label: "QQ 音乐" }
-                            PlatformTab { key: "kugou"; label: "酷狗概念版" }
                         }
                     }
 
@@ -96,9 +94,9 @@ Item {
                         layer.effect: MultiEffect {
                             shadowEnabled: true
                             shadowColor: Qt.rgba(
-                                bridge.platform === "qq" ? 0.06 : bridge.platform === "kugou" ? 0.05 : 0.98,
-                                bridge.platform === "qq" ? 0.72 : bridge.platform === "kugou" ? 0.52 : 0.14,
-                                bridge.platform === "qq" ? 0.50 : bridge.platform === "kugou" ? 0.91 : 0.23,
+                                bridge.platform === "qq" ? 0.06 : 0.98,
+                                bridge.platform === "qq" ? 0.72 : 0.14,
+                                bridge.platform === "qq" ? 0.50 : 0.23,
                                 0.35
                             )
                             shadowBlur: 0.50
@@ -228,7 +226,18 @@ Item {
                         RowLayout { anchors.fill: parent; anchors.leftMargin: 18; anchors.rightMargin: 18; spacing: 0
                             Text { text: index + 1; color: "#a1a8b4"; font.pixelSize: 11; Layout.preferredWidth: 48; horizontalAlignment: Text.AlignHCenter }
                             RowLayout { Layout.fillWidth: true; spacing: 11
-                                Rectangle { width: 38; height: 38; radius: 7; color: "#e3e7ed"; clip: true; RoundedImage { anchors.fill: parent; source: item.cover || ""; radius: 7; preferredSourceSize: 160 } AppIcon { anchors.centerIn: parent; name: "music"; color: "#a1a8b4"; width: 16; height: 16; visible: !item.cover } }
+                                Item {
+                                    width: 38
+                                    height: 38
+                                    RoundedImage {
+                                        anchors.fill: parent
+                                        source: item.cover || ""
+                                        radius: 7
+                                        preferredSourceSize: 160
+                                        fallbackColor: "#e3e7ed"
+                                    }
+                                    AppIcon { anchors.centerIn: parent; name: "music"; color: "#a1a8b4"; width: 16; height: 16; visible: !item.cover }
+                                }
                                 Text { Layout.fillWidth: true; text: item.name; color: "#253044"; font.pixelSize: 12; font.bold: true; elide: Text.ElideRight }
                                 Rectangle {
                                     visible: songRow.vip
@@ -239,7 +248,7 @@ Item {
                             }
                             Text { text: item.artist; color: "#697486"; font.pixelSize: 11; Layout.preferredWidth: 140; elide: Text.ElideRight }
                             Text { text: item.album; color: "#929aa7"; font.pixelSize: 11; Layout.preferredWidth: 150; elide: Text.ElideRight }
-                            Rectangle { Layout.preferredWidth: 62; Layout.preferredHeight: 20; radius: 10; color: item.source === "qq" ? "#e8f8f1" : item.source === "kugou" ? "#e8f5fc" : "#fff0f2"; Text { anchors.centerIn: parent; text: root.platformName(item.source); color: item.source === "qq" ? "#047857" : item.source === "kugou" ? "#0369a1" : "#e11d48"; font.pixelSize: 9; font.bold: true } }
+                            Rectangle { Layout.preferredWidth: 62; Layout.preferredHeight: 20; radius: 10; color: item.source === "qq" ? "#e8f8f1" : "#fff0f2"; Text { anchors.centerIn: parent; text: root.platformName(item.source); color: item.source === "qq" ? "#047857" : "#e11d48"; font.pixelSize: 9; font.bold: true } }
                             Text { text: root.duration(item.duration); color: "#929aa7"; font.pixelSize: 11; Layout.preferredWidth: 52; horizontalAlignment: Text.AlignRight }
                         }
                         MouseArea {
@@ -299,9 +308,9 @@ Item {
         layer.effect: MultiEffect {
             shadowEnabled: true
             shadowColor: Qt.rgba(
-                tab.key === "qq" ? 0.06 : tab.key === "kugou" ? 0.05 : 0.98,
-                tab.key === "qq" ? 0.72 : tab.key === "kugou" ? 0.52 : 0.14,
-                tab.key === "qq" ? 0.50 : tab.key === "kugou" ? 0.91 : 0.23,
+                tab.key === "qq" ? 0.06 : 0.98,
+                tab.key === "qq" ? 0.72 : 0.14,
+                tab.key === "qq" ? 0.50 : 0.23,
                 0.28
             )
             shadowBlur: 0.4

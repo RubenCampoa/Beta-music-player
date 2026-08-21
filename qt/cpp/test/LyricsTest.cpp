@@ -1,6 +1,6 @@
 // LyricsTest — 歌词解析纯函数单元测试。
-// 覆盖 MusicBridge::parseLrc / parseYrc / parseKrc / filterQqLyricLines，
-// 数据模型与 Electron 原版 src/utils/{lrc,yrc,krc}.ts + qqMusicApi 对齐。
+// 覆盖 MusicBridge::parseLrc / parseYrc / parseQrc / filterQqLyricLines，
+// 覆盖网易云 LRC/YRC 与 QQ QRC 的统一数据模型。
 #include "MusicBridge.h"
 #include "LyricParser.h"
 
@@ -64,30 +64,6 @@ void testParseYrc()
     }
 }
 
-void testParseKrc()
-{
-    const QJsonArray lines = MusicBridge::parseKrc(
-        QStringLiteral("[1200,3000]<0,400,0>你好<400,2600,0>世界\n"));
-    CHECK(lines.size() == 1);
-    if (lines.size() == 1) {
-        const QJsonObject line = lines.at(0).toObject();
-        CHECK(near(line.value("time").toDouble(), 1.2));
-        CHECK(line.value("text").toString() == QStringLiteral("你好世界"));
-        const QJsonArray words = line.value("words").toArray();
-        CHECK(words.size() == 2);
-        if (words.size() == 2) {
-            const QJsonObject w0 = words.at(0).toObject();
-            CHECK(w0.value("text").toString() == QStringLiteral("你好"));
-            CHECK(near(w0.value("time").toDouble(), 1.2));
-            CHECK(near(w0.value("duration").toDouble(), 0.4));
-            const QJsonObject w1 = words.at(1).toObject();
-            CHECK(w1.value("text").toString() == QStringLiteral("世界"));
-            CHECK(near(w1.value("time").toDouble(), 1.6));
-            CHECK(near(w1.value("duration").toDouble(), 2.6));
-        }
-    }
-}
-
 void testParseQrc()
 {
     const QJsonArray lines = MusicBridge::parseQrc(QStringLiteral(
@@ -143,16 +119,23 @@ void testLyricParserNamespace()
         CHECK(near(lrc.at(0).toObject().value("time").toDouble(), 8.0));
     }
 
-    const QJsonArray krc = LyricParser::parseKrc(
-        QStringLiteral("[offset:500]\n[1000,2000]<0,500,0>你好\n"));
-    CHECK(krc.size() == 1);
-    if (krc.size() == 1) {
-        CHECK(near(krc.at(0).toObject().value("time").toDouble(), 1.5));
-    }
-
     const QJsonArray qrc = LyricParser::parseQrc(
         QStringLiteral("<Lyric_1 LyricContent=\"[1000,2000](1000,500)你好\"/>"));
     CHECK(qrc.size() == 1);
+}
+
+void testIncompleteWordTimedFallback()
+{
+    const QJsonArray partialWordTimed{
+        QJsonObject{{"time", 10.0}, {"text", QStringLiteral("仅解析到一行")}}
+    };
+    QJsonArray completePlain;
+    for (int index = 0; index < 8; ++index) {
+        completePlain.append(QJsonObject{{"time", 10.0 + index * 3.0},
+                                         {"text", QString::number(index)}});
+    }
+    CHECK(LyricParser::preferCompleteLyrics(partialWordTimed, completePlain).size() == 8);
+    CHECK(LyricParser::preferCompleteLyrics(completePlain, partialWordTimed).size() == 8);
 }
 
 } // namespace
@@ -162,11 +145,11 @@ int main()
     testParseLrc();
     testParseYrc();
     testParseQrc();
-    testParseKrc();
     testFilterQqLyricLines();
     testVersionComparison();
     testJsonListModel();
     testLyricParserNamespace();
+    testIncompleteWordTimedFallback();
     if (failures == 0) {
         std::printf("LyricsTest: 全部通过\n");
         return 0;

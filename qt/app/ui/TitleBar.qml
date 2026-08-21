@@ -1,4 +1,4 @@
-// 与 Electron 原版一致的 56px 顶栏：交通灯、品牌、居中搜索、平台与账户。
+// 56px 顶栏：交通灯、品牌、居中搜索、平台与账户。
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -171,7 +171,6 @@ Rectangle {
 
     function defaultLoginText(platform) {
         if (platform === "qq") return "登录 QQ 音乐"
-        if (platform === "kugou") return "登录酷狗音乐"
         if (platform === "local") return "本地模式"
         return "登录网易云"
     }
@@ -185,12 +184,12 @@ Rectangle {
 
         PlatformPill {
             platformKey: bridge.platform
-            title: bridge.platform === "qq" ? "QQ 音乐" : bridge.platform === "kugou" ? "酷狗音乐" : bridge.platform === "local" ? "本地音乐" : "网易云"
-            accent: bridge.platform === "qq" ? "#059669" : bridge.platform === "kugou" ? "#0284c7" : bridge.platform === "local" ? "#7c3aed" : "#e11d48"
-            borderColor: bridge.platform === "qq" ? "#a7f3d0" : bridge.platform === "kugou" ? "#bae6fd" : bridge.platform === "local" ? "#ddd6fe" : "#fecdd3"
-            background: bridge.platform === "qq" ? "#ecfdf5" : bridge.platform === "kugou" ? "#f0f9ff" : bridge.platform === "local" ? "#f5f3ff" : "#fff1f2"
+            title: bridge.platform === "qq" ? "QQ 音乐" : bridge.platform === "local" ? "本地音乐" : "网易云"
+            accent: bridge.platform === "qq" ? "#059669" : bridge.platform === "local" ? "#7c3aed" : "#e11d48"
+            borderColor: bridge.platform === "qq" ? "#a7f3d0" : bridge.platform === "local" ? "#ddd6fe" : "#fecdd3"
+            background: bridge.platform === "qq" ? "#ecfdf5" : bridge.platform === "local" ? "#f5f3ff" : "#fff1f2"
             onClicked: {
-                var platforms = ["netease", "qq", "kugou"]
+                var platforms = ["netease", "qq"]
                 var next = (platforms.indexOf(bridge.platform) + 1) % platforms.length
                 bridge.set_platform(platforms[next])
             }
@@ -225,7 +224,7 @@ Rectangle {
                     height: 20
                     radius: 10
                     color: "#f1f5f9"
-                    clip: true
+                    antialiasing: true
                     RoundedImage {
                         id: accountAvatar
                         anchors.fill: parent

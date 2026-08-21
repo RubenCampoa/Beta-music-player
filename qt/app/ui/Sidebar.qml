@@ -34,7 +34,7 @@ Rectangle {
         // 3. 歌单区（自适应滚动，占满中间剩余空间）
         RowLayout {
             Layout.fillWidth: true; Layout.leftMargin: 11; Layout.rightMargin: 10
-            Text { Layout.fillWidth: true; text: (bridge.platform === "qq" ? "QQ音乐" : bridge.platform === "kugou" ? "酷狗" : "网易云") + "歌单"; color: "#697689"; font.pixelSize: 12; font.bold: true }
+            Text { Layout.fillWidth: true; text: (bridge.platform === "qq" ? "QQ音乐" : "网易云") + "歌单"; color: "#697689"; font.pixelSize: 12; font.bold: true }
             AppIcon { name: "list-music"; color: "#a0a8b4"; Layout.preferredWidth: 14; Layout.preferredHeight: 14 }
         }
         Item { Layout.preferredHeight: 6 }

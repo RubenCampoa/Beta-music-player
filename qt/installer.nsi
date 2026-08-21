@@ -5,7 +5,7 @@ RequestExecutionLevel user
 !include "x64.nsh"
 
 !ifndef VERSION
-!define VERSION "1.0.8"
+!define VERSION "1.0.9"
 !endif
 !ifndef SOURCE_DIR
 !define SOURCE_DIR "dist\BetaMusicPlayer"

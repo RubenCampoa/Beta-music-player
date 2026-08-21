@@ -57,8 +57,7 @@ try {
   );
 
   // 1b. Decrypt QRC hex on the server so the Qt client (which has no
-  // qrc-decoder) receives plain QRC/LRC text. The Electron renderer also
-  // accepts plain QRC, so this is safe for both clients.
+  // qrc-decoder) receives plain QRC/LRC text for the Qt client.
   const normalizeDecl = 'var normalizeLyricResponse = (resData, isFormat) => {\n\tconst lyricString =';
   if (patched.includes(normalizeDecl)) {
     patched = patched.replace(normalizeDecl, 'var normalizeLyricResponse = (resData, isFormat) => {\n\tlet lyricString =');

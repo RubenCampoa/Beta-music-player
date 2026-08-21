@@ -140,14 +140,14 @@ ScrollView {
                         Layout.preferredHeight: 22
                         Layout.preferredWidth: pillText.implicitWidth + 20
                         radius: 11
-                        color: bridge.platform === "qq" ? "#ecfdf5" : bridge.platform === "kugou" ? "#f0f9ff" : "#fff1f2"
-                        border.color: bridge.platform === "qq" ? "#a7f3d0" : bridge.platform === "kugou" ? "#bae6fd" : "#fecdd3"
+                        color: bridge.platform === "qq" ? "#ecfdf5" : "#fff1f2"
+                        border.color: bridge.platform === "qq" ? "#a7f3d0" : "#fecdd3"
 
                         Text {
                             id: pillText
                             anchors.centerIn: parent
-                            text: bridge.platform === "qq" ? "🟢 QQ 音乐" : bridge.platform === "kugou" ? "🔵 酷狗概念版" : "🔴 网易云"
-                            color: bridge.platform === "qq" ? "#047857" : bridge.platform === "kugou" ? "#0369a1" : "#be123c"
+                            text: bridge.platform === "qq" ? "🟢 QQ 音乐" : "🔴 网易云"
+                            color: bridge.platform === "qq" ? "#047857" : "#be123c"
                             font.pixelSize: 11
                             font.bold: true
                         }
@@ -155,7 +155,7 @@ ScrollView {
                 }
 
                 Text {
-                    text: "精选 " + (bridge.platform === "qq" ? "QQ 音乐" : bridge.platform === "kugou" ? "酷狗" : "网易云") + " 推荐，陪你度过每一个当下。"
+                    text: "精选 " + (bridge.platform === "qq" ? "QQ 音乐" : "网易云") + " 推荐，陪你度过每一个当下。"
                     color: "#8992a1"
                     font.pixelSize: 12
                     Layout.topMargin: 6
@@ -325,7 +325,7 @@ ScrollView {
             Layout.bottomMargin: 35
 
             QuickMixCard {
-                title: root.getPlaylistName(0, bridge.platform === "netease" ? "私人漫游" : (bridge.platform === "qq" ? "QQ 音乐 每日推荐" : "酷狗 每日推荐"))
+                title: root.getPlaylistName(0, bridge.platform === "netease" ? "私人漫游" : "QQ 音乐 每日推荐")
                 description: root.getPlaylistDescription(0, "全网融合最喜欢门单曲集合")
                 coverSource: root.getPlaylistCover(0, 1, 300)
                 stackDirection: 1
@@ -333,7 +333,7 @@ ScrollView {
             }
 
             QuickMixCard {
-                title: root.getPlaylistName(1, bridge.platform === "netease" ? "私人雷达" : (bridge.platform === "qq" ? "QQ 音乐 私人电台" : "酷狗 私人电台"))
+                title: root.getPlaylistName(1, bridge.platform === "netease" ? "私人雷达" : "QQ 音乐 私人电台")
                 description: root.getPlaylistDescription(1, "喜爱交织音乐流新流行歌曲")
                 coverSource: root.getPlaylistCover(1, 2, 300)
                 stackDirection: -1
@@ -594,7 +594,17 @@ ScrollView {
         scale: hovered ? 1.09 : 1
         opacity: hovered ? 1 : baseOpacity
         z: hovered ? 10 : baseZ
-        clip: true
+        // RoundedImage and the rounded overlay already constrain their own pixels.
+        // Rectangle.clip is a hard clip and becomes stepped after this card rotates.
+        clip: false
+        antialiasing: true
+        // Composite at 2x before rotating. Only these three small hero cards pay the
+        // cost, while their frame, image and overlay share one smooth diagonal edge.
+        layer.enabled: Math.abs(rotation) > 0.001 || Math.abs(scale - 1) > 0.001
+        layer.smooth: true
+        layer.mipmap: true
+        layer.textureSize: Qt.size(Math.max(1, Math.ceil(width * 2)),
+                                   Math.max(1, Math.ceil(height * 2)))
         Behavior on y { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
         Behavior on rotation { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
         Behavior on scale { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
@@ -610,6 +620,7 @@ ScrollView {
         Rectangle {
             anchors.fill: parent
             radius: heroArt.radius
+            antialiasing: true
             color: heroArt.hovered ? "#47ffffff" : "transparent"
             Behavior on color { ColorAnimation { duration: 160 } }
             Text { anchors.centerIn: parent; text: "▶"; color: "#202a3a"; font.pixelSize: 22; visible: heroArt.hovered }
@@ -626,7 +637,7 @@ ScrollView {
         property bool hovered: playlistMouse.containsMouse
         radius: 16
         color: "#e2e6ec"
-        clip: true
+        antialiasing: true
         transform: Translate {
             y: playlistCard.hovered ? -3 : 0
             Behavior on y { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }

@@ -26,9 +26,6 @@ WebLoginWindow::WebLoginWindow(const QString &platform, MusicBridge *bridge, QWi
     if (m_platform == QStringLiteral("qq")) {
         setWindowTitle(QStringLiteral("QQ 音乐 - 官方网页登录"));
         m_loginUrl = QStringLiteral("https://y.qq.com/portal/profile.html");
-    } else if (m_platform == QStringLiteral("kugou")) {
-        setWindowTitle(QStringLiteral("酷狗音乐 - 官方网页登录"));
-        m_loginUrl = QStringLiteral("https://www.kugou.com/newuc/login/weblogin");
     } else {
         setWindowTitle(QStringLiteral("网易云音乐 - 官方网页登录"));
         m_loginUrl = QStringLiteral("https://music.163.com/#/login");
@@ -150,8 +147,6 @@ void WebLoginWindow::checkCookies()
     std::wstring targetDomain;
     if (m_platform == QStringLiteral("qq")) {
         targetDomain = L"https://y.qq.com";
-    } else if (m_platform == QStringLiteral("kugou")) {
-        targetDomain = L"https://www.kugou.com";
     } else {
         targetDomain = L"https://music.163.com";
     }
@@ -191,11 +186,6 @@ void WebLoginWindow::checkCookies()
                         }
                     } else if (m_platform == QStringLiteral("qq")) {
                         if ((nameStr == QStringLiteral("uin") || nameStr == QStringLiteral("p_uin") || nameStr == QStringLiteral("qm_keyst") || nameStr == QStringLiteral("qqmusic_key"))
-                            && !valueStr.isEmpty()) {
-                            hasValidLoginToken = true;
-                        }
-                    } else if (m_platform == QStringLiteral("kugou")) {
-                        if ((nameStr == QStringLiteral("KuGou") || nameStr == QStringLiteral("token") || nameStr == QStringLiteral("KugooID"))
                             && !valueStr.isEmpty()) {
                             hasValidLoginToken = true;
                         }

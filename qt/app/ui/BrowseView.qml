@@ -19,7 +19,7 @@ ScrollView {
     onVisibleChanged: if (visible) contentY = 0
 
     function platformName() {
-        return bridge.platform === "qq" ? "QQ 音乐" : bridge.platform === "kugou" ? "酷狗概念版" : "网易云"
+        return bridge.platform === "qq" ? "QQ 音乐" : "网易云"
     }
     function chooseCategory(key) {
         activeCategory = key
@@ -145,7 +145,7 @@ ScrollView {
         ColumnLayout {
             anchors.fill: parent; anchors.margins: 10; spacing: 7
             Rectangle {
-                Layout.fillWidth: true; Layout.preferredHeight: width; radius: 12; color: "#e2e6ec"; clip: true
+                Layout.fillWidth: true; Layout.preferredHeight: width; radius: 12; color: "#e2e6ec"; antialiasing: true
                 RoundedImage { anchors.fill: parent; source: chart.cover; radius: 12; preferredSourceSize: 360; fallbackColor: "#e2e6ec" }
                 Text { anchors.centerIn: parent; visible: !chart.cover; text: "♪"; color: "#a1a8b4"; font.pixelSize: 28 }
                 Rectangle { anchors.fill: parent; radius: 12; antialiasing: true; color: hit.containsMouse ? "#38000000" : "transparent" }

@@ -25,11 +25,24 @@ ApplicationWindow {
     // Keep page state after the first visit, but avoid constructing every
     // view, list and image provider during application startup.
     component LazyPage: Loader {
+        id: lazyPage
         property bool selected: false
-        property bool loadedOnce: false
-        active: selected || loadedOnce
+        property bool retained: false
+        active: selected || retained
         asynchronous: false
-        onLoaded: loadedOnce = true
+        onLoaded: retained = true
+        onSelectedChanged: {
+            if (selected) {
+                retained = true
+            }
+        }
+        Timer {
+            id: releaseTimer
+            interval: 45000
+            repeat: false
+            running: lazyPage.retained && !lazyPage.selected
+            onTriggered: if (!lazyPage.selected) lazyPage.retained = false
+        }
     }
 
     Shortcut {
@@ -94,17 +107,40 @@ ApplicationWindow {
                 }
             }
 
-            FluidBackground {
+            // Full lyrics owns the most expensive scene in the application
+            // (shader compilation, artwork effects and a delegate per lyric
+            // line). Defer it until the feature is opened for the first time;
+            // afterwards keep it alive so playback state and animations are
+            // preserved across subsequent opens.
+            Loader {
+                id: fullLyricsLoader
                 anchors.fill: parent
-                visible: root.settingsData.fluidBackground !== false
-                animationEnabled: root.showFullLyrics
-                                  && root.visibility !== Window.Minimized
-                                  && root.visibility !== Window.Hidden
-                property var activeSong: bridge.currentSong
-                artworkSource: root.showFullLyrics ? (activeSong.cover || "") : ""
-            }
+                property bool retained: false
+                active: root.showFullLyrics || retained
+                asynchronous: true
+                onLoaded: retained = true
+                Timer {
+                    interval: 20000
+                    repeat: false
+                    running: fullLyricsLoader.retained && !root.showFullLyrics
+                    onTriggered: if (!root.showFullLyrics) fullLyricsLoader.retained = false
+                }
+                sourceComponent: Component {
+                    Item {
+                        FluidBackground {
+                            anchors.fill: parent
+                            visible: root.settingsData.fluidBackground !== false
+                            animationEnabled: root.showFullLyrics
+                                              && root.visibility !== Window.Minimized
+                                              && root.visibility !== Window.Hidden
+                            property var activeSong: bridge.currentSong
+                            artworkSource: root.showFullLyrics ? (activeSong.cover || "") : ""
+                        }
 
-            FullLyricsView { anchors.fill: parent }
+                        FullLyricsView { anchors.fill: parent }
+                    }
+                }
+            }
         }
 
         // ---------- 主界面 ----------

@@ -31,9 +31,23 @@ Item {
         id: maskSourceItem
         sourceItem: maskRect
         hideSource: true
-        live: true
+        // Small covers need a denser alpha mask than their 38–50 px display
+        // texture; otherwise the rounded edge only has one coverage sample.
+        readonly property real shortEdge: Math.min(root.width, root.height)
+        readonly property real renderScale: shortEdge <= 64 ? 3.0 : (shortEdge <= 128 ? 2.0 : 1.0)
+        textureSize.width: Math.max(1, Math.ceil(root.width * renderScale))
+        textureSize.height: Math.max(1, Math.ceil(root.height * renderScale))
+        // The mask is static between geometry/radius changes. Keeping every
+        // artwork mask live forced the scene graph to redraw idle pages.
+        live: false
         smooth: true
+        mipmap: true
     }
+
+    onWidthChanged: maskSourceItem.scheduleUpdate()
+    onHeightChanged: maskSourceItem.scheduleUpdate()
+    onRadiusChanged: maskSourceItem.scheduleUpdate()
+    Component.onCompleted: maskSourceItem.scheduleUpdate()
 
     // 2. 底层独立圆角柔和弥散投影（严格使用遮罩形状产生纯净阴影，杜绝黑色矩形底块溢出）
     MultiEffect {
@@ -54,6 +68,7 @@ Item {
         radius: root.radius
         color: root.fallbackColor
         visible: sourceImage.status !== Image.Ready
+        antialiasing: true
     }
 
     // 4. 原始待裁剪图片
@@ -65,6 +80,9 @@ Item {
         sourceSize.height: root.preferredSourceSize > 0 ? root.preferredSourceSize : undefined
         fillMode: root.fillMode
         smooth: true
+        // Mip filtering matters when a cover is scaled or its parent card is
+        // rotated. Without it, high-frequency album art and rounded edges
+        // shimmer and stair-step even when smooth sampling is enabled.
         mipmap: true
         asynchronous: true
         cache: root.cacheEnabled
@@ -77,6 +95,7 @@ Item {
         anchors.fill: parent
         source: sourceImage
         visible: sourceImage.status === Image.Ready
+        antialiasing: true
         maskEnabled: true
         maskSource: maskSourceItem
         maskThresholdMin: 0.0

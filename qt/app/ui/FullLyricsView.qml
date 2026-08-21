@@ -9,6 +9,7 @@ Item {
     readonly property var lyricLines: bridge.lyricsModel
     property var preferences: bridge.settings
     property bool pureMode: false
+    readonly property real modeProgress: pureMode ? 1 : 0
 
     function fmt(ms) {
         var total = Math.max(0, Math.floor((ms || 0) / 1000))
@@ -83,12 +84,9 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: 10
 
-            ToolbarPill {
-                pillWidth: root.pureMode ? 96 : 112
-                iconName: root.pureMode ? "columns" : "align-left"
-                label: root.pureMode ? "双栏模式" : "纯歌词全屏"
-                iconColor: root.pureMode ? "#f472b6" : "#22d3ee"
-                tip: root.pureMode ? "双栏模式" : "纯歌词模式"
+            ModeSwitchPill {
+                progress: root.modeProgress
+                pureMode: root.pureMode
                 onClicked: root.pureMode = !root.pureMode
             }
             ToolbarPill {
@@ -117,18 +115,26 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.topMargin: 0
         anchors.bottomMargin: 8
-        width: root.pureMode ? Math.min(parent.width - 48, 960) : Math.min(parent.width - 64, 1440)
+        readonly property real dualFrameWidth: Math.min(parent.width - 64, 1440)
+        readonly property real pureFrameWidth: Math.min(parent.width - 48, 960)
+        readonly property real dualGap: Math.max(32, Math.min(80, (dualFrameWidth - 600) * 0.08))
+        readonly property real dualPaneWidth: Math.max(0, (dualFrameWidth - dualGap) / 2)
+        width: dualFrameWidth + (pureFrameWidth - dualFrameWidth) * root.modeProgress
 
-        RowLayout {
+        Item {
             anchors.fill: parent
-            spacing: root.pureMode ? 0 : Math.max(32, Math.min(80, (contentFrame.width - 600) * 0.08))
 
             Item {
                 id: leftPane
-                visible: !root.pureMode
-                Layout.fillWidth: true
-                Layout.preferredWidth: 1
-                Layout.fillHeight: true
+                x: -28 * root.modeProgress
+                y: 0
+                width: contentFrame.dualPaneWidth
+                height: parent.height
+                opacity: 1 - root.modeProgress
+                scale: 1 - 0.045 * root.modeProgress
+                transformOrigin: Item.Right
+                visible: opacity > 0.001
+                enabled: root.modeProgress < 0.5
 
                 ColumnLayout {
                     id: leftColumn
@@ -159,7 +165,7 @@ Item {
                             anchors.fill: parent
                             source: root.song.cover || ""
                             radius: 18
-                            preferredSourceSize: 1024
+                            preferredSourceSize: 640
                             cacheEnabled: true
                             fallbackColor: "#1affffff"
                             shadowEnabled: true
@@ -491,15 +497,19 @@ Item {
 
             LyricsView {
                 id: lyricView
-                Layout.fillWidth: true
-                Layout.preferredWidth: 1
-                Layout.fillHeight: true
-                Layout.leftMargin: root.pureMode ? 48 : 0
-                Layout.rightMargin: root.pureMode ? 48 : 0
+                readonly property real dualX: contentFrame.dualPaneWidth + contentFrame.dualGap
+                readonly property real pureX: 48
+                readonly property real dualWidth: contentFrame.dualPaneWidth
+                readonly property real pureWidth: Math.max(0, contentFrame.pureFrameWidth - 96)
+                x: dualX + (pureX - dualX) * root.modeProgress
+                y: 0
+                width: dualWidth + (pureWidth - dualWidth) * root.modeProgress
+                height: parent.height
                 activeView: bridge.fullLyrics
                 lyricLines: root.lyricLines
                 activeIndex: bridge.activeIndex
                 pureMode: root.pureMode
+                modeProgress: root.modeProgress
                 lyricGlow: root.preferences.lyricGlow !== false
                 lyricBlur: root.preferences.lyricBlur !== false
                 lyricZoom: root.preferences.lyricZoom !== false
@@ -585,6 +595,74 @@ Item {
         MouseArea {
             id: pillMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
             onClicked: pill.clicked(); ToolTip.visible: containsMouse; ToolTip.text: pill.tip; ToolTip.delay: 350
+        }
+    }
+
+    component ModeSwitchPill: Rectangle {
+        id: modePill
+        property real progress: 0
+        property bool pureMode: false
+        signal clicked()
+        width: 112
+        height: 34
+        radius: 17
+        color: modeMouse.containsMouse ? "#36ffffff" : "#1cffffff"
+        border.width: 1
+        border.color: modePill.pureMode ? "#48f472b6" : "#3a22d3ee"
+        scale: modeMouse.pressed ? 0.95 : modeMouse.containsMouse ? 1.025 : 1
+
+        Behavior on color { ColorAnimation { duration: 170 } }
+        Behavior on scale { NumberAnimation { duration: 170; easing.type: Easing.OutBack } }
+
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: 1
+            radius: 16
+            color: "transparent"
+            border.width: 1
+            border.color: modePill.pureMode ? "#16f472b6" : "#1422d3ee"
+            opacity: 0.45 + 0.35 * Math.sin(modePill.progress * Math.PI)
+        }
+
+        Row {
+            spacing: 6
+            x: (parent.width - implicitWidth) / 2 + 7 * modePill.progress
+            anchors.verticalCenter: parent.verticalCenter
+            opacity: 1 - modePill.progress
+            scale: 1 - 0.06 * modePill.progress
+            AppIcon {
+                name: "align-left"
+                color: "#22d3ee"
+                width: 16; height: 16; strokeWidth: 2
+                rotation: -12 * modePill.progress
+            }
+            Text { text: "纯歌词全屏"; color: "#eef1f5"; font.pixelSize: 12; font.bold: true }
+        }
+
+        Row {
+            spacing: 6
+            x: (parent.width - implicitWidth) / 2 - 7 * (1 - modePill.progress)
+            anchors.verticalCenter: parent.verticalCenter
+            opacity: modePill.progress
+            scale: 0.94 + 0.06 * modePill.progress
+            AppIcon {
+                name: "columns"
+                color: "#f472b6"
+                width: 16; height: 16; strokeWidth: 2
+                rotation: 12 * (1 - modePill.progress)
+            }
+            Text { text: "双栏模式"; color: "#eef1f5"; font.pixelSize: 12; font.bold: true }
+        }
+
+        MouseArea {
+            id: modeMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: modePill.clicked()
+            ToolTip.visible: containsMouse
+            ToolTip.text: modePill.pureMode ? "切换到双栏模式" : "切换到纯歌词模式"
+            ToolTip.delay: 350
         }
     }
 
